@@ -1,0 +1,31 @@
+{
+  "name": "fast-harness",
+  "description": "基于 Harness 三体架构的 Generator-Evaluator 分离多 Agent 协作开发套件，提供 implement/fix/refactor 三大流水线命令、9 个专职 Agent 和 5 个运维 Skill。",
+  "version": "1.0.0",
+  "author": {
+    "name": "jindong"
+  },
+  "commands": [
+    "implement-command",
+    "fix-command",
+    "refactor-command"
+  ],
+  "agents": [
+    "requirement-design-agent",
+    "generator-agent",
+    "code-reviewer-agent",
+    "security-reviewer-agent",
+    "api-test-agent",
+    "tester-gen-agent",
+    "test-runner-agent",
+    "debugger-agent",
+    "monitor-agent"
+  ],
+  "skills": [
+    "dev-mysql-bastion-query",
+    "kubectl-readonly",
+    "k8s-monitor-full",
+    "loki-log-keyword-search",
+    "prometheus-metrics-query"
+  ]
+}
