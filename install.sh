@@ -258,6 +258,30 @@ MDRULE
 install_cursor() {
     info "配置 Cursor 环境..."
 
+    # 复制 Agents → .cursor/agents/
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/agents" ]]; then
+        mkdir -p "$PROJECT_DIR/.cursor/agents"
+        for agent_file in "$PROJECT_DIR/$PLUGIN_DIR/agents/"*.md; do
+            [[ -f "$agent_file" ]] && safe_copy_file "$agent_file" "$PROJECT_DIR/.cursor/agents/$(basename "$agent_file")"
+        done
+    fi
+
+    # 复制 Skills → .cursor/skills/
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/skills" ]]; then
+        safe_copy_dir "$PROJECT_DIR/$PLUGIN_DIR/skills" "$PROJECT_DIR/.cursor/skills"
+    fi
+
+    # 复制 Commands → .cursor/commands/（去掉 -command 后缀使 /implement 生效）
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/commands" ]]; then
+        mkdir -p "$PROJECT_DIR/.cursor/commands"
+        for cmd_file in "$PROJECT_DIR/$PLUGIN_DIR/commands/"*-command.md; do
+            [[ -f "$cmd_file" ]] || continue
+            local base
+            base="$(basename "$cmd_file" | sed 's/-command\.md$/.md/')"
+            safe_copy_file "$cmd_file" "$PROJECT_DIR/.cursor/commands/$base"
+        done
+    fi
+
     # 创建 .cursor/rules 目录和规则文件
     local rule_file="$PROJECT_DIR/.cursor/rules/fast-harness.mdc"
     if [[ ! -f "$rule_file" ]]; then
@@ -388,6 +412,7 @@ Agent 间通过文件契约通信，实现 Context Reset（不依赖对话历史
 | 只改注释或文档 | 无行为影响 | 直接改 |
 | 修改现有接口的返回值新增可选字段 | 向后兼容的小改动 | 直接改 + 补充测试 |
 AGENTSEOF
+)
 
     if [[ -f "$PROJECT_DIR/AGENTS.md" ]]; then
         # 文件已存在，追加内容（不覆盖）
@@ -442,18 +467,24 @@ echo "╚═══════════════════════�
 echo ""
 echo "已安装的文件："
 echo "  📁 $PLUGIN_DIR/                 # 插件核心文件"
-echo "  📁 $PLUGIN_DIR/commands/        # 3 个流水线命令"
-echo "  📁 $PLUGIN_DIR/agents/          # 9 个专职 Agent"
-echo "  📁 $PLUGIN_DIR/skills/          # 5 个运维 Skill"
+echo "  📁 $PLUGIN_DIR/commands/        # 3 个流水线命令（规范原文）"
+echo "  📁 $PLUGIN_DIR/agents/          # 9 个专职 Agent（规范原文）"
+echo "  📁 $PLUGIN_DIR/skills/          # 5 个运维 Skill（规范原文）"
 echo "  📁 $PLUGIN_DIR/docs/            # 完整使用文档"
 echo "  📄 AGENTS.md                     # AI 认知入口"
 
 case "$PLATFORM" in
     cursor)
+        echo "  📁 .cursor/agents/              # Cursor 可识别的 Agent"
+        echo "  📁 .cursor/skills/              # Cursor 可识别的 Skill"
+        echo "  📁 .cursor/commands/            # Cursor 可识别的命令（/implement 等）"
         echo "  📄 .cursor/rules/fast-harness.mdc" ;;
     claude)
         echo "  📄 .claude/rules/fast-harness.mdc" ;;
     both)
+        echo "  📁 .cursor/agents/              # Cursor 可识别的 Agent"
+        echo "  📁 .cursor/skills/              # Cursor 可识别的 Skill"
+        echo "  📁 .cursor/commands/            # Cursor 可识别的命令（/implement 等）"
         echo "  📄 .cursor/rules/fast-harness.mdc"
         echo "  📄 .claude/rules/fast-harness.mdc" ;;
 esac
