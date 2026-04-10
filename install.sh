@@ -39,6 +39,7 @@ PLATFORM=""
 PLUGIN_DIR="$DEFAULT_PLUGIN_DIR"
 PROJECT_DIR="$(pwd)"
 SKIP_AGENTS_MD=false
+FORCE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -50,6 +51,8 @@ while [[ $# -gt 0 ]]; do
             PROJECT_DIR="$2"; shift 2 ;;
         --skip-agents)
             SKIP_AGENTS_MD=true; shift ;;
+        --force)
+            FORCE=true; SKIP_AGENTS_MD=true; shift ;;
         -h|--help)
             echo "用法: install.sh [选项]"
             echo ""
@@ -58,6 +61,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --dir <name>                     插件目录名（默认: fast-harness）"
             echo "  --project <path>                 项目根目录（默认: 当前目录）"
             echo "  --skip-agents                    跳过 AGENTS.md 生成"
+            echo "  --force                          强制更新插件文件（覆盖已有，保留 .local/ 和 project-context.md）"
             echo "  -h, --help                       显示帮助"
             exit 0 ;;
         *)
@@ -134,8 +138,8 @@ git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TEMP_DIR/fast-harness" 2>/d
 }
 ok "下载完成"
 
-# ================================ 安全复制函数 ================================
-# 不覆盖已有文件
+# ================================ 复制函数 ================================
+# 安全复制（不覆盖已有文件）
 safe_copy_file() {
     local src="$1"
     local dst="$2"
@@ -151,6 +155,26 @@ safe_copy_file() {
     return 0
 }
 
+# 强制复制（覆盖已有文件）
+force_copy_file() {
+    local src="$1"
+    local dst="$2"
+
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+    ok "更新: $dst"
+    return 0
+}
+
+# 根据 FORCE 标志选择复制策略
+copy_file() {
+    if $FORCE; then
+        force_copy_file "$1" "$2"
+    else
+        safe_copy_file "$1" "$2"
+    fi
+}
+
 safe_copy_dir() {
     local src="$1"
     local dst="$2"
@@ -161,7 +185,12 @@ safe_copy_dir() {
 
     find "$src" -type f | while read -r file; do
         local rel="${file#$src/}"
-        safe_copy_file "$file" "$dst/$rel"
+        # --force 时跳过 project-context.md（用户已自定义的配置）
+        if $FORCE && [[ "$rel" == "project-context.md" ]]; then
+            skip "$dst/$rel (用户自定义配置，跳过)"
+            continue
+        fi
+        copy_file "$file" "$dst/$rel"
     done
 }
 
@@ -190,13 +219,13 @@ safe_copy_dir "$TEMP_DIR/fast-harness/plugin" "$PROJECT_DIR/$PLUGIN_DIR"
 
 # 复制文档
 mkdir -p "$PROJECT_DIR/$PLUGIN_DIR/docs"
-safe_copy_file "$TEMP_DIR/fast-harness/docs/guide.md" "$PROJECT_DIR/$PLUGIN_DIR/docs/guide.md"
+copy_file "$TEMP_DIR/fast-harness/docs/guide.md" "$PROJECT_DIR/$PLUGIN_DIR/docs/guide.md"
 
 # 复制图片
 if [[ -d "$TEMP_DIR/fast-harness/images" ]]; then
     mkdir -p "$PROJECT_DIR/$PLUGIN_DIR/docs/images"
     for img in "$TEMP_DIR/fast-harness/images/"*.png; do
-        [[ -f "$img" ]] && safe_copy_file "$img" "$PROJECT_DIR/$PLUGIN_DIR/docs/images/$(basename "$img")"
+        [[ -f "$img" ]] && copy_file "$img" "$PROJECT_DIR/$PLUGIN_DIR/docs/images/$(basename "$img")"
     done
 fi
 
@@ -214,9 +243,9 @@ install_claude() {
         ok "Claude 插件清单已就绪: $PLUGIN_DIR/.claude-plugin/plugin.json"
     fi
 
-    # 创建 .claude/rules 目录和规则文件
+    # 创建/更新 .claude/rules 规则文件
     local rule_file="$PROJECT_DIR/.claude/rules/fast-harness.mdc"
-    if [[ ! -f "$rule_file" ]]; then
+    if $FORCE || [[ ! -f "$rule_file" ]]; then
         mkdir -p "$PROJECT_DIR/.claude/rules"
         cat > "$rule_file" << 'MDRULE'
 ---
@@ -264,7 +293,7 @@ install_cursor() {
     if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/agents" ]]; then
         mkdir -p "$PROJECT_DIR/.cursor/agents"
         for agent_file in "$PROJECT_DIR/$PLUGIN_DIR/agents/"*.md; do
-            [[ -f "$agent_file" ]] && safe_copy_file "$agent_file" "$PROJECT_DIR/.cursor/agents/$(basename "$agent_file")"
+            [[ -f "$agent_file" ]] && copy_file "$agent_file" "$PROJECT_DIR/.cursor/agents/$(basename "$agent_file")"
         done
     fi
 
@@ -280,13 +309,13 @@ install_cursor() {
             [[ -f "$cmd_file" ]] || continue
             local base
             base="$(basename "$cmd_file" | sed 's/-command\.md$/.md/')"
-            safe_copy_file "$cmd_file" "$PROJECT_DIR/.cursor/commands/$base"
+            copy_file "$cmd_file" "$PROJECT_DIR/.cursor/commands/$base"
         done
     fi
 
-    # 创建 .cursor/rules 目录和规则文件
+    # 创建/更新 .cursor/rules 规则文件
     local rule_file="$PROJECT_DIR/.cursor/rules/fast-harness.mdc"
-    if [[ ! -f "$rule_file" ]]; then
+    if $FORCE || [[ ! -f "$rule_file" ]]; then
         mkdir -p "$PROJECT_DIR/.cursor/rules"
         cat > "$rule_file" << 'MDRULE'
 ---
@@ -463,9 +492,15 @@ chmod +x "$PROJECT_DIR/$PLUGIN_DIR/configure.sh" 2>/dev/null || true
 
 # ================================ 完成 ================================
 echo ""
+if $FORCE; then
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║                   更新完成！                          ║"
+echo "╚══════════════════════════════════════════════════════╝"
+else
 echo "╔══════════════════════════════════════════════════════╗"
 echo "║                   安装完成！                          ║"
 echo "╚══════════════════════════════════════════════════════╝"
+fi
 echo ""
 echo "已安装的文件："
 echo "  📁 $PLUGIN_DIR/                 # 插件核心文件"

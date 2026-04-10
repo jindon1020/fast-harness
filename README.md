@@ -113,19 +113,20 @@ curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh |
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --force --platform claude
 ```
 
-`--force` 模式下，**以下内容会被覆盖更新**：
+`--force` 模式会**覆盖更新**以下内容：
 
-- `fast-harness/` 目录下所有 commands、agents、skills 规范文件
+- `fast-harness/` 目录下所有 commands、agents、skills 规范文件及文档
 - `.cursor/rules/fast-harness.mdc` / `.claude/rules/fast-harness.mdc`
 - `.cursor/agents/`、`.cursor/skills/`、`.cursor/commands/` 下的插件文件
 
-**以下内容始终保留，不会被覆盖**：
+**始终保留，不会被覆盖**：
 
 - `.local/` — 密钥、kubeconfig、bastion 配置
 - `.ai/` — 流水线运行产物（task_card、审查报告、测试结果等）
-- `fast-harness/project-context.md` — 项目上下文（如已配置）
+- `fast-harness/project-context.md` — 项目上下文（如已自定义）
+- `AGENTS.md` — 不重复追加 fast-harness 章节
 
-> 大版本更新后建议重新运行 `fast-harness/configure.sh`，检查是否有新的 `{{占位符}}` 需要填写。
+> 大版本更新后建议重新运行 `fast-harness/configure.sh`，检查是否有新增的 `{{占位符}}` 需要填写。
 
 ## 目录结构
 
