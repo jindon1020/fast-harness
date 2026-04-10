@@ -24,17 +24,17 @@ description: 经堡垒机 SSH 隧道在本地只读查询开发环境 MySQL（dr
 ## 私钥与堡垒机配置（本 Skill 不包含任何私钥内容）
 
 1. **SSH 私钥必须由使用者自行放置**，本仓库**不得**在 Skill 或文档中写入私钥文件内容。
-2. **推荐路径**（目录已被 Git 忽略，见 `deploy/monitor/.local/README.md`）：
-   - 私钥文件：`deploy/monitor/.local/id_rsa`
-   - 权限：`chmod 600 deploy/monitor/.local/id_rsa`
-3. **可选覆盖**：环境变量 `CREATION_TOOL_BASTION_SSH_KEY` 指向本机任意私钥路径（仍须 `600` 权限）。
-4. **堡垒机连接参数**：在 `deploy/monitor/.local/bastion.env` 中配置（由同目录 `bastion.env.example` 复制而来，**勿提交** `bastion.env`）。至少需要：`BASTION_HOST`、`BASTION_PORT`、`BASTION_USER`。
+2. **统一路径**（目录已被 Git 忽略，见 `.local/README.md`）：
+   - 私钥文件：`.local/id_rsa`（相对于项目根目录）
+   - 权限：`chmod 600 .local/id_rsa`
+3. **可选覆盖**：环境变量 `BASTION_SSH_KEY` 指向本机任意私钥路径（仍须 `600` 权限）。
+4. **堡垒机连接参数**：在 `.local/bastion.env` 中配置（由同目录 `bastion.env.example` 复制而来，**勿提交** `bastion.env`）。至少需要：`BASTION_HOST`、`BASTION_PORT`、`BASTION_USER`。
 
-**若私钥文件不存在且未设置 `CREATION_TOOL_BASTION_SSH_KEY`：**  
-必须先向用户说明：请将堡垒机 SSH 私钥放到上述推荐路径，或设置环境变量；**不要**猜测或伪造密钥路径，**不要**在仓库中新增私钥文件。
+**若私钥文件不存在且未设置 `BASTION_SSH_KEY`：**  
+必须先向用户说明：请将堡垒机 SSH 私钥放到项目根目录 `.local/id_rsa`，或设置环境变量；**不要**猜测或伪造密钥路径，**不要**在仓库中新增私钥文件。
 
-**若 `bastion.env` 缺失或关键变量为空：**  
-提醒用户从 `deploy/monitor/.local/bastion.env.example` 复制为 `bastion.env` 并填写堡垒机地址、端口、用户名后再建立隧道。
+**若 `.local/bastion.env` 缺失或关键变量为空：**  
+提醒用户从 `.local/bastion.env.example` 复制为 `bastion.env` 并填写堡垒机地址、端口、用户名后再建立隧道。
 
 ---
 
@@ -51,16 +51,18 @@ description: 经堡垒机 SSH 隧道在本地只读查询开发环境 MySQL（dr
 
 ## 建立 SSH 隧道（后台运行示例）
 
-在**项目根目录**执行前，先 `source deploy/monitor/.local/bastion.env`（若使用 `bastion.env`）。
+在**项目根目录**执行前，先 `source .local/bastion.env`（若使用 `bastion.env`）。
 
 将下列占位符替换为实际值（`RDS_HOST` / `RDS_PORT` 来自 `config.yaml` 的 `DB.MYSQL`；`LOCAL_PORT` 建议默认 `13306`，避免与本地其它服务冲突）：
 
 ```bash
-SSH_KEY="${CREATION_TOOL_BASTION_SSH_KEY:-$(pwd)/deploy/monitor/.local/id_rsa}"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+SSH_KEY="${BASTION_SSH_KEY:-${PROJECT_ROOT}/.local/id_rsa}"
 if [ ! -f "$SSH_KEY" ]; then
-  echo "错误：未找到 SSH 私钥。请将私钥放到 deploy/monitor/.local/id_rsa 或设置 CREATION_TOOL_BASTION_SSH_KEY。"
+  echo "错误：未找到 SSH 私钥。请将私钥放到 .local/id_rsa 或设置 BASTION_SSH_KEY。"
   exit 1
 fi
+source "${PROJECT_ROOT}/.local/bastion.env"
 
 ssh -f -N -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new \
   -i "$SSH_KEY" -p "${BASTION_PORT}" \
@@ -99,6 +101,6 @@ conn.close()
 ## Agent 自检清单（执行前）
 
 - [ ] 已确认本次需求为**只读**或已拿到用户对**具体写语句**的明确确认。
-- [ ] 私钥路径存在或已设置 `CREATION_TOOL_BASTION_SSH_KEY`；否则已提醒用户放置私钥。
-- [ ] `bastion.env`（或等价环境变量）已就绪；否则已提醒用户从 example 复制并填写。
+- [ ] 私钥路径（`.local/id_rsa`）存在或已设置 `BASTION_SSH_KEY`；否则已提醒用户放置私钥。
+- [ ] `.local/bastion.env`（或等价环境变量）已就绪；否则已提醒用户从 `.local/bastion.env.example` 复制并填写。
 - [ ] 隧道建立后再连 `127.0.0.1:LOCAL_PORT`，勿在未隧道时直连 RDS 公网（通常不可达或策略禁止）。

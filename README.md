@@ -111,13 +111,14 @@ your-project/
 │   ├── rules/fast-harness.mdc         # Cursor 规则（仅 Cursor 平台）
 │   ├── agents/                        # Cursor 自动识别的 Sub-agent（9 个）
 │   ├── skills/                        # Cursor 自动识别的 Skill（5 个）
-│   └── commands/                      # Cursor 斜杠命令（/implement /fix /refactor）
+│   └── commands/                      # Cursor 斜杠命令（/implement /modify /fix /refactor）
 ├── .claude/rules/fast-harness.mdc     # Claude 规则（仅 Claude 平台）
 └── fast-harness/                      # 插件原文目录（规范详细版）
     ├── .claude-plugin/
     │   └── plugin.json                # Claude Code 插件清单
     ├── commands/
     │   ├── implement-command.md       # 需求实现流水线规范
+    │   ├── modify-command.md          # 接口功能变更流水线规范
     │   ├── fix-command.md             # Bug 修复流水线规范
     │   └── refactor-command.md        # 代码重构流水线规范
     ├── agents/
@@ -164,11 +165,12 @@ Phase 4  集成测试     → 解析 xmind 脑图生成 + 执行（可选）
 Phase 5  最终报告     → 汇总结果 ✋ 确认提交
 ```
 
-### 三大命令
+### 四大命令
 
 | 命令 | 用途 | 示例 |
 |------|------|------|
 | `/implement` | 新功能开发 | `/implement 实现素材转移功能 sprint=sprint_2026_04` |
+| `/modify` | 已有接口功能变更 | `/modify 积分查询接口增加时间范围筛选 module=asset` |
 | `/fix` | Bug 修复 | `/fix 线上报 500 request_id=abc-123` |
 | `/refactor` | 代码重构 | `/refactor 把分页逻辑抽取到 utils` |
 
@@ -194,6 +196,8 @@ Phase 5  最终报告     → 汇总结果 ✋ 确认提交
 |--------|---------|----------|
 | `/implement`（完整） | 300k – 500k | 15 – 30 min |
 | `/implement fast=true` | 100k – 200k | 6 – 12 min |
+| `/modify` | 150k – 300k | 8 – 18 min |
+| `/modify fast=true` | 80k – 150k | 4 – 10 min |
 | `/fix` | 100k – 200k | 5 – 15 min |
 | `/fix fast=true` | 50k – 100k | 3 – 8 min |
 | `/refactor` | 200k – 400k | 10 – 20 min |

@@ -22,7 +22,7 @@ app/
 ├── gateways/    # 外部服务集成
 └── config/      # 配置文件
 tests/
-├── sprint_YYYY_MM/   # 按 Sprint 组织测试
+├── {branch}/         # 按 Git 分支组织测试（如 feature_user-points/）
 .ai/
 ├── design/           # 设计文档
 ├── implement/        # implement 流水线文件

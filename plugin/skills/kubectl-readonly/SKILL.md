@@ -7,15 +7,16 @@ description: 只读查询 K8s 资源状态。触发词：查 Pod、查 Deploymen
 
 ## 自动初始化（首次使用）
 
-**AI 自动检测 skill 目录并执行以下命令**：
+**AI 自动检测项目根目录并执行以下命令**：
 
 ```bash
-# 获取当前 skill 所在目录
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 获取项目根目录（Git 根）
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+LOCAL_DIR="${PROJECT_ROOT}/.local"
 
 # 建立 K8s API 隧道（后台运行）
-source "${SKILL_DIR}/bastion.env"
-ssh -i "${SKILL_DIR}/id_rsa" \
+source "${LOCAL_DIR}/bastion.env"
+ssh -i "${LOCAL_DIR}/id_rsa" \
   -L 127.0.0.1:16443:172.16.37.101:6443 \
   "${BASTION_USER}@${BASTION_HOST}" -p "${BASTION_PORT}" -Nf &
 ```
@@ -23,8 +24,8 @@ ssh -i "${SKILL_DIR}/id_rsa" \
 ## 验证端口状态
 
 ```bash
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" \
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig" \
   kubectl get pods -n drama-prod --request-timeout=5s && echo " K8s API OK"
 ```
 
@@ -44,29 +45,30 @@ KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" \
 ## 可用命令
 
 ```bash
-# 获取 skill 目录
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 获取项目根目录（Git 根）
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig"
 
 # 查看 Pod 列表
-KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" kubectl get pods -n drama-prod
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig" kubectl get pods -n drama-prod
 
 # 查看 Pod 详情
-KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" kubectl describe pod <pod-name> -n drama-prod
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig" kubectl describe pod <pod-name> -n drama-prod
 
 # 查看 Pod 日志
-KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" kubectl logs <pod-name> -n drama-prod --tail=100
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig" kubectl logs <pod-name> -n drama-prod --tail=100
 
 # 查看 Deployment
-KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" kubectl get deployments -n drama-prod
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig" kubectl get deployments -n drama-prod
 
 # 查看 Events
-KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" kubectl get events -n drama-prod --sort-by='.lastTimestamp' | tail -20
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig" kubectl get events -n drama-prod --sort-by='.lastTimestamp' | tail -20
 ```
 
 ## 命令格式
 
 ```bash
-KUBECONFIG="${SKILL_DIR}/kubeconfig-readonly" kubectl <command> -n <namespace>
+KUBECONFIG="${PROJECT_ROOT}/.local/openclaw-readonly.kubeconfig" kubectl <command> -n <namespace>
 ```
 
 ## 注意事项
