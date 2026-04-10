@@ -6,10 +6,12 @@
 # 支持 Cursor 和 Claude Code 两种 AI IDE
 #
 # 用法:
-#   curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash -s -- --platform cursor
-#   curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash -s -- --platform claude
-#   curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash -s -- --dir my-plugin
+#   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash
+#   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform cursor
+#   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform claude
+#   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --dir my-plugin
+#
+# 注：使用 jsDelivr CDN 可避免 raw.githubusercontent.com 的缓存问题
 # ============================================================================
 
 set -euo pipefail

@@ -56,15 +56,17 @@ Generator (生成)          Discriminator (鉴别)
 cd /path/to/your/project
 
 # 自动检测平台，安装到 fast-harness/ 目录
-curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash
 
 # 指定平台
-curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash -s -- --platform cursor
-curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash -s -- --platform claude
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform cursor
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform claude
 
 # 自定义插件目录名
-curl -fsSL https://raw.githubusercontent.com/jindon1020/fast-harness/main/install.sh | bash -s -- --dir my-ai-plugin
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --dir my-ai-plugin
 ```
+
+> **提示**：使用 jsDelivr CDN（`cdn.jsdelivr.net`）而非 `raw.githubusercontent.com`，可避免 GitHub 原始文件缓存导致拿到旧版本的问题。
 
 ### 方式二：克隆后本地安装
 
@@ -105,15 +107,19 @@ fast-harness/configure.sh
 ```
 your-project/
 ├── AGENTS.md                          # AI 认知入口（追加 fast-harness 章节）
-├── .cursor/rules/fast-harness.mdc     # Cursor 规则（仅 Cursor 平台）
+├── .cursor/
+│   ├── rules/fast-harness.mdc         # Cursor 规则（仅 Cursor 平台）
+│   ├── agents/                        # Cursor 自动识别的 Sub-agent（9 个）
+│   ├── skills/                        # Cursor 自动识别的 Skill（5 个）
+│   └── commands/                      # Cursor 斜杠命令（/implement /fix /refactor）
 ├── .claude/rules/fast-harness.mdc     # Claude 规则（仅 Claude 平台）
-└── fast-harness/                      # 插件目录
+└── fast-harness/                      # 插件原文目录（规范详细版）
     ├── .claude-plugin/
     │   └── plugin.json                # Claude Code 插件清单
     ├── commands/
-    │   ├── implement-command.md       # 需求实现流水线
-    │   ├── fix-command.md             # Bug 修复流水线
-    │   └── refactor-command.md        # 代码重构流水线
+    │   ├── implement-command.md       # 需求实现流水线规范
+    │   ├── fix-command.md             # Bug 修复流水线规范
+    │   └── refactor-command.md        # 代码重构流水线规范
     ├── agents/
     │   ├── requirement-design-agent.md  # Planner
     │   ├── generator-agent.md           # Generator
