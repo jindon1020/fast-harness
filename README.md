@@ -30,11 +30,11 @@ Generator (生成)          Discriminator (鉴别)
 │             │          │   security-reviewer        │
 └──────▲──────┘          ├─────────────────────────┤
        │                 │ Round 2: 单元测试         │
-       │  FAIL+feedback  │   api-test-agent          │
+       │  FAIL+feedback  │   unit-test-gen-agent      │
        │◄────────────── │   test-runner              │
        │                 ├─────────────────────────┤
   debugger-agent         │ Round 3: 集成测试         │
-  (最小化修复)            │   tester-gen-agent        │
+  (最小化修复)            │   integration-test-gen     │
                          │   test-runner              │
                          └─────────────────────────┘
                            VERDICT: PASS / FAIL
@@ -100,6 +100,33 @@ fast-harness/configure.sh
 - **不泄露敏感信息** — skills 目录下的密钥文件均为 `.example` 模板
 - **可完全回退** — 删除插件目录和对应的 rules 文件即可完全卸载
 
+### 更新到最新版本
+
+```bash
+cd /path/to/your/project
+
+# 从远程拉取最新版本（覆盖插件文件）
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --force
+
+# 指定平台更新
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --force --platform cursor
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --force --platform claude
+```
+
+`--force` 模式下，**以下内容会被覆盖更新**：
+
+- `fast-harness/` 目录下所有 commands、agents、skills 规范文件
+- `.cursor/rules/fast-harness.mdc` / `.claude/rules/fast-harness.mdc`
+- `.cursor/agents/`、`.cursor/skills/`、`.cursor/commands/` 下的插件文件
+
+**以下内容始终保留，不会被覆盖**：
+
+- `.local/` — 密钥、kubeconfig、bastion 配置
+- `.ai/` — 流水线运行产物（task_card、审查报告、测试结果等）
+- `fast-harness/project-context.md` — 项目上下文（如已配置）
+
+> 大版本更新后建议重新运行 `fast-harness/configure.sh`，检查是否有新的 `{{占位符}}` 需要填写。
+
 ## 目录结构
 
 安装后，你的项目中会新增以下文件：
@@ -126,8 +153,8 @@ your-project/
     │   ├── generator-agent.md           # Generator
     │   ├── code-reviewer-agent.md       # Code Reviewer
     │   ├── security-reviewer-agent.md   # Security Reviewer
-    │   ├── api-test-agent.md            # 单元测试生成
-    │   ├── tester-gen-agent.md          # 集成测试生成
+    │   ├── unit-test-gen-agent.md       # 单元测试生成
+    │   ├── integration-test-gen-agent.md # 集成测试生成
     │   ├── test-runner-agent.md         # 测试执行
     │   ├── debugger-agent.md            # 调试修复
     │   └── monitor-agent.md             # K8s 监控
@@ -184,8 +211,8 @@ Phase 5  最终报告     → 汇总结果 ✋ 确认提交
 | generator-agent | Generator | 按任务卡编写实现代码 |
 | code-reviewer-agent | Code Reviewer | 六维度代码质量审查 |
 | security-reviewer-agent | Security Reviewer | 安全漏洞审查 |
-| api-test-agent | 单元测试 | 连接本地 DB 真实数据驱动测试 |
-| tester-gen-agent | 集成测试 | 解析 xmind 脑图生成测试 |
+| unit-test-gen-agent | 单元测试 | 连接本地 DB 真实数据驱动测试 |
+| integration-test-gen-agent | 集成测试 | 解析 xmind 脑图生成测试 |
 | test-runner-agent | Executor | 运行 pytest 输出 VERDICT |
 | debugger-agent | Debugger | 本地修复 / 线上排查双路径 |
 | monitor-agent | Monitor | K8s + Prometheus 只读监控 |
