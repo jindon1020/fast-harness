@@ -260,7 +260,7 @@ alwaysApply: true
 
 ## 按需读取原则
 
-收到 `/implement`、`/fix`、`/refactor` 命令时，按以下规则加载：
+收到 `/implement`、`/fix`、`/refactor`、`/modify` 命令时，按以下规则加载：
 1. 读取对应的 command 文件获取流水线规范
 2. 由 command 按需调度 agent（Sub-agent 方式启动）
 3. 不要预加载所有 agent 指令
@@ -272,6 +272,7 @@ alwaysApply: true
 | `/implement` | 端到端需求实现 | `fast-harness/commands/implement-command.md` |
 | `/fix` | Bug 修复闭环 | `fast-harness/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `fast-harness/commands/refactor-command.md` |
+| `/modify` | 存量代码精准修改 | `fast-harness/commands/modify-command.md` |
 
 ## 编码规约
 
@@ -330,7 +331,7 @@ alwaysApply: true
 
 ## 按需读取原则
 
-收到 `/implement`、`/fix`、`/refactor` 命令时，按以下规则加载：
+收到 `/implement`、`/fix`、`/refactor`、`/modify` 命令时，按以下规则加载：
 1. 读取对应的 command 文件获取流水线规范
 2. 由 command 按需调度 agent（Sub-agent 方式启动）
 3. 不要预加载所有 agent 指令
@@ -342,6 +343,7 @@ alwaysApply: true
 | `/implement` | 端到端需求实现 | `fast-harness/commands/implement-command.md` |
 | `/fix` | Bug 修复闭环 | `fast-harness/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `fast-harness/commands/refactor-command.md` |
+| `/modify` | 存量代码精准修改 | `fast-harness/commands/modify-command.md` |
 
 ## 编码规约
 
@@ -391,8 +393,9 @@ if [[ "$SKIP_AGENTS_MD" == false ]]; then
 | \`/implement\` | 端到端需求实现 | 用户描述新功能需求 | [$PLUGIN_DIR/commands/implement-command.md]($PLUGIN_DIR/commands/implement-command.md) |
 | \`/fix\` | Bug 修复闭环 | 测试 FAIL / 审查 Critical / 线上异常 / 手动报告 | [$PLUGIN_DIR/commands/fix-command.md]($PLUGIN_DIR/commands/fix-command.md) |
 | \`/refactor\` | 批量代码重构 | 技术债清理 / 审查 Improvements 积压 | [$PLUGIN_DIR/commands/refactor-command.md]($PLUGIN_DIR/commands/refactor-command.md) |
+| \`/modify\` | 存量代码精准修改 | 修改现有功能 / 调整业务逻辑 / 接口改造 | [$PLUGIN_DIR/commands/modify-command.md]($PLUGIN_DIR/commands/modify-command.md) |
 
-> **⚡ 快速模式**: 三个命令均支持 \`fast=true\` 可选参数，跳过 GAN 对抗审查/质量审计环节，节省 30%-40% Token。
+> **⚡ 快速模式**: 四个命令均支持 \`fast=true\` 可选参数，跳过 GAN 对抗审查/质量审计环节，节省 30%-40% Token。
 
 ### Agents — 由 Command 按需调度
 
@@ -504,7 +507,7 @@ fi
 echo ""
 echo "已安装的文件："
 echo "  📁 $PLUGIN_DIR/                 # 插件核心文件"
-echo "  📁 $PLUGIN_DIR/commands/        # 3 个流水线命令（规范原文）"
+echo "  📁 $PLUGIN_DIR/commands/        # 4 个流水线命令（规范原文）"
 echo "  📁 $PLUGIN_DIR/agents/          # 9 个专职 Agent（规范原文）"
 echo "  📁 $PLUGIN_DIR/skills/          # 5 个运维 Skill（规范原文）"
 echo "  📁 $PLUGIN_DIR/docs/            # 完整使用文档"
