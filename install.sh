@@ -243,6 +243,64 @@ install_claude() {
         ok "Claude 插件清单已就绪: $PLUGIN_DIR/.claude-plugin/plugin.json"
     fi
 
+    # 复制 Hooks → .claude/hooks/
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/hooks" ]]; then
+        mkdir -p "$PROJECT_DIR/.claude/hooks"
+        for hook_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.sh; do
+            [[ -f "$hook_file" ]] && copy_file "$hook_file" "$PROJECT_DIR/.claude/hooks/$(basename "$hook_file")"
+        done
+        chmod +x "$PROJECT_DIR/.claude/hooks/"*.sh 2>/dev/null || true
+    fi
+
+    # 配置 .claude/settings.json 中的 hooks
+    local settings_file="$PROJECT_DIR/.claude/settings.json"
+    local archive_hook_cmd="bash \$CLAUDE_PROJECT_DIR/.claude/hooks/archive-to-agents.sh"
+    if [[ -f "$settings_file" ]]; then
+        if grep -qF "archive-to-agents" "$settings_file" 2>/dev/null; then
+            skip "$settings_file (archive hook 已配置)"
+        elif command -v python3 &>/dev/null; then
+            # 用 python3 安全合并 hooks 到已有 settings.json
+            python3 -c "
+import json, sys
+try:
+    with open('$settings_file', 'r') as f:
+        data = json.load(f)
+except:
+    data = {}
+hooks = data.setdefault('hooks', {})
+stop = hooks.setdefault('Stop', [])
+stop.append({
+    'matcher': '',
+    'hooks': [{'type': 'command', 'command': '$archive_hook_cmd'}]
+})
+with open('$settings_file', 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+" && ok "合并 hook 到: $settings_file" || warn "无法自动合并 hooks，请手动添加 Stop hook 到 $settings_file"
+        else
+            warn "settings.json 已存在且无 python3，请手动将 archive hook 添加到 $settings_file 的 hooks.Stop 中"
+        fi
+    else
+        mkdir -p "$PROJECT_DIR/.claude"
+        cat > "$settings_file" << SETTINGSJSON
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$archive_hook_cmd"
+          }
+        ]
+      }
+    ]
+  }
+}
+SETTINGSJSON
+        ok "创建: $settings_file"
+    fi
+
     # 创建/更新 .claude/rules 规则文件
     local rule_file="$PROJECT_DIR/.claude/rules/fast-harness.mdc"
     if $FORCE || [[ ! -f "$rule_file" ]]; then
@@ -273,6 +331,11 @@ alwaysApply: true
 | `/fix` | Bug 修复闭环 | `fast-harness/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `fast-harness/commands/refactor-command.md` |
 | `/modify` | 存量代码精准修改 | `fast-harness/commands/modify-command.md` |
+
+## 历史上下文
+
+流水线执行后，hook 脚本会自动将 `.ai/` 下的过程文件归档到 `AGENTS.md`。
+执行命令前应检查 `AGENTS.md` 的「流水线执行归档」章节，复用历史设计文档和审查经验。
 
 ## 编码规约
 
@@ -314,6 +377,41 @@ install_cursor() {
         done
     fi
 
+    # 复制 Hooks → .cursor/hooks/
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/hooks" ]]; then
+        mkdir -p "$PROJECT_DIR/.cursor/hooks"
+        for hook_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.sh; do
+            [[ -f "$hook_file" ]] && copy_file "$hook_file" "$PROJECT_DIR/.cursor/hooks/$(basename "$hook_file")"
+        done
+        chmod +x "$PROJECT_DIR/.cursor/hooks/"*.sh 2>/dev/null || true
+    fi
+
+    # 创建/更新 .cursor/hooks.json
+    local hooks_json="$PROJECT_DIR/.cursor/hooks.json"
+    local archive_hook=".cursor/hooks/archive-to-agents.sh"
+    if [[ -f "$hooks_json" ]]; then
+        if ! grep -qF "$archive_hook" "$hooks_json" 2>/dev/null; then
+            warn "hooks.json 已存在，请手动将以下 hook 添加到 stop 事件中:"
+            echo "  {\"command\": \"$archive_hook\"}"
+        else
+            skip "$hooks_json (archive hook 已配置)"
+        fi
+    else
+        cat > "$hooks_json" << HOOKJSON
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": "$archive_hook"
+      }
+    ]
+  }
+}
+HOOKJSON
+        ok "创建: $hooks_json"
+    fi
+
     # 创建/更新 .cursor/rules 规则文件
     local rule_file="$PROJECT_DIR/.cursor/rules/fast-harness.mdc"
     if $FORCE || [[ ! -f "$rule_file" ]]; then
@@ -344,6 +442,11 @@ alwaysApply: true
 | `/fix` | Bug 修复闭环 | `fast-harness/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `fast-harness/commands/refactor-command.md` |
 | `/modify` | 存量代码精准修改 | `fast-harness/commands/modify-command.md` |
+
+## 历史上下文
+
+流水线执行后，hook 脚本会自动将 `.ai/` 下的过程文件归档到 `AGENTS.md`。
+执行命令前应检查 `AGENTS.md` 的「流水线执行归档」章节，复用历史设计文档和审查经验。
 
 ## 编码规约
 
@@ -445,6 +548,19 @@ Agent 间通过文件契约通信，实现 Context Reset（不依赖对话历史
 | 纯配置变更（YAML/环境变量） | 无业务逻辑变更 | 直接改 + 确认配置生效 |
 | 只改注释或文档 | 无行为影响 | 直接改 |
 | 修改现有接口的返回值新增可选字段 | 向后兼容的小改动 | 直接改 + 补充测试 |
+
+### 流水线执行归档
+
+> 以下为流水线命令执行后自动归档的过程文件索引。查阅历史设计文档、技术方案、审查反馈等，直接读取对应路径下的文件。
+>
+> **使用方式**：执行 \`/implement\`、\`/fix\`、\`/refactor\`、\`/modify\` 命令前，先查阅此章节：
+> - 查找**同模块**的历史记录，复用已有设计文档（\`task_card.json\` / \`change_card.json\`）
+> - 参考历史 \`review_feedback.md\` 审查意见，主动规避已知问题
+> - 阅读历史 \`diagnosis.md\` 了解已修复 Bug 的根因，避免回归
+> - 复用 \`tests/{branch}/\` 下的测试用例和数据，只生成增量测试
+
+| 时间 | 命令 | Pipeline ID | 路径 | 核心文件 |
+|------|------|-------------|------|----------|
 AGENTSEOF
 )
 
@@ -510,22 +626,31 @@ echo "  📁 $PLUGIN_DIR/                 # 插件核心文件"
 echo "  📁 $PLUGIN_DIR/commands/        # 4 个流水线命令（规范原文）"
 echo "  📁 $PLUGIN_DIR/agents/          # 9 个专职 Agent（规范原文）"
 echo "  📁 $PLUGIN_DIR/skills/          # 5 个运维 Skill（规范原文）"
+echo "  📁 $PLUGIN_DIR/hooks/           # Hook 脚本（归档等）"
 echo "  📁 $PLUGIN_DIR/docs/            # 完整使用文档"
-echo "  📄 AGENTS.md                     # AI 认知入口"
+echo "  📄 AGENTS.md                     # AI 认知入口 + 历史归档索引"
 
 case "$PLATFORM" in
     cursor)
         echo "  📁 .cursor/agents/              # Cursor 可识别的 Agent"
         echo "  📁 .cursor/skills/              # Cursor 可识别的 Skill"
         echo "  📁 .cursor/commands/            # Cursor 可识别的命令（/implement 等）"
+        echo "  📁 .cursor/hooks/               # Cursor Hook 脚本"
+        echo "  📄 .cursor/hooks.json            # Hook 事件配置"
         echo "  📄 .cursor/rules/fast-harness.mdc" ;;
     claude)
+        echo "  📁 .claude/hooks/               # Claude Code Hook 脚本"
+        echo "  📄 .claude/settings.json         # Claude Code Hook 配置"
         echo "  📄 .claude/rules/fast-harness.mdc" ;;
     both)
         echo "  📁 .cursor/agents/              # Cursor 可识别的 Agent"
         echo "  📁 .cursor/skills/              # Cursor 可识别的 Skill"
         echo "  📁 .cursor/commands/            # Cursor 可识别的命令（/implement 等）"
+        echo "  📁 .cursor/hooks/               # Cursor Hook 脚本"
+        echo "  📄 .cursor/hooks.json            # Cursor Hook 事件配置"
         echo "  📄 .cursor/rules/fast-harness.mdc"
+        echo "  📁 .claude/hooks/               # Claude Code Hook 脚本"
+        echo "  📄 .claude/settings.json         # Claude Code Hook 配置"
         echo "  📄 .claude/rules/fast-harness.mdc" ;;
 esac
 

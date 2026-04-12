@@ -227,6 +227,17 @@ feat: {task_card.feature}
 - **最多 3 轮重试**: 超限升级人类，防止无限循环消耗 Token
 - **歧义必须停下**: Agent 遇到缺失/歧义必须暂停确认，禁止猜测
 
+## Historical Context
+
+在 Pre-flight 阶段，读取项目根目录 `AGENTS.md` 中的「流水线执行归档」章节，利用历史执行记录提升流水线质量：
+
+1. **同模块历史**: 查找与当前 `module` 相关的历史 implement 记录，复用已有 `task_card.json` 中的接口设计、DB Schema 和技术方案（`.ai/design/`），避免从零设计
+2. **审查经验**: 参考历史 `review_feedback.md` 的 Critical/Improvements，在 Phase 1 代码生成阶段主动规避已知问题
+3. **测试资产**: 复用 `tests/{branch}/` 下已有的测试用例和数据文件，Phase 3/4 只生成增量测试
+4. **设计文档**: 若涉及跨模块依赖，通过归档索引定位相关模块的 `task_card.json` 了解接口契约
+
+> 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。
+
 ## Project Context
 
 > 安装后根据实际项目填写，参考 `fast-harness/project-context.example.md`

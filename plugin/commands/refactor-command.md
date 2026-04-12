@@ -307,6 +307,17 @@ refactor: {重构目标一句话}
 - **审计不强阻塞**: Phase 4 FAIL 不阻断提交（行为已验证），但报告中显著标注
 - **Context Reset**: Agent 间通过文件契约通信，不继承对话历史
 
+## Historical Context
+
+在 Pre-flight 阶段，读取项目根目录 `AGENTS.md` 中的「流水线执行归档」章节，利用历史执行记录制定更精准的重构计划：
+
+1. **历史重构**: 查找同模块/同 scope 的历史 refactor 记录，读取 `refactor_plan.md` 和 `metrics_comparison.md` 了解已完成的改善和残留技术债
+2. **接口契约**: 通过历史 implement/modify 记录的 `task_card.json`/`change_card.json` 确认不可触碰的接口边界
+3. **审查积压**: 参考历史 `review_feedback.md` 中的 Improvements/Nitpicks，纳入重构范围一并解决
+4. **测试基线**: 复用已有测试用例（`tests/{branch}/`）作为行为等价验证的基线
+
+> 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。
+
 ## Project Context
 
 > 安装后根据实际项目填写，参考 `fast-harness/project-context.example.md`

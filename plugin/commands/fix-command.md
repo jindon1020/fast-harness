@@ -259,6 +259,17 @@ fix: {根因一句话}
 - **Context Reset**: Agent 间通过文件契约通信，不继承对话历史
 - **歧义必须停下**: 遇到缺失/歧义暂停确认，禁止猜测
 
+## Historical Context
+
+在 Pre-flight 阶段，读取项目根目录 `AGENTS.md` 中的「流水线执行归档」章节，利用历史执行记录辅助 Bug 诊断：
+
+1. **同模块历史**: 查找当前 `module` 的历史 implement/modify 记录，读取 `task_card.json`/`change_card.json` 了解原始设计意图，辅助根因分析
+2. **历史修复**: 查找同模块的历史 fix 记录，读取 `diagnosis.md` 了解已修复的问题，避免重复诊断或引入已知的回归
+3. **审查反馈**: 参考历史 `review_feedback.md` 中与当前 Bug 相关的审查意见，可能直接指向根因
+4. **测试基线**: 复用已有测试用例（`tests/{branch}/`），在回归测试阶段追加而非重建
+
+> 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。
+
 ## Project Context
 
 > 安装后根据实际项目填写，参考 `fast-harness/project-context.example.md`

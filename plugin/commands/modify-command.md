@@ -265,6 +265,17 @@ modify: {变更描述一句话}
 - **测试持久化**: 保存到 `tests/{branch}/`，新增用例追加不覆盖
 - **歧义必须停下**: 遇到缺失/歧义暂停确认，禁止猜测
 
+## Historical Context
+
+在 Pre-flight 阶段，读取项目根目录 `AGENTS.md` 中的「流水线执行归档」章节，利用历史执行记录辅助变更分析：
+
+1. **原始设计**: 查找当前 `module` 的历史 implement 记录，读取 `task_card.json` 了解接口的原始设计意图和 DB Schema，确保变更方案与整体架构一致
+2. **变更历史**: 查找同接口的历史 modify 记录，读取 `change_card.json` 了解已执行过的变更，评估累计影响和兼容性风险
+3. **审查经验**: 参考历史 `review_feedback.md` 的审查意见，在 Phase 1 代码修改阶段主动规避已知问题
+4. **测试资产**: 复用已有的单元测试用例（`tests/{branch}/`），Phase 3 只生成增量变更验证和回归保护用例
+
+> 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。
+
 ## Project Context
 
 > 安装后根据实际项目填写，参考 `fast-harness/project-context.example.md`
