@@ -52,20 +52,33 @@
 ## Command Format
 
 ```
-/modify <变更描述> [module=xxx] [fast=true]
-/modify <变更描述> from=implement [module=xxx] [fast=true]
-/modify change_card=.ai/modify/{branch}_{module}/change_card.json [fast=true]
+/modify <变更描述> [module=xxx] [from=implement] [mode=fast] [unit_test=off] [inte_test=on]
+/modify change_card=<path> [mode=fast] [unit_test=off] [inte_test=on]
 ```
+
+### 输入参数
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| 变更描述 | 是（与 change_card 二选一） | 自然语言变更需求，触发 Phase 0 |
-| `change_card` | 否 | 已有 change_card.json 路径，跳过 Phase 0 |
-| `module` | 否 | 模块名，不传时自动推断 |
-| `from` | 否 | `implement` 时从 task_card 读取接口上下文 |
-| `fast` | 否 | `true` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
+| 变更描述 | 二选一 | 自然语言变更需求，触发 Phase 0 变更分析 |
+| `change_card` | 二选一 | 已有 `change_card.json` 路径，跳过 Phase 0 |
 
-> branch 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
+### 上下文参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `module` | 自动推断 | 模块名。未传入时从变更描述或分支名推断 |
+| `from` | - | `implement` 时从 `task_card.json` 读取接口上下文，导入 `existing_interfaces` |
+
+### 流水线控制参数
+
+| 参数 | 默认值 | 取值 | 说明 |
+|------|--------|------|------|
+| `mode` | `full` | `full` / `fast` | `fast` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
+| `unit_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 3；传模块名仅运行该模块的单元测试 |
+| `inte_test` | `off` | `on` / `off` / `<module>` | `on` 启用已有集成测试回归（Phase 3c）；传模块名仅运行该模块的集成测试。默认关闭：modify 为局部变更，通常无需集成测试 |
+
+> `branch` 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
 
 ## Pre-flight
 
@@ -73,8 +86,14 @@
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`，`module` 未传入时自动推断
 3. 传入 `change_card=...` 且文件存在 → 跳过 Phase 0
 4. `from=implement` → 从 `.ai/implement/{branch}_{module}/task_card.json` 读取接口上下文，导入 `existing_interfaces`，复用已有测试文件
-5. `fast=true` → 告知「快速模式，跳过 GAN 审查：变更分析 → 代码修改 → 单元测试」
-6. 默认 → 告知「完整模式：变更分析 → 代码修改 → GAN 审查 → 单元测试。关键节点暂停确认」
+5. 解析运行模式，向用户确认流水线配置：
+   - `mode=fast` → 跳过 Phase 2 GAN 审查
+   - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={module_name}` → Phase 3 仅运行指定模块
+   - `inte_test=on` → 追加 Phase 3c 集成测试回归（若存在 `tests/{branch}/{module}_api_test.py`）；`inte_test={module_name}` → 仅运行指定模块的集成测试
+6. 告知用户流水线路径：
+   - 完整模式（默认）：「变更分析 → 代码修改 → GAN 审查 → 单元测试。关键节点暂停确认」
+   - 快速模式（mode=fast）：「变更分析 → 代码修改 → 单元测试」
+   - 根据 unit_test/inte_test 开关动态裁剪路径展示
 
 ## Execution Steps
 
@@ -118,7 +137,7 @@ mkdir -p .ai/modify/{branch}_{module}
 
 ### Phase 2: GAN 对抗审查（Discriminator Round 1）
 
-**Skip if**: `fast=true`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
+**Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
 
@@ -137,6 +156,9 @@ mkdir -p .ai/modify/{branch}_{module}
 **Retry Loop** (MAX=2): 提取 Critical → `debugger-agent` 最小化修复 → 重新审查。超限 → AskQuestion「已循环 2 轮：[列出]。(A) 人工修复 (B) 忽略继续测试 (C) 终止」
 
 ### Phase 3: 单元测试（Discriminator Round 2）
+
+**Skip if**: `unit_test=off`（报告中标注「⏭️ 单元测试已跳过（unit_test=off）」）
+**Scope**: `unit_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_unit_test.py`，报告标注「🎯 单元测试范围：{module_name}」
 
 #### Step 3a: 生成测试用例
 
@@ -158,12 +180,31 @@ mkdir -p .ai/modify/{branch}_{module}
 **Agent**: `test-runner-agent` (Sub-agent)
 
 **Prompt**:
-> 执行 tests/{branch}/{module}_unit_test.py，测试类型：单元测试（变更验证）。
+> 执行 tests/{branch}/{test_target_module}_unit_test.py，测试类型：单元测试（变更验证）。
 > change_card: .ai/modify/{branch}_{module}/change_card.json。
 > 结果写入 unit_test_results.md，输出 VERDICT。
 
-**Verdict**: PASS → Phase 4 | FAIL → Retry Loop
+> 其中 `test_target_module` = unit_test 参数值（若为模块名）或当前 module。
+
+**Verdict**: PASS → Phase 3c/4 | FAIL → Retry Loop
 **Retry Loop** (MAX=2): `debugger-agent` 根据 unit_test_results.md + change_card 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 2 轮：[列出]。(A) 人工修复 (B) 终止」
+
+### Phase 3c: 集成测试回归（可选）
+
+**Skip if**: `inte_test=off`（默认）或不存在 `tests/{branch}/{module}_api_test.py`
+**Trigger**: `inte_test=on` 且存在集成测试文件，或 `inte_test={module_name}`
+**Scope**: `inte_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_api_test.py`，报告标注「🎯 集成测试范围：{module_name}」
+
+**Agent**: `test-runner-agent` (Sub-agent)
+
+**Prompt**:
+> 执行集成测试回归：tests/{branch}/{test_target_module}_api_test.py。
+> change_card: .ai/modify/{branch}_{module}/change_card.json。
+> 结果写入 integration_test_results.md，输出 VERDICT。
+
+> 其中 `test_target_module` = inte_test 参数值（若为模块名）或当前 module。
+
+**Retry Loop** (MAX=2): 同 Step 3b。
 
 ### Phase 4: 最终报告
 
@@ -173,7 +214,10 @@ mkdir -p .ai/modify/{branch}_{module}
 ## 🔄 modify 变更流水线执行报告
 
 ### 模式
-{若 fast=true：⚡ 快速模式（已跳过 GAN 审查）}
+{mode=fast：⚡ 快速模式（已跳过 GAN 审查）}
+{unit_test=off：⏭️ 单元测试已跳过}
+{inte_test=on/module_name：已启用集成测试回归}
+{unit_test/inte_test 为模块名：🎯 测试范围已限定}
 
 ### 概览
 | 阶段 | Agent | VERDICT | 重试 |
@@ -181,7 +225,8 @@ mkdir -p .ai/modify/{branch}_{module}
 | Phase 0: 变更分析 | modify-command | ✅ | - |
 | Phase 1: 代码修改 | generator-agent | ✅ | - |
 | Phase 2: 代码审查 | code-reviewer + security-reviewer | PASS/FAIL/⚡SKIP | 0-2 |
-| Phase 3: 单元测试 | unit-test-gen-agent + test-runner | PASS/FAIL | 0-2 |
+| Phase 3: 单元测试 | unit-test-gen-agent + test-runner | PASS/FAIL/⏭️SKIP | 0-2 |
+| Phase 3c: 集成回归 | test-runner（可选） | PASS/FAIL/⏭️SKIP | 0-2 |
 
 ### 变更信息
 - 模块: {module} | 接口: {列表} | 向后兼容: {是/否} | 风险: {low/medium/high}
@@ -191,6 +236,7 @@ $(cat .ai/modify/{branch}_{module}/changed_files.txt)
 
 ### 测试覆盖
 - 单元测试：{N} 用例（变更验证 {N} + 回归保护 {N}），通过率 {X}%
+- 集成回归：{N} 用例，通过率 {X}%（若执行）
 
 ### 审查摘要
 - 代码审查：{Critical} Critical / {Improvement} Improvements | 安全审查：{结论}
@@ -213,7 +259,7 @@ modify: {变更描述一句话}
 - **向后兼容优先**: 不兼容变更显式标注 BREAKING CHANGE，测试覆盖旧格式异常处理
 - **GAN 分离**: Generator 不自评，独立 Reviewer 评判；Debugger 只修复已报告问题
 - **轻量 Phase 0**: 接口定位 + 影响分析 + change_card 生成，无需完整需求设计
-- **仅单元测试**: 不执行集成测试，基于真实数据的单元测试已足够覆盖改动面
+- **默认仅单元测试**: 集成测试默认关闭（`inte_test=off`），可通过 `inte_test=on` 启用已有集成测试回归
 - **2 轮上限**: GAN/测试修复各限 2 轮，超限升级人类（修改是局部变更，超限说明方案有问题）
 - **Context Reset**: Agent 间通过文件契约通信，不继承对话历史
 - **测试持久化**: 保存到 `tests/{branch}/`，新增用例追加不覆盖

@@ -133,17 +133,36 @@ SendMessage(to="planner-agent", message="
 
 ---
 
-### B-Step 0: 切换模式 + 信息收集
+### B-Step 0: 切换模式 + 环境识别 + 信息收集
 
 **必须首先**：调用 `SwitchMode` 切换为 `plan` 模式，说明：「进入线上问题排查阶段，禁止直接修改代码，须先完成日志与数据分析。」
 
-收集以下信息（缺失时主动向用户询问）：
+#### 环境智能推断
+
+根据用户描述中的关键词自动推断目标环境和服务：
+
+| 用户关键词 | 推断结果 |
+|------------|----------|
+| `prod` / `生产` / `线上` / `正式` / `正式环境` | 环境 → `drama-prod` |
+| `dev` / `开发` / `测试` / `开发环境` | 环境 → `drama-dev` |
+| `creation-tool` / `creation` / `创作工具` | 服务 → `creation-tool` |
+| `asset-manager` / `asset` / `资产` | 服务 → `asset-manager` |
+| `algo-manager` / `algo` / `算法` | 服务 → `algo-manager` |
+
+**强制暂停询问条件**（满足任一即暂停，不得猜测）：
+- 用户仅说"有问题""报错""挂了"但**未提及任何环境关键词** → 暂停，列出选项：「请确认问题发生在哪个环境？① drama-dev（开发）② drama-prod（生产）」
+- 用户**未提及服务名**且无法从错误描述中推断 → 暂停询问：「请确认涉及的服务？① creation-tool ② asset-manager ③ algo-manager」
+- 用户描述同时包含 dev 和 prod 关键词（如"dev 环境的数据和线上不一致"）→ 暂停确认主排查环境
+
+**推断后必须回显确认**：向用户确认推断结果，例如：「我理解你说的是 **drama-prod** 环境的 **creation-tool** 服务，对吗？」。用户确认后再继续。
+
+#### 信息收集清单
 
 | 信息 | 必填 | 说明 |
 |------|------|------|
 | `request_id` | 建议提供 | 用于精准查询 Loki 日志；用户说没有则跳过 |
-| 环境 | 必填 | `drama-dev` 或 `drama-prod` |
-| 服务名 | 必填 | `creation-tool` / `algo-manager` / `asset-manager` |
+| 环境 | 必填 | `drama-dev` 或 `drama-prod`（由上述推断规则确定） |
+| 服务名 | 必填 | `creation-tool` / `algo-manager` / `asset-manager`（由上述推断规则确定） |
 | 错误描述 | 必填 | 报错信息、异常行为、复现步骤 |
 | 发生时间范围 | 建议提供 | 帮助缩小日志查询窗口 |
 
@@ -168,15 +187,18 @@ Sub-agent 指令：
 
 ### B-Step 2: 数据库比对（按需启用）
 
-若日志分析涉及数据状态异常、字段值不一致、数据缺失等情况，开启 Sub-agent 调用 **skill `dev-mysql-bastion-query`**：
+若日志分析涉及数据状态异常、字段值不一致、数据缺失等情况，开启 Sub-agent 调用 **skill `db-bastion-query`**：
 
 ```
-Sub-agent 指令（仅限 dev 环境只读查询）：
+Sub-agent 指令（只读查询，环境与 B-Step 0 确认的一致）：
+- 目标环境：{drama-dev / drama-prod}（对应 .local/bastion.env 或 .local/bastion-prod.env）
 - 根据日志中的关键 ID（episode_id / shot_id / project_id 等）
 - 查询相关表的实际数据状态
 - 重点核查：软删除标记、状态字段、关联外键完整性、时间戳
 - 禁止执行任何写入/删除操作
 ```
+
+> **prod 环境额外约束**：查询生产库前，Sub-agent 必须向用户确认查询必要性；仅允许 `SELECT` 和 `SHOW TABLES`，禁止其他 `SHOW` 变体。
 
 **典型比对场景**：
 - 日志报"数据不存在"，但业务逻辑认为应该存在 → 查是否被软删除

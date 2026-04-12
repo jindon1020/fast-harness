@@ -33,27 +33,47 @@
 ## Command Format
 
 ```
-/implement <需求描述> [module=xxx] [xmind=/path/to/xxx.xmind] [fast=true]
-/implement task_card=.ai/implement/{branch}_{module}/task_card.json [xmind=...] [fast=true]
+/implement <需求描述> [module=xxx] [xmind=...] [mode=fast] [unit_test=off] [inte_test=off]
+/implement task_card=<path> [xmind=...] [mode=fast] [unit_test=off] [inte_test=off]
 ```
+
+### 输入参数
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| 需求描述 | 是（与 task_card 二选一） | 自然语言需求，触发 Phase 0 |
-| `task_card` | 否 | 已有 task_card.json 路径，跳过 Phase 0 |
-| `module` | 否 | 模块名，不传时自动推断 |
-| `xmind` | 否 | xmind 测试用例路径，用于 Phase 4 |
-| `fast` | 否 | `true` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
+| 需求描述 | 二选一 | 自然语言需求，触发 Phase 0 需求设计 |
+| `task_card` | 二选一 | 已有 `task_card.json` 路径，跳过 Phase 0 |
 
-> branch 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
+### 上下文参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `module` | 自动推断 | 模块名。未传入时从需求描述或分支名推断 |
+| `xmind` | - | xmind 测试用例路径，用于集成测试（Phase 4） |
+
+### 流水线控制参数
+
+| 参数 | 默认值 | 取值 | 说明 |
+|------|--------|------|------|
+| `mode` | `full` | `full` / `fast` | `fast` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
+| `unit_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 3；传模块名仅运行该模块的单元测试 |
+| `inte_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 4；传模块名仅运行该模块的集成测试 |
+
+> `branch` 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
 
 ## Pre-flight
 
 1. 检查参数完整性：至少需要需求描述或 `task_card` 路径
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`，`module` 未传入时从需求描述或分支名推断
 3. 传入 `task_card=...` 且文件存在 → 跳过 Phase 0
-4. `fast=true` → 告知用户「快速模式，跳过 GAN 审查：需求设计 → 代码生成 → 单元测试 → 集成测试」
-5. 默认 → 告知用户「完整模式：需求设计 → 代码生成 → GAN 审查 → 单元测试 → 集成测试。关键节点暂停确认」
+4. 解析运行模式，向用户确认流水线配置：
+   - `mode=fast` → 跳过 Phase 2 GAN 审查
+   - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={module_name}` → Phase 3 仅运行指定模块
+   - `inte_test=off` → 跳过 Phase 4 集成测试；`inte_test={module_name}` → Phase 4 仅运行指定模块
+5. 告知用户流水线路径：
+   - 完整模式（默认）：「需求设计 → 代码生成 → GAN 审查 → 单元测试 → 集成测试。关键节点暂停确认」
+   - 快速模式（mode=fast）：「需求设计 → 代码生成 → 单元测试 → 集成测试」
+   - 根据 unit_test/inte_test 开关动态裁剪路径展示
 
 ## Execution Steps
 
@@ -79,7 +99,7 @@
 
 ### Phase 2: GAN 对抗审查（Discriminator Round 1）
 
-**Skip if**: `fast=true`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
+**Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
 
@@ -93,6 +113,9 @@
 **Retry Loop** (MAX=3): 提取 review_feedback.md 中 Critical → `debugger-agent` 最小化修复（只改 Critical，不重构不改风格，更新 changed_files.txt）→ 重新并行审查。超限 → AskQuestion「已循环 3 轮仍有 Critical：[列出]。(A) 人工修复后继续 (B) 忽略继续测试 (C) 终止」
 
 ### Phase 3: 单元测试（Discriminator Round 2）
+
+**Skip if**: `unit_test=off`（报告中标注「⏭️ 单元测试已跳过（unit_test=off）」）
+**Scope**: `unit_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_unit_test.py`，报告标注「🎯 单元测试范围：{module_name}」
 
 #### Step 3a: 生成测试用例
 
@@ -111,16 +134,20 @@
 **Agent**: `test-runner-agent` (Sub-agent)
 
 **Prompt**:
-> 执行 tests/{branch}/{module}_unit_test.py，测试类型：单元测试（自发性测试）。
+> 执行 tests/{branch}/{test_target_module}_unit_test.py，测试类型：单元测试（自发性测试）。
 > task_card 位于 .ai/implement/{branch}_{module}/task_card.json。
 > 结果写入 .ai/implement/{branch}_{module}/unit_test_results.md，输出 VERDICT。
+
+> 其中 `test_target_module` = unit_test 参数值（若为模块名）或当前 module。
 
 **Verdict**: PASS → Phase 4 | FAIL → Retry Loop
 **Retry Loop** (MAX=3): `debugger-agent` 根据 unit_test_results.md 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 3 轮：[列出失败]。(A) 人工修复 (B) 跳过继续集成测试 (C) 终止」
 
 ### Phase 4: 集成测试（Discriminator Round 3）
 
+**Skip if**: `inte_test=off`（报告中标注「⏭️ 集成测试已跳过（inte_test=off）」）
 **Skip if**: task_card.json 中 `test_cases` 为空或无 xmind → AskQuestion「未指定 xmind。(A) 提供路径继续 (B) 跳过进入报告」
+**Scope**: `inte_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_api_test.py`，报告标注「🎯 集成测试范围：{module_name}」
 
 #### Step 4a: 生成测试用例
 
@@ -136,9 +163,11 @@
 **Agent**: `test-runner-agent` (Sub-agent)
 
 **Prompt**:
-> 执行 tests/{branch}/{module}_api_test.py，测试类型：集成测试（外部测试 - xmind）。
+> 执行 tests/{branch}/{test_target_module}_api_test.py，测试类型：集成测试（外部测试 - xmind）。
 > task_card 位于 .ai/implement/{branch}_{module}/task_card.json。
 > 结果写入 .ai/implement/{branch}_{module}/integration_test_results.md，输出 VERDICT。
+
+> 其中 `test_target_module` = inte_test 参数值（若为模块名）或当前 module。
 
 **Retry Loop**: 同 Phase 3（MAX=3，超限人类介入）
 
@@ -150,7 +179,10 @@
 ## 🏁 implement 流水线执行报告
 
 ### 模式
-{若 fast=true：⚡ 快速模式（已跳过 GAN 审查）}
+{mode=fast：⚡ 快速模式（已跳过 GAN 审查）}
+{unit_test=off：⏭️ 单元测试已跳过}
+{inte_test=off：⏭️ 集成测试已跳过}
+{unit_test/inte_test 为模块名：🎯 测试范围已限定}
 
 ### 概览
 | 阶段 | Agent | VERDICT | 重试 |
@@ -158,8 +190,8 @@
 | Phase 0: 需求设计 | requirement-design-agent | ✅ | - |
 | Phase 1: 代码生成 | generator-agent | ✅ | - |
 | Phase 2: 代码审查 | code-reviewer + security-reviewer | PASS/FAIL/⚡SKIP | 0-3 |
-| Phase 3: 单元测试 | unit-test-gen-agent + test-runner | PASS/FAIL | 0-3 |
-| Phase 4: 集成测试 | integration-test-gen-agent + test-runner | PASS/FAIL/SKIP | 0-3 |
+| Phase 3: 单元测试 | unit-test-gen-agent + test-runner | PASS/FAIL/⏭️SKIP | 0-3 |
+| Phase 4: 集成测试 | integration-test-gen-agent + test-runner | PASS/FAIL/⏭️SKIP | 0-3 |
 
 ### 改动文件
 $(cat .ai/implement/{branch}_{module}/changed_files.txt)

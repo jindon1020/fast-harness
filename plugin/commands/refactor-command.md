@@ -44,29 +44,49 @@
 ## Command Format
 
 ```
-/refactor <重构目标描述> [module=xxx] [scope=app/services/] [fast=true]
-/refactor from=implement [module=xxx] [fast=true]
-/refactor plan=.ai/refactor/{refactor_id}/refactor_plan.md [fast=true]
+/refactor <重构目标描述> [module=xxx] [scope=app/services/] [mode=fast] [unit_test=off] [inte_test=off]
+/refactor from=implement [module=xxx] [mode=fast] [unit_test=off] [inte_test=off]
+/refactor plan=<path> [mode=fast] [unit_test=off] [inte_test=off]
 ```
+
+### 输入参数
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| 重构目标描述 | 是（与 from/plan 三选一） | 自然语言描述重构意图 |
-| `from` | 否 | `implement` 时从审查反馈提取 Improvements/Nitpicks |
-| `plan` | 否 | 已有 refactor_plan.md 路径，跳过 Phase 0 |
-| `module` | 否 | 模块名 |
-| `scope` | 否 | 限定重构扫描范围（目录或文件路径） |
-| `fast` | 否 | `true` 跳过 Phase 4 质量审计（省 20-30% Token），行为验证仍执行。适用于 rename/move 等低风险重构 |
+| 重构目标描述 | 三选一 | 自然语言描述重构意图，触发 Phase 0 诊断扫描 |
+| `from` | 三选一 | `implement` 时从审查反馈提取 Improvements/Nitpicks |
+| `plan` | 三选一 | 已有 `refactor_plan.md` 路径，跳过 Phase 0 |
 
-> branch 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
+### 上下文参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `module` | 自动推断 | 模块名。未传入时从重构描述或分支名推断 |
+| `scope` | - | 限定重构扫描范围（目录或文件路径），缩小诊断和改动边界 |
+
+### 流水线控制参数
+
+| 参数 | 默认值 | 取值 | 说明 |
+|------|--------|------|------|
+| `mode` | `full` | `full` / `fast` | `fast` 跳过 Phase 4 质量审计（省 20-30% Token），行为验证仍执行。适用于 rename/move 等低风险重构 |
+| `unit_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 1/3 单元测试基线与验证；传模块名仅运行该模块的单元测试 |
+| `inte_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 1/3 集成测试基线与验证；`on` 在测试文件存在时自动纳入基线；传模块名仅运行该模块的集成测试 |
+
+> `branch` 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
 
 ## Pre-flight
 
 1. 检查参数：至少需要重构目标描述或审查反馈文件
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`
 3. `from=implement` → 从 `.ai/implement/{branch}_{module}/review_feedback.md` 读取 Improvements/Nitpicks + task_card.json 上下文 + 复用已有测试文件
-4. `fast=true` → 告知「快速模式，跳过质量审计：范围定义 → 基线快照 → 批量重构 → 行为验证。**不会改变任何接口外部行为**」
-5. 默认 → 告知「完整模式：范围定义 → 基线快照 → 批量重构 → 行为验证 → 质量审计。**不会改变任何接口外部行为**」
+4. 解析运行模式，向用户确认流水线配置：
+   - `mode=fast` → 跳过 Phase 4 质量审计
+   - `unit_test=off` → Phase 1/3 跳过单元测试基线采集与行为验证；`unit_test={module_name}` → 仅运行指定模块的单元测试
+   - `inte_test=off` → Phase 1/3 跳过集成测试基线采集与行为验证；`inte_test={module_name}` → 仅运行指定模块的集成测试
+5. 告知用户流水线路径：
+   - 完整模式（默认）：「范围定义 → 基线快照 → 批量重构 → 行为验证 → 质量审计。**不会改变任何接口外部行为**」
+   - 快速模式（mode=fast）：「范围定义 → 基线快照 → 批量重构 → 行为验证。**不会改变任何接口外部行为**」
+   - 根据 unit_test/inte_test 开关动态裁剪基线采集和验证范围
 6. 创建 Git 安全检查点：
 ```bash
 git rev-parse HEAD > .ai/refactor/{refactor_id}/git_checkpoint.txt
@@ -126,9 +146,17 @@ git stash list > .ai/refactor/{refactor_id}/stash_before.txt
 
 **Agent**: `test-runner-agent` (Sub-agent)
 
+**测试范围根据开关动态裁剪**:
+- `unit_test=off` → 跳过 `{module}_unit_test.py` 基线采集
+- `inte_test=off` → 跳过 `{module}_api_test.py` 基线采集
+- `unit_test={module_name}` → 仅采集 `{module_name}_unit_test.py`
+- `inte_test={module_name}` → 仅采集 `{module_name}_api_test.py`
+
 **Prompt**:
 > 运行以下测试建立基线快照（不做 VERDICT 判断，只记录结果）：
-> 1) tests/{branch}/{module}_unit_test.py 2) tests/{branch}/{module}_api_test.py 3) 重构范围相关测试
+> 1) tests/{branch}/{test_target_module}_unit_test.py（若 unit_test 未关闭）
+> 2) tests/{branch}/{test_target_module}_api_test.py（若 inte_test 未关闭）
+> 3) 重构范围相关测试
 > 写入 baseline_snapshot.md，格式：每用例 ID/名称/状态(PASS/FAIL/SKIP)/耗时。
 
 #### Step 1b: 采集质量指标
@@ -159,9 +187,13 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 
 ### Phase 3: 行为等价验证
 
+**Skip if**: `unit_test=off` 且 `inte_test=off`（报告中标注「⏭️ 行为等价验证全部跳过」，⚠️ 高风险：无法保证行为不变）
+
 #### Step 3a: 运行全量测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
+
+**测试范围与 Phase 1 基线一致**（跟随 unit_test/inte_test 开关裁剪）
 
 **Prompt**:
 > 运行与 Phase 1 基线完全一致的测试范围，验证重构后行为等价。
@@ -175,6 +207,8 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 
 #### Step 3b: 补充覆盖验证（按需）
 
+**Skip if**: `unit_test=off`
+
 若重构涉及的代码路径无测试覆盖，启动 `unit-test-gen-agent` (Sub-agent) 补充回归测试：
 
 **Prompt**:
@@ -186,7 +220,7 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 
 ### Phase 4: 质量审计
 
-**Skip if**: `fast=true`（报告中标注「⚡ 快速模式 — 质量审计已跳过」）
+**Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — 质量审计已跳过」）
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
 
@@ -221,7 +255,10 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 ## ♻️ refactor 重构流水线执行报告
 
 ### 模式
-{若 fast=true：⚡ 快速模式（已跳过质量审计）}
+{mode=fast：⚡ 快速模式（已跳过质量审计）}
+{unit_test=off：⏭️ 单元测试验证已跳过}
+{inte_test=off：⏭️ 集成测试验证已跳过}
+{unit_test/inte_test 为模块名：🎯 测试范围已限定}
 
 ### 概览
 | 阶段 | Agent | VERDICT | 重试 |
@@ -229,7 +266,7 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 | Phase 0: 范围定义 | code-reviewer (诊断) | ✅ | - |
 | Phase 1: 基线快照 | test-runner | ✅ {N} 例基线 | - |
 | Phase 2: 批量重构 | refactor-command | ✅ {M} 项完成 | - |
-| Phase 3: 行为验证 | test-runner | PASS/FAIL | 0-2 |
+| Phase 3: 行为验证 | test-runner | PASS/FAIL/⏭️SKIP | 0-2 |
 | Phase 4: 质量审计 | code-reviewer + security-reviewer | PASS/FAIL/⚡SKIP | 0-1 |
 
 ### 重构项执行
@@ -241,7 +278,7 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 |------|--------|--------|------|
 
 ### 行为等价验证
-基线用例 {N} 个 → 重构后通过 {N} 个 → 行为等价 ✅ 100%
+基线用例 {N} 个 → 重构后通过 {N} 个 → 行为等价 ✅ 100%（若跳过则标注 ⏭️ SKIP）
 
 ### 改动文件
 $(cat .ai/refactor/{refactor_id}/changed_files.txt)
