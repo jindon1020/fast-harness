@@ -4,28 +4,5 @@
   "version": "1.0.0",
   "author": {
     "name": "jindong"
-  },
-  "commands": [
-    "implement-command",
-    "fix-command",
-    "refactor-command"
-  ],
-  "agents": [
-    "requirement-design-agent",
-    "generator-agent",
-    "code-reviewer-agent",
-    "security-reviewer-agent",
-    "api-test-agent",
-    "tester-gen-agent",
-    "test-runner-agent",
-    "debugger-agent",
-    "monitor-agent"
-  ],
-  "skills": [
-    "dev-mysql-bastion-query",
-    "kubectl-readonly",
-    "k8s-monitor-full",
-    "loki-log-keyword-search",
-    "prometheus-metrics-query"
-  ]
+  }
 }
