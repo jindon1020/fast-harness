@@ -40,6 +40,7 @@ PLUGIN_DIR="$DEFAULT_PLUGIN_DIR"
 PROJECT_DIR="$(pwd)"
 SKIP_AGENTS_MD=false
 FORCE=false
+LOCAL_SRC=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -53,15 +54,23 @@ while [[ $# -gt 0 ]]; do
             SKIP_AGENTS_MD=true; shift ;;
         --force)
             FORCE=true; SKIP_AGENTS_MD=true; shift ;;
+        --local)
+            # 使用本地仓库替代 git clone，可选传入仓库路径
+            if [[ -n "${2:-}" && ! "${2:-}" =~ ^-- ]]; then
+                LOCAL_SRC="$(cd "$2" && pwd)"; shift 2
+            else
+                LOCAL_SRC="$(cd "$(dirname "$0")" && pwd)"; shift
+            fi ;;
         -h|--help)
             echo "用法: install.sh [选项]"
             echo ""
             echo "选项:"
             echo "  --platform <cursor|claude|both>  指定 IDE 平台（默认: 自动检测）"
-            echo "  --dir <name>                     插件目录名（默认: fast-harness）"
+            echo "  --dir <name>                     插件目录名（默认: .ether）"
             echo "  --project <path>                 项目根目录（默认: 当前目录）"
             echo "  --skip-agents                    跳过 AGENTS.md 生成"
             echo "  --force                          强制更新插件文件（覆盖已有，保留 .local/ 和 project-context.md）"
+            echo "  --local [path]                   使用本地仓库（默认: 脚本所在目录）跳过 git clone"
             echo "  -h, --help                       显示帮助"
             exit 0 ;;
         *)
@@ -128,15 +137,24 @@ echo ""
 TEMP_DIR="$(mktemp -d)"
 trap "rm -rf $TEMP_DIR" EXIT
 
-info "正在下载 fast-harness..."
-git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TEMP_DIR/fast-harness" 2>/dev/null || {
-    # 如果 main 分支不存在，尝试 master
-    git clone --depth 1 "$REPO_URL" "$TEMP_DIR/fast-harness" 2>/dev/null || {
-        err "无法克隆仓库: $REPO_URL"
+if [[ -n "$LOCAL_SRC" ]]; then
+    # --local 模式：直接使用本地目录，创建软链接避免拷贝
+    if [[ ! -d "$LOCAL_SRC/plugin" ]]; then
+        err "本地路径不是有效的 fast-harness 仓库: $LOCAL_SRC（缺少 plugin/ 目录）"
         exit 1
+    fi
+    ln -sf "$LOCAL_SRC" "$TEMP_DIR/fast-harness"
+    ok "使用本地仓库: $LOCAL_SRC"
+else
+    info "正在下载 fast-harness..."
+    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TEMP_DIR/fast-harness" 2>/dev/null || {
+        git clone --depth 1 "$REPO_URL" "$TEMP_DIR/fast-harness" 2>/dev/null || {
+            err "无法克隆仓库: $REPO_URL"
+            exit 1
+        }
     }
-}
-ok "下载完成"
+    ok "下载完成"
+fi
 
 # ================================ 复制函数 ================================
 # 安全复制（不覆盖已有文件）
