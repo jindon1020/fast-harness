@@ -146,7 +146,7 @@ safe_copy_file() {
 
     if [[ -f "$dst" ]]; then
         skip "$dst"
-        return 1
+        return 0
     fi
 
     mkdir -p "$(dirname "$dst")"
