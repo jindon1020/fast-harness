@@ -1,0 +1,29 @@
+name: 清除 jsDelivr CDN 缓存
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 清除 install.sh 缓存
+        run: |
+          curl -fsSL "https://purge.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh" \
+            -o /dev/null -w "状态码: %{http_code}\n"
+
+      - name: 清除 plugin 核心文件缓存
+        run: |
+          FILES=(
+            "plugin/commands/implement-command.md"
+            "plugin/commands/fix-command.md"
+            "plugin/commands/refactor-command.md"
+            "plugin/commands/modify-command.md"
+            "plugin/hooks/archive-to-agents.sh"
+          )
+          for f in "${FILES[@]}"; do
+            curl -fsSL "https://purge.jsdelivr.net/gh/jindon1020/fast-harness@main/$f" \
+              -o /dev/null -w "$f → %{http_code}\n"
+          done

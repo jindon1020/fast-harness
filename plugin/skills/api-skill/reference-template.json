@@ -1,0 +1,84 @@
+{
+  "apis": [
+    {
+      "method": "GET",
+      "path": "/drama-api/example/list",
+      "params": {
+        "team_id": {
+          "in": "query",
+          "required": true,
+          "description": "团队 ID"
+        },
+        "keyword": {
+          "in": "query",
+          "required": false,
+          "description": "按名称搜索"
+        },
+        "page_index": {
+          "in": "query",
+          "required": false,
+          "description": "页码"
+        },
+        "page_size": {
+          "in": "query",
+          "required": false,
+          "description": "每页条数"
+        },
+        "sort_by": {
+          "in": "query",
+          "required": false,
+          "description": "排序字段名；升序/降序键名以 OpenAPI 为准",
+          "sortFields": ["field_a", "field_b"]
+        }
+      },
+      "items": [
+        {
+          "changeType": "added",
+          "scope": "query",
+          "name": "keyword",
+          "required": false,
+          "description": "名称搜索"
+        },
+        {
+          "changeType": "added",
+          "scope": "response",
+          "field": "rows",
+          "type": "array",
+          "itemSchema": { "id": "string", "name": "string" },
+          "example": [{ "id": "1", "name": "demo" }]
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/drama-api/example/action",
+      "params": {
+        "team_id": {
+          "in": "query",
+          "required": true,
+          "description": "团队 ID"
+        },
+        "allocations": {
+          "in": "body",
+          "required": true,
+          "description": "分配列表",
+          "type": "array",
+          "itemSchema": {
+            "user_id": "string",
+            "type": "number",
+            "points": "number"
+          }
+        }
+      },
+      "items": [
+        {
+          "changeType": "added",
+          "scope": "body",
+          "name": "allocations",
+          "required": true,
+          "description": "请求体批量分配结构"
+        }
+      ]
+    }
+  ]
+}
