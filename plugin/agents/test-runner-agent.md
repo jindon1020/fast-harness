@@ -39,7 +39,6 @@ color: purple
 curl -s http://127.0.0.1:8000/healthz || echo "SERVICE_DOWN"
 
 # 如果未运行，启动服务
-cd /Users/geralt/PycharmProjects/creation-tool
 source .venv/bin/activate
 nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
 sleep 3
@@ -49,7 +48,6 @@ curl -s http://127.0.0.1:8000/healthz
 ### Phase 2: 本地验证
 
 ```bash
-cd /Users/geralt/PycharmProjects/creation-tool
 source .venv/bin/activate
 pytest tests/{branch}/team_api_test.py -v --tb=short 2>&1
 ```

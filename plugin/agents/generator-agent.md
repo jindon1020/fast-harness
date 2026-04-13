@@ -79,7 +79,7 @@ $(cat {contract_dir}/changed_files.txt)
 
 ## 你的上下文
 
-**项目路径**: `/Users/geralt/PycharmProjects/creation-tool`
+**项目路径**: 当前工作目录（Workspace 根目录）
 
 **项目结构**:
 ```

@@ -102,7 +102,6 @@ rg "def [a-z]" $PROJECT/models/ -n --glob "*.py" | rg -v "__"
 ### 检测命令
 
 ```bash
-cd /Users/geralt/PycharmProjects/creation-tool
 source .venv/bin/activate
 
 # 对改动文件逐一计算圈复杂度（需安装 radon）
@@ -133,8 +132,6 @@ radon cc app/services/xxx_service.py -s
 ### 检测命令
 
 ```bash
-cd /Users/geralt/PycharmProjects/creation-tool
-
 # 检测改动文件与现有代码中的相似逻辑片段（基于 AST token 相似度）
 pip show pylint > /dev/null 2>&1 || pip install pylint -q
 python -m pylint app/services/ app/dao/ --disable=all --enable=duplicate-code 2>/dev/null | head -50
@@ -169,7 +166,7 @@ rg "except.*Exception.*as.*e:" app/ -n --glob "*.py" -A 3
 
 ```bash
 # 查找对应模块的测试文件
-find /Users/geralt/PycharmProjects/creation-tool/tests -name "*.py" | xargs rg "def test_" -l
+find tests -name "*.py" | xargs rg "def test_" -l
 
 # 统计测试函数数量
 rg "def test_" tests/ --glob "*.py" -c

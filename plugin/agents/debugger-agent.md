@@ -50,7 +50,7 @@ color: orange
 
 ```bash
 # 搜索错误关键词
-rg "KeyError|Exception|raise" /Users/geralt/PycharmProjects/creation-tool/app/services/ -n | head -20
+rg "KeyError|Exception|raise" app/services/ -n | head -20
 
 # 查看最近改动（与 main 分支对比）
 git diff main -- app/services/xxx_service.py
@@ -73,7 +73,6 @@ cp app/services/xxx_service.py /tmp/xxx_service.py.bak
 ### A-Step 4: 本地回归验证
 
 ```bash
-cd /Users/geralt/PycharmProjects/creation-tool
 source .venv/bin/activate
 
 # 先只跑失败用例
@@ -211,7 +210,7 @@ Sub-agent 指令（只读查询，环境与 B-Step 0 确认的一致）：
 
 ```bash
 # 定位日志中提到的代码路径
-rg "函数名|关键字" /Users/geralt/PycharmProjects/creation-tool/app/ -n
+rg "函数名|关键字" app/ -n
 
 # 查看当前分支与 main 的差异（排查是否新部署引入的 bug）
 git log --oneline -10
@@ -272,7 +271,7 @@ git diff main -- app/services/xxx_service.py
 curl http://localhost:8000/healthz
 
 # 若服务未启动
-cd /Users/geralt/PycharmProjects/creation-tool && source .venv/bin/activate
+source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -312,7 +311,7 @@ curl -X POST http://localhost:8000/drama-api/xxx \
 
 ## 项目上下文
 
-**项目路径**: `/Users/geralt/PycharmProjects/creation-tool`
+**项目路径**: 当前工作目录（Workspace 根目录）
 
 **本地数据库**:
 - Host: 127.0.0.1 | Port: 3306
@@ -320,5 +319,5 @@ curl -X POST http://localhost:8000/drama-api/xxx \
 - DB: drama-local
 
 **本地服务**:
-- 启动：`cd /Users/geralt/PycharmProjects/creation-tool && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- 启动：`source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 健康检查：`GET http://localhost:8000/healthz`
