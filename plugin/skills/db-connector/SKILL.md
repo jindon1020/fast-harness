@@ -98,21 +98,22 @@ if not bastion:
 
 key_path = bastion.get('key_path', '.local/id_rsa')
 local_port = bastion.get('local_port', 13306)
+bind_addr = bastion.get('bind_address', '127.0.0.1')
 
 cmd = [
     'ssh', '-f', '-N', '-o', 'ExitOnForwardFailure=yes',
     '-o', 'StrictHostKeyChecking=accept-new',
     '-i', key_path, '-p', str(bastion.get('port', 22)),
-    '-L', f'{local_port}:{config[\"host\"]}:{config[\"port\"]}',
+    '-L', f'{bind_addr}:{local_port}:{config[\"host\"]}:{config[\"port\"]}',
     f'{bastion[\"user\"]}@{bastion[\"host\"]}'
 ]
 print('建立隧道:', ' '.join(cmd))
 subprocess.run(cmd, check=True)
-print(f'隧道就绪: 127.0.0.1:{local_port} → {config[\"host\"]}:{config[\"port\"]}')
+print(f'隧道就绪: {bind_addr}:{local_port} → {config[\"host\"]}:{config[\"port\"]}')
 "
 ```
 
-隧道建立后，连接 `127.0.0.1:{local_port}`。
+隧道建立后，连接 `{bind_address}:{local_port}`（`bind_address` 默认 `127.0.0.1`）。
 
 ---
 
