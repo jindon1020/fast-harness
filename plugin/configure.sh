@@ -193,6 +193,84 @@ if [[ "${USE_KAFKA:-N}" =~ ^[Yy]$ ]]; then
   }"
 fi
 
+# --- Kubernetes ---
+echo ""
+read -p "使用 Kubernetes / K8s 监控? [y/N]: " USE_K8S
+if [[ "${USE_K8S:-N}" =~ ^[Yy]$ ]]; then
+    info "配置 Kubernetes..."
+    read -p "  kubeconfig 路径（相对项目根目录）[.local/kubeconfig-readonly]: " K8S_KUBECONFIG
+    K8S_KUBECONFIG="${K8S_KUBECONFIG:-.local/kubeconfig-readonly}"
+
+    echo ""
+    info "  配置 K8s API 堡垒机 SSH 隧道..."
+    read -p "  堡垒机 Host: " K8S_BASTION_HOST
+    read -p "  堡垒机 Port [22]: " K8S_BASTION_PORT; K8S_BASTION_PORT="${K8S_BASTION_PORT:-22}"
+    read -p "  堡垒机 User [deploy]: " K8S_BASTION_USER; K8S_BASTION_USER="${K8S_BASTION_USER:-deploy}"
+    read -p "  SSH Key 路径（相对项目根目录）[.local/id_rsa]: " K8S_KEY_PATH; K8S_KEY_PATH="${K8S_KEY_PATH:-.local/id_rsa}"
+    read -p "  K8s API Server 内网 IP [172.16.0.1]: " K8S_API_HOST; K8S_API_HOST="${K8S_API_HOST:-172.16.0.1}"
+    read -p "  K8s API Server 端口 [6443]: " K8S_API_PORT; K8S_API_PORT="${K8S_API_PORT:-6443}"
+    read -p "  本地隧道监听端口 [16443]: " K8S_LOCAL_PORT; K8S_LOCAL_PORT="${K8S_LOCAL_PORT:-16443}"
+
+    echo ""
+    info "  配置 namespace..."
+    read -p "  生产 namespace [drama-prod]: " K8S_NS_PROD; K8S_NS_PROD="${K8S_NS_PROD:-drama-prod}"
+    read -p "  开发 namespace [drama-dev]: " K8S_NS_DEV; K8S_NS_DEV="${K8S_NS_DEV:-drama-dev}"
+    read -p "  Loki namespace [loki]: " K8S_NS_LOKI; K8S_NS_LOKI="${K8S_NS_LOKI:-loki}"
+    read -p "  Prometheus namespace [arms-prom]: " K8S_NS_PROM; K8S_NS_PROM="${K8S_NS_PROM:-arms-prom}"
+
+    LOKI_JSON=""
+    echo ""
+    read -p "  使用 Loki 日志? [Y/n]: " USE_LOKI
+    if [[ "${USE_LOKI:-Y}" =~ ^[Yy]$ ]]; then
+        read -p "    Loki Service 名 [loki]: " LOKI_SVC; LOKI_SVC="${LOKI_SVC:-loki}"
+        read -p "    Loki Service 端口 [3100]: " LOKI_SVC_PORT; LOKI_SVC_PORT="${LOKI_SVC_PORT:-3100}"
+        read -p "    本地转发端口 [3100]: " LOKI_LOCAL_PORT; LOKI_LOCAL_PORT="${LOKI_LOCAL_PORT:-3100}"
+        LOKI_JSON=",
+    \"loki\": {
+      \"service\": \"$LOKI_SVC\",
+      \"service_port\": $LOKI_SVC_PORT,
+      \"local_port\": $LOKI_LOCAL_PORT
+    }"
+    fi
+
+    PROM_JSON=""
+    echo ""
+    read -p "  使用 Prometheus 监控? [Y/n]: " USE_PROM
+    if [[ "${USE_PROM:-Y}" =~ ^[Yy]$ ]]; then
+        read -p "    Prometheus Service 名 [arms-prom-server]: " PROM_SVC; PROM_SVC="${PROM_SVC:-arms-prom-server}"
+        read -p "    Prometheus Service 端口 [9090]: " PROM_SVC_PORT; PROM_SVC_PORT="${PROM_SVC_PORT:-9090}"
+        read -p "    本地转发端口 [19090]: " PROM_LOCAL_PORT; PROM_LOCAL_PORT="${PROM_LOCAL_PORT:-19090}"
+        PROM_JSON=",
+    \"prometheus\": {
+      \"service\": \"$PROM_SVC\",
+      \"service_port\": $PROM_SVC_PORT,
+      \"local_port\": $PROM_LOCAL_PORT
+    }"
+    fi
+
+    [[ "$INFRA_JSON" != "{" ]] && INFRA_JSON="$INFRA_JSON,"
+    INFRA_JSON="$INFRA_JSON
+  \"kubernetes\": {
+    \"kubeconfig_path\": \"$K8S_KUBECONFIG\",
+    \"bastion\": {
+      \"host\": \"$K8S_BASTION_HOST\",
+      \"port\": $K8S_BASTION_PORT,
+      \"user\": \"$K8S_BASTION_USER\",
+      \"key_path\": \"$K8S_KEY_PATH\",
+      \"k8s_api_host\": \"$K8S_API_HOST\",
+      \"k8s_api_port\": $K8S_API_PORT,
+      \"local_port\": $K8S_LOCAL_PORT,
+      \"bind_address\": \"127.0.0.1\"
+    },
+    \"namespaces\": {
+      \"prod\": \"$K8S_NS_PROD\",
+      \"dev\": \"$K8S_NS_DEV\",
+      \"loki\": \"$K8S_NS_LOKI\",
+      \"prometheus\": \"$K8S_NS_PROM\"
+    }$LOKI_JSON$PROM_JSON
+  }"
+fi
+
 INFRA_JSON="$INFRA_JSON
 }"
 

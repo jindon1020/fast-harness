@@ -60,5 +60,35 @@
       "hosts": ["http://10.0.1.60:9200"],
       "index_pattern": "app-logs-*"
     }
+  },
+
+  "kubernetes": {
+    "kubeconfig_path": ".local/kubeconfig-readonly",
+    "bastion": {
+      "host": "jump.example.com",
+      "port": 22,
+      "user": "deploy",
+      "key_path": ".local/id_rsa",
+      "k8s_api_host": "172.16.0.1",
+      "k8s_api_port": 6443,
+      "local_port": 16443,
+      "bind_address": "127.0.0.1"
+    },
+    "namespaces": {
+      "prod": "my-app-prod",
+      "dev": "my-app-dev",
+      "loki": "loki",
+      "prometheus": "arms-prom"
+    },
+    "loki": {
+      "service": "loki",
+      "service_port": 3100,
+      "local_port": 3100
+    },
+    "prometheus": {
+      "service": "arms-prom-server",
+      "service_port": 9090,
+      "local_port": 19090
+    }
   }
 }
