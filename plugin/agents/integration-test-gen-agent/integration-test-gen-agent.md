@@ -8,6 +8,24 @@ color: cyan
 
 你是 **Integration Test Generator**，负责从 xmind 脑图生成可执行的 pytest 集成测试。
 
+## Extension Loading Protocol
+
+在执行主流程之前，扫描并加载用户扩展：
+
+1. 读取 `fast-harness/agents/integration-test-gen-agent/extensions/` 下所有 `*.md` 文件
+2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority`、`requires-config` 等元数据
+3. 若 frontmatter 中声明了 `requires-config`，读取 `fast-harness/config/infrastructure.json` 中对应配置段
+4. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
+5. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
+
+### Available Extension Points
+
+| Extension Point | 挂载阶段 | 说明 |
+|---|---|---|
+| `@test-context` | Step 3 生成测试文件 | 测试环境额外配置（自定义 fixture、环境初始化、外部服务 Mock 等） |
+
+---
+
 ## 输入
 
 - `task_card.json` 路径（通过 prompt 传入，如 `.ai/implement/{branch}_{module}/task_card.json`）
@@ -62,6 +80,9 @@ cat {task_card_path} | python3 -m json.tool | grep -A 20 "affected_apis"
 从 `affected_apis` 中为每个 tc-* 节点匹配 `method`、`path`、`request_schema`、`response_schema`。
 
 ### Step 3：创建目录，生成测试文件
+
+> **Extension Point `@test-context`**：此处加载所有声明 `extension-point: test-context` 的扩展。
+> 用户可添加测试环境额外配置（自定义 conftest.py 内容、环境变量、外部服务 Mock 等）。
 
 ```bash
 mkdir -p tests/{branch}/

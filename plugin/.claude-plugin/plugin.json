@@ -1,7 +1,7 @@
 {
   "name": "fast-harness",
-  "description": "基于 Harness 三体架构的 Generator-Evaluator 分离多 Agent 协作开发套件，提供 implement/fix/refactor 三大流水线命令、9 个专职 Agent 和 5 个运维 Skill。",
-  "version": "1.0.0",
+  "description": "基于 Harness 三体架构的 Generator-Evaluator 分离多 Agent 协作开发套件。提供 implement/fix/refactor/modify 四大流水线命令、9 个专职 Agent（支持用户扩展点）、Connector Skills（db/redis/kafka）和 harness-meta-skill 扩展管理。",
+  "version": "2.0.0",
   "author": {
     "name": "jindong"
   }

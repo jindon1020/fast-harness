@@ -85,10 +85,10 @@ rm -rf /tmp/fast-harness
 ### 安装后配置
 
 ```bash
-# 交互式配置项目上下文（数据库、服务地址等）
+# 交互式配置项目上下文和基础设施（数据库、Redis、Kafka 等）
 fast-harness/configure.sh
 
-# 或手动编辑 commands 中的 {{占位符}}
+# 生成 project-context.md（项目上下文）和 config/infrastructure.json（中间件配置）
 ```
 
 ### 安全保证
@@ -124,9 +124,11 @@ curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh |
 - `.local/` — 密钥、kubeconfig、bastion 配置
 - `.ai/` — 流水线运行产物（task_card、审查报告、测试结果等）
 - `fast-harness/project-context.md` — 项目上下文（如已自定义）
+- `fast-harness/config/infrastructure.json` — 基础设施配置（如已自定义）
+- `fast-harness/agents/*/extensions/` — 用户自定义扩展文件
 - `AGENTS.md` — 不重复追加 fast-harness 章节
 
-> 大版本更新后建议重新运行 `fast-harness/configure.sh`，检查是否有新增的 `{{占位符}}` 需要填写。
+> 大版本更新后建议重新运行 `fast-harness/configure.sh`，检查是否有新配置项需要填写。
 
 ## 目录结构
 
@@ -144,31 +146,39 @@ your-project/
 └── fast-harness/                      # 插件原文目录（规范详细版）
     ├── .claude-plugin/
     │   └── plugin.json                # Claude Code 插件清单
-    ├── commands/
+    ├── commands/                      # 纯编排，不含项目细节
     │   ├── implement-command.md       # 需求实现流水线规范
     │   ├── modify-command.md          # 接口功能变更流水线规范
     │   ├── fix-command.md             # Bug 修复流水线规范
     │   └── refactor-command.md        # 代码重构流水线规范
-    ├── agents/
-    │   ├── requirement-design-agent.md  # Planner
-    │   ├── generator-agent.md           # Generator
-    │   ├── code-reviewer-agent.md       # Code Reviewer
-    │   ├── security-reviewer-agent.md   # Security Reviewer
-    │   ├── unit-test-gen-agent.md       # 单元测试生成
-    │   ├── integration-test-gen-agent.md # 集成测试生成
-    │   ├── test-runner-agent.md         # 测试执行
-    │   ├── debugger-agent.md            # 调试修复
-    │   └── monitor-agent.md             # K8s 监控
-    ├── skills/
-    │   ├── dev-mysql-bastion-query/     # MySQL 堡垒机查询
-    │   ├── kubectl-readonly/            # K8s 只读查询
-    │   ├── k8s-monitor-full/            # K8s 诊断全套
-    │   ├── loki-log-keyword-search/     # Loki 日志检索
-    │   └── prometheus-metrics-query/    # Prometheus 指标
-    ├── configure.sh                     # 项目上下文配置脚本
-    ├── project-context.example.md       # 项目上下文模板
+    ├── agents/                        # Agent 目录化（含扩展点）
+    │   ├── debugger-agent/
+    │   │   ├── debugger-agent.md      # 系统流程 + Extension Points
+    │   │   └── extensions/            # 用户自定义扩展（@data-source 等）
+    │   ├── generator-agent/
+    │   │   ├── generator-agent.md
+    │   │   └── extensions/            # 用户自定义扩展（@coding-convention 等）
+    │   ├── ... (其余 7 个 Agent 同理)
+    │   └── _extension-template.md     # 扩展文件模板
+    ├── config/                        # 基础设施配置
+    │   ├── infrastructure.json        # 中间件连接配置（MySQL/Redis/Kafka）
+    │   └── infrastructure.example.json
+    ├── project-context.md             # 集中式项目上下文
+    ├── skills/                        # 系统级 Skill
+    │   ├── db-connector/              # 统一数据库连接
+    │   ├── redis-connector/           # Redis 连接
+    │   ├── kafka-connector/           # Kafka 连接
+    │   ├── harness-meta-skill/        # 扩展点管理元技能
+    │   ├── db-bastion-query/          # MySQL 堡垒机查询（旧版兼容）
+    │   ├── kubectl-readonly/          # K8s 只读查询
+    │   ├── k8s-monitor-full/          # K8s 诊断全套
+    │   ├── loki-log-keyword-search/   # Loki 日志检索
+    │   ├── prometheus-metrics-query/  # Prometheus 指标
+    │   └── xmind-test-extractor/      # XMind 测试用例提取
+    ├── configure.sh                   # 交互式项目配置脚本
+    ├── project-context.example.md     # 项目上下文模板
     └── docs/
-        └── guide.md                     # 完整使用说明
+        └── guide.md                   # 完整使用说明
 ```
 
 ## 快速开始
@@ -217,6 +227,35 @@ Phase 5  最终报告     → 汇总结果 ✋ 确认提交
 | test-runner-agent | Executor | 运行 pytest 输出 VERDICT |
 | debugger-agent | Debugger | 本地修复 / 线上排查双路径 |
 | monitor-agent | Monitor | K8s + Prometheus 只读监控 |
+
+## 扩展点机制（v2.0 新增）
+
+fast-harness v2.0 引入 Spring 式扩展点架构，用户可在不修改框架代码的前提下注入自定义逻辑：
+
+```
+框架层（不可修改）           用户扩展层（自由定制）
+┌─────────────────┐       ┌─────────────────────────┐
+│ Commands        │       │ project-context.md       │
+│ (纯编排调度)      │       │ config/infrastructure.json│
+├─────────────────┤       ├─────────────────────────┤
+│ Agents          │◄─────│ extensions/*.md           │
+│ (系统流程 +      │       │ (YAML frontmatter 声明    │
+│  Extension Points)│      │  挂载点和优先级)           │
+├─────────────────┤       └─────────────────────────┘
+│ Connector Skills │
+│ (db/redis/kafka) │
+└─────────────────┘
+```
+
+### 使用扩展
+
+1. 在 `fast-harness/agents/{agent}/extensions/` 下创建 `.md` 文件
+2. 用 YAML frontmatter 声明挂载的扩展点（如 `@data-source`、`@coding-convention`）
+3. Agent 启动时自动扫描并按优先级加载
+
+### 使用 harness-meta-skill
+
+直接告诉 AI：「帮我创建一个扩展」或「查看所有可用扩展点」，harness-meta-skill 会交互式引导完成。
 
 ## Token 消耗估算
 

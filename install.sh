@@ -353,11 +353,17 @@ MDRULE
 install_cursor() {
     info "配置 Cursor 环境..."
 
-    # 复制 Agents → .cursor/agents/
+    # 复制 Agents → .cursor/agents/（从目录化结构中提取 .md 文件）
     if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/agents" ]]; then
         mkdir -p "$PROJECT_DIR/.cursor/agents"
-        for agent_file in "$PROJECT_DIR/$PLUGIN_DIR/agents/"*.md; do
-            [[ -f "$agent_file" ]] && copy_file "$agent_file" "$PROJECT_DIR/.cursor/agents/$(basename "$agent_file")"
+        for agent_dir in "$PROJECT_DIR/$PLUGIN_DIR/agents/"*/; do
+            [[ -d "$agent_dir" ]] || continue
+            local agent_name
+            agent_name="$(basename "$agent_dir")"
+            local agent_md="$agent_dir/${agent_name}.md"
+            if [[ -f "$agent_md" ]]; then
+                copy_file "$agent_md" "$PROJECT_DIR/.cursor/agents/${agent_name}.md"
+            fi
         done
     fi
 
@@ -623,9 +629,10 @@ fi
 echo ""
 echo "已安装的文件："
 echo "  📁 $PLUGIN_DIR/                 # 插件核心文件"
-echo "  📁 $PLUGIN_DIR/commands/        # 4 个流水线命令（规范原文）"
-echo "  📁 $PLUGIN_DIR/agents/          # 9 个专职 Agent（规范原文）"
-echo "  📁 $PLUGIN_DIR/skills/          # 5 个运维 Skill（规范原文）"
+echo "  📁 $PLUGIN_DIR/commands/        # 4 个流水线命令（纯编排）"
+echo "  📁 $PLUGIN_DIR/agents/          # 9 个专职 Agent（含 extensions/ 扩展目录）"
+echo "  📁 $PLUGIN_DIR/skills/          # 系统 Skill + Connector + harness-meta-skill"
+echo "  📁 $PLUGIN_DIR/config/          # 基础设施配置（infrastructure.json）"
 echo "  📁 $PLUGIN_DIR/hooks/           # Hook 脚本（归档等）"
 echo "  📁 $PLUGIN_DIR/docs/            # 完整使用文档"
 echo "  📄 AGENTS.md                     # AI 认知入口 + 历史归档索引"
@@ -656,9 +663,9 @@ esac
 
 echo ""
 echo "下一步："
-echo "  1. 配置项目上下文（二选一）:"
-echo "     方式 A: 运行 $PLUGIN_DIR/configure.sh 交互式配置"
-echo "     方式 B: 手动编辑 commands/*.md 中的 {{占位符}}"
+echo "  1. 配置项目上下文和基础设施:"
+echo "     运行 $PLUGIN_DIR/configure.sh 交互式配置"
+echo "     (生成 project-context.md 和 config/infrastructure.json)"
 echo ""
 echo "  2. 查看完整使用说明:"
 echo "     cat $PLUGIN_DIR/docs/guide.md"
@@ -667,4 +674,8 @@ echo "  3. 开始使用:"
 echo "     /implement 我需要实现 XXX 功能"
 echo "     /fix 线上报 500 错误 request_id=abc-123"
 echo "     /refactor 把 XXX 模块的重复代码抽取为公共函数"
+echo ""
+echo "  4. 添加自定义扩展（可选）:"
+echo "     使用 harness-meta-skill 管理扩展点，或直接在"
+echo "     $PLUGIN_DIR/agents/{agent-name}/extensions/ 下添加 .md 文件"
 echo ""

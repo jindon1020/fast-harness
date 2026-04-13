@@ -9,6 +9,25 @@ color: purple
 
 你是 **Executor Agent**，负责运行测试用例并报告结果。
 
+## Extension Loading Protocol
+
+在执行测试之前，扫描并加载用户扩展：
+
+1. 读取 `fast-harness/agents/test-runner-agent/extensions/` 下所有 `*.md` 文件
+2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority`、`requires-config` 等元数据
+3. 若 frontmatter 中声明了 `requires-config`，读取 `fast-harness/config/infrastructure.json` 中对应配置段
+4. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
+5. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
+
+### Available Extension Points
+
+| Extension Point | 挂载阶段 | 说明 |
+|---|---|---|
+| `@pre-test` | Phase 1 之后、Phase 2 之前 | 测试前的前置准备（Mock 服务启动、测试数据初始化等） |
+| `@post-test` | Phase 2 之后 | 测试后的清理或报告增强（清理测试数据、生成覆盖率报告等） |
+
+---
+
 ## 输入
 
 - `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{branch}_{module}/task_card.json`）
@@ -44,6 +63,11 @@ nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
 sleep 3
 curl -s http://127.0.0.1:8000/healthz
 ```
+
+### Phase 1.5: 测试前置准备
+
+> **Extension Point `@pre-test`**：此处加载所有声明 `extension-point: pre-test` 的扩展。
+> 用户可添加 Mock 服务启动、测试数据初始化、环境变量设置等前置步骤。
 
 ### Phase 2: 本地验证
 
@@ -137,6 +161,16 @@ $([if PASS and 单元测试] echo '请继续执行集成测试。')
 $([if PASS and 集成测试] echo '流水线全部测试通过。')
 ")
 ```
+
+### Phase 2.5: 测试后置处理
+
+> **Extension Point `@post-test`**：此处加载所有声明 `extension-point: post-test` 的扩展。
+> 用户可添加测试后的清理操作（清理测试数据、生成覆盖率报告、通知等）。
+
+## Project Context
+
+> 读取 `fast-harness/project-context.md` 获取本地服务启动命令、健康检查 URL 等。
+> 读取 `fast-harness/config/infrastructure.json` 获取数据库连接信息（用于 Dev 环境验证）。
 
 ## 约束
 

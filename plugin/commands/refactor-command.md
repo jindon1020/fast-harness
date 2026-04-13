@@ -320,10 +320,6 @@ refactor: {重构目标一句话}
 
 ## Project Context
 
-> 安装后根据实际项目填写，参考 `fast-harness/project-context.example.md`
-
-**项目路径**: `{{PROJECT_ROOT}}`
-**目录结构**: `{{PROJECT_STRUCTURE}}`
-**本地数据库**: Host: {{DB_HOST}} | Port: {{DB_PORT}} | User: {{DB_USER}} | Pass: {{DB_PASS}} | DB: {{DB_NAME}}
-**本地服务**: `{{DEV_SERVER_CMD}}`
-**健康检查**: `{{HEALTH_CHECK_URL}}`
+> 项目上下文已集中管理，不再使用占位符。
+> 所有 Sub-agent 启动时自动读取 `fast-harness/project-context.md` 获取项目路径、目录结构、开发服务器等信息。
+> 中间件连接配置（MySQL、Redis、Kafka 等）从 `fast-harness/config/infrastructure.json` 读取。

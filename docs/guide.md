@@ -54,27 +54,37 @@
 fast-harness/
 ├── .claude-plugin/
 │   └── plugin.json                     # 插件元数据
-├── commands/
+├── commands/                           # 纯编排，不含项目上下文
 │   ├── implement-command.md            # 端到端需求实现流水线
 │   ├── modify-command.md               # 已有接口功能变更流水线
 │   ├── fix-command.md                  # Bug 修复闭环流水线
 │   └── refactor-command.md             # 批量代码重构流水线
-├── agents/
-│   ├── requirement-design-agent.md     # Planner — 需求设计
-│   ├── generator-agent.md              # Generator — 代码生成
-│   ├── code-reviewer-agent.md          # Code Reviewer — 代码审查
-│   ├── security-reviewer-agent.md      # Security Reviewer — 安全审查
-│   ├── unit-test-gen-agent.md          # 单元测试生成（真实数据驱动）
-│   ├── integration-test-gen-agent.md   # 集成测试生成（xmind 脑图驱动）
-│   ├── test-runner-agent.md            # Executor — 测试执行
-│   ├── debugger-agent.md               # Debugger — 调试修复（双路径）
-│   └── monitor-agent.md                # Monitor — K8s 监控
-└── skills/
-    ├── dev-mysql-bastion-query/         # 堡垒机 SSH 隧道查 MySQL
-    ├── kubectl-readonly/                # K8s 只读查询
-    ├── k8s-monitor-full/                # K8s 监控诊断全套
-    ├── loki-log-keyword-search/         # Loki 日志关键词检索
-    └── prometheus-metrics-query/        # Prometheus 指标查询
+├── agents/                             # Agent 目录化（含扩展点）
+│   ├── debugger-agent/
+│   │   ├── debugger-agent.md           # 系统流程 + Extension Points
+│   │   └── extensions/                 # 用户自定义扩展
+│   ├── generator-agent/
+│   │   ├── generator-agent.md
+│   │   └── extensions/
+│   ├── ... (其余 7 个 Agent 同理)
+│   └── _extension-template.md          # 扩展文件模板
+├── config/                             # 基础设施配置层
+│   ├── infrastructure.json             # 中间件连接配置（用户填写）
+│   └── infrastructure.example.json     # 配置模板
+├── project-context.md                  # 集中式项目上下文（用户配置）
+├── project-context.example.md          # 项目上下文模板
+├── skills/
+│   ├── db-connector/                   # 统一数据库连接（替代旧版 bastion-query）
+│   ├── redis-connector/                # Redis 连接
+│   ├── kafka-connector/                # Kafka 连接
+│   ├── harness-meta-skill/             # 扩展点管理元技能
+│   ├── db-bastion-query/               # 堡垒机 SSH 隧道查 MySQL（旧版兼容）
+│   ├── kubectl-readonly/               # K8s 只读查询
+│   ├── k8s-monitor-full/               # K8s 监控诊断全套
+│   ├── loki-log-keyword-search/        # Loki 日志关键词检索
+│   ├── prometheus-metrics-query/       # Prometheus 指标查询
+│   └── xmind-test-extractor/           # XMind 测试用例提取
+└── configure.sh                        # 交互式项目配置脚本
 ```
 
 ### Commands — 四大流水线
@@ -106,15 +116,52 @@ fast-harness/
 
 ### Skills — 运维能力底座
 
-| Skill | 用途 | 安全级别 |
-|-------|------|----------|
-| `dev-mysql-bastion-query` | 经堡垒机 SSH 隧道只读查询开发环境 MySQL | 只读 |
-| `kubectl-readonly` | 只读查询 K8s Pod/Deployment/Events 状态 | RBAC 只读 |
-| `k8s-monitor-full` | K8s + Loki + Prometheus 一体化诊断 | 只读 |
-| `loki-log-keyword-search` | 根据关键词/request_id 检索 Loki 日志 | 只读 |
-| `prometheus-metrics-query` | 查询 ARMS Prometheus 监控指标（QPS/错误率/延迟/CPU/内存） | 只读 |
+| 类型 | Skill | 用途 | 安全级别 |
+|------|-------|------|----------|
+| **Connector** | `db-connector` | 统一数据库连接（从 infrastructure.json 读取配置） | 只读 |
+| **Connector** | `redis-connector` | Redis 连接与查询 | 只读 |
+| **Connector** | `kafka-connector` | Kafka 消费与状态查询 | 只读 |
+| **Meta** | `harness-meta-skill` | 扩展点管理（查看/创建/管理扩展） | - |
+| 运维 | `db-bastion-query` | 经堡垒机 SSH 隧道查 MySQL（旧版兼容） | 只读 |
+| 运维 | `kubectl-readonly` | 只读查询 K8s 状态 | RBAC 只读 |
+| 运维 | `k8s-monitor-full` | K8s + Loki + Prometheus 一体化诊断 | 只读 |
+| 运维 | `loki-log-keyword-search` | Loki 日志关键词检索 | 只读 |
+| 运维 | `prometheus-metrics-query` | ARMS Prometheus 监控指标查询 | 只读 |
 
-所有 Skill 均为**只读操作**，通过 RBAC 权限 + 堡垒机隧道双重保障，不会误操作生产数据。
+所有运维 Skill 均为**只读操作**，通过 RBAC 权限 + 堡垒机隧道双重保障，不会误操作生产数据。
+
+### 扩展点机制（v2.0 新增）
+
+每个 Agent 定义了若干 Extension Points，用户可在 `agents/{agent}/extensions/` 下创建 `.md` 文件来注入自定义逻辑：
+
+| Agent | 扩展点 | 说明 |
+|-------|--------|------|
+| debugger-agent | `@data-source`、`@diagnosis-strategy`、`@fix-validation` | 自定义数据源、诊断策略、修复验证 |
+| generator-agent | `@pre-generation`、`@coding-convention`、`@code-template` | 生成前检查、编码规范、代码模板 |
+| code-reviewer-agent | `@review-dimension`、`@project-rule` | 额外审查维度、项目审查规则 |
+| security-reviewer-agent | `@security-rule` | 项目安全规则 |
+| unit-test-gen-agent | `@test-data-source`、`@test-pattern` | 测试数据源、测试模式 |
+| integration-test-gen-agent | `@test-context` | 测试环境配置 |
+| test-runner-agent | `@pre-test`、`@post-test` | 测试前后处理 |
+| monitor-agent | `@metric-source`、`@alert-rule` | 监控源、告警规则 |
+| requirement-design-agent | `@design-convention` | 设计规范 |
+
+**扩展文件格式**（YAML frontmatter + Markdown 内容）：
+
+```yaml
+---
+extension-point: data-source
+name: redis-cache-inspector
+description: 调试时检查 Redis 缓存状态
+priority: 10
+requires-config: redis.local
+---
+
+## Redis 缓存检查策略
+（具体的检查命令和分析步骤...）
+```
+
+使用 `harness-meta-skill` 可以交互式创建和管理扩展。
 
 ---
 

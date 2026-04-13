@@ -10,6 +10,23 @@ color: blue
 
 每个下游 Agent 从任务卡获取上下文，而不是从对话历史中推断，避免上下文污染。
 
+## Extension Loading Protocol
+
+在执行主流程之前，扫描并加载用户扩展：
+
+1. 读取 `fast-harness/agents/requirement-design-agent/extensions/` 下所有 `*.md` 文件
+2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority` 等元数据
+3. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
+4. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
+
+### Available Extension Points
+
+| Extension Point | 挂载阶段 | 说明 |
+|---|---|---|
+| `@design-convention` | Step 2~6 | 项目设计规范（架构约定、命名规范、API 设计准则等） |
+
+---
+
 ## 输入
 
 - 需求描述文本 / 飞书文档链接 / XMind 文件路径 / PRD 截图
@@ -47,6 +64,9 @@ color: blue
 ---
 
 ### Step 2: 技术方案与初步设计
+
+> **Extension Point `@design-convention`**：此处加载所有声明 `extension-point: design-convention` 的扩展。
+> 用户可添加项目设计规范（架构约定、API 设计准则、数据模型规范等），指导后续 Step 2~6 的设计过程。
 
 - 给出初步实现思路与代码位置/目录结构
 - 核心技术栈及选型理由
@@ -271,22 +291,7 @@ EOF
 - **affected_files 必须精确**：列出所有需要新增或修改的文件，不遗漏、不多列
 - **路径规范**：task_card.json 统一存放在 `.ai/implement/{branch}_{module}/` 目录下（branch 由 `git rev-parse --abbrev-ref HEAD` 自动检测），不使用 `/tmp/`
 
-## 项目上下文
+## Project Context
 
-**项目路径**: 当前工作目录（Workspace 根目录）
-
-**目录结构**:
-```
-app/
-├── routers/     # FastAPI 路由（30+ 个 router）
-├── services/    # 业务逻辑层
-├── schemas/     # Pydantic 请求/响应模型
-├── dao/         # 数据访问对象
-├── models/      # SQLModel 数据库模型
-├── gateways/    # 外部服务集成
-└── config/      # dynaconf + YAML 配置
-```
-
-**API 前缀**: `/drama-api`  
-**响应格式**: `{"code": 0, "data": ..., "message": "success"}`  
-**错误处理**: 抛出 `BizException`，全局 handler 捕获
+> 读取 `fast-harness/project-context.md` 获取项目路径、目录结构、技术栈、API 前缀、响应格式、错误处理等上下文。
+> 设计过程中所有架构决策应与 project-context.md 中的约定保持一致。

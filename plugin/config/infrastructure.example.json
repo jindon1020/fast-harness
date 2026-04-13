@@ -1,0 +1,64 @@
+{
+  "$comment": "fast-harness 基础设施配置模板。复制为 infrastructure.json 并填写实际值，或运行 configure.sh 交互式生成。",
+
+  "mysql": {
+    "local": {
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "root",
+      "password": "123456",
+      "database": "my-db"
+    },
+    "dev": {
+      "host": "10.0.1.100",
+      "port": 3306,
+      "user": "readonly",
+      "password": "",
+      "database": "my-db-dev",
+      "bastion": {
+        "host": "jump.example.com",
+        "port": 22,
+        "user": "deploy",
+        "key_path": ".local/id_rsa",
+        "local_port": 13306
+      }
+    },
+    "prod": {
+      "host": "10.0.2.100",
+      "port": 3306,
+      "user": "readonly",
+      "password": "",
+      "database": "my-db-prod",
+      "bastion": {
+        "host": "jump.example.com",
+        "port": 22,
+        "user": "deploy",
+        "key_path": ".local/id_rsa",
+        "local_port": 13307
+      }
+    }
+  },
+
+  "redis": {
+    "local": {
+      "host": "127.0.0.1",
+      "port": 6379,
+      "password": "",
+      "db": 0
+    }
+  },
+
+  "kafka": {
+    "dev": {
+      "brokers": ["10.0.1.50:9092"],
+      "group_id": "debug-consumer"
+    }
+  },
+
+  "elasticsearch": {
+    "dev": {
+      "hosts": ["http://10.0.1.60:9200"],
+      "index_pattern": "app-logs-*"
+    }
+  }
+}

@@ -11,6 +11,24 @@ color: yellow
 
 与 Security Reviewer Agent 并行执行，互不干扰。
 
+## Extension Loading Protocol
+
+在执行审查之前，扫描并加载用户扩展：
+
+1. 读取 `fast-harness/agents/code-reviewer-agent/extensions/` 下所有 `*.md` 文件
+2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority` 等元数据
+3. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
+4. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
+
+### Available Extension Points
+
+| Extension Point | 挂载阶段 | 说明 |
+|---|---|---|
+| `@review-dimension` | 维度 1~6 之后 | 额外审查维度（如性能审查、国际化检查等） |
+| `@project-rule` | 各维度内部 | 项目特定审查规则（覆盖或补充默认规则） |
+
+---
+
 ## 输入
 
 - 改动文件列表（通过 prompt 参数传入，或读取 `{contract_dir}/changed_files.txt`）
@@ -35,61 +53,31 @@ color: yellow
 
 ## 维度 1：架构合规性检查
 
+> **Extension Point `@project-rule`**：此处加载所有声明 `extension-point: project-rule` 的扩展。
+> 用户可添加项目特定的分层架构规则、依赖方向约束、命名规范等。
+> 若无扩展，使用下方默认规则。
+
 ### 本项目层级依赖规则
 
-基于"显式跨层边界分层架构"（Layered domain architecture with explicit cross-cutting boundaries），本项目各层职责与依赖方向如下：
-
-```
-utils/           ← 纯工具函数，无业务状态，可被任意层引用
-    ↓
-dependencies.py  ← Provider/Wiring 层，负责依赖注入装配
-    ↓
-routers/         ← 入口层，HTTP 路由，只负责请求解析与响应封装
-    ↓
-services/        ← 业务逻辑层，编排 DAO/Gateway，不涉及 HTTP 细节
-    ↓
-dao/             ← 数据访问层，只做数据库操作，无业务逻辑
-models/          ← SQLModel DB 模型，无逻辑
-schemas/         ← Pydantic 请求/响应契约，无逻辑
-gateways/        ← 外部服务调用，封装 HTTP/RPC，无业务逻辑
-config/          ← 配置读取，无逻辑
-```
+> 以下为默认的分层架构规则。用户可通过 `@project-rule` 扩展覆盖或补充。
+> 项目具体的目录结构参见 `fast-harness/project-context.md`。
 
 **依赖方向：只允许向下引用，严禁向上/跨层引用。**
 
 ### 检测命令
 
+根据 `fast-harness/project-context.md` 中定义的目录结构，检测跨层引用违规。典型检测模式：
+
 ```bash
-PROJECT=app
+# 检测跨层引用：入口层直接调用数据层（跳过业务层）
+rg "from.*\.dao" {entry_layer}/ -n --glob "*.py"
 
-# ① router 层是否直接调用了 dao（跳过 service 层）
-rg "from app\.dao" $PROJECT/routers/ -n --glob "*.py"
+# 检测反向依赖：数据层引用业务层
+rg "from.*\.services" {data_layer}/ -n --glob "*.py"
 
-# ② dao 层是否反向引用了 service 层（依赖倒置违规）
-rg "from app\.services" $PROJECT/dao/ -n --glob "*.py"
-
-# ③ dao 层是否引用了 schemas（DTO 不应渗透到数据层）
-rg "from app\.schemas" $PROJECT/dao/ -n --glob "*.py"
-
-# ④ service 层是否引用了 routers（循环依赖）
-rg "from app\.routers" $PROJECT/services/ -n --glob "*.py"
-
-# ⑤ gateway 层是否引用了 service/dao（网关应只做 I/O 封装）
-rg "from app\.(services|dao)" $PROJECT/gateways/ -n --glob "*.py"
-
-# ⑥ models 层是否含有业务逻辑（应为纯数据模型）
-rg "def [a-z]" $PROJECT/models/ -n --glob "*.py" | rg -v "__"
+# 检测循环依赖：业务层引用入口层
+rg "from.*\.routers" {service_layer}/ -n --glob "*.py"
 ```
-
-### 各层风格一致性规则
-
-| 层级 | 必须遵守 | 禁止 |
-|------|----------|------|
-| `routers/` | 只调用 service，通过 `Depends()` 注入；只做参数校验和响应封装 | 直接调用 dao / 写业务逻辑 / 直接操作 DB session |
-| `services/` | 接收 domain 对象或基础类型参数；所有业务规则在此层 | 直接返回 ORM 对象给 router；import Request/Response schema 做内部逻辑 |
-| `dao/` | 只接收基础类型或 model 对象；只做 CRUD | 内嵌业务逻辑（if/else 判断业务状态）；调用其他 service |
-| `schemas/` | 纯 Pydantic 模型；字段含 validator | 含数据库查询逻辑；import dao/service |
-| `gateways/` | 封装外部 HTTP/RPC；统一异常转换 | 混入业务逻辑；直接操作 DB |
 
 **判定标准**：发现跨层引用 → **Critical**；发现层内风格不一致 → **Improvement**
 
@@ -400,3 +388,11 @@ $([if FAIL] Critical 阻塞项:
 - 测试用例编写由 **Tester Agent** 负责，此处仅评估覆盖缺口
 - 发现 Critical 后继续完成所有维度检查，不提前终止，汇总后一次性输出 VERDICT
 - 每个 Finding 必须包含：文件路径 + 行号 + 具体问题描述 + 修复建议
+
+> **Extension Point `@review-dimension`**：此处加载所有声明 `extension-point: review-dimension` 的扩展。
+> 用户可添加额外审查维度（如性能审查、国际化检查、可观测性审查等），格式同上方维度 1~6。
+
+## Project Context
+
+> 读取 `fast-harness/project-context.md` 获取项目路径、目录结构、技术栈等上下文。
+> 审查规则中的层级检测命令应根据 project-context.md 中定义的实际目录结构调整。

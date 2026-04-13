@@ -1,20 +1,21 @@
 # 项目上下文配置
 
-> 安装 fast-harness 后，请复制此文件为 `project-context.md` 并根据实际项目填写。
-> 然后将 commands 文件中的 `{{占位符}}` 替换为实际值，或运行 `fast-harness/configure.sh`。
+> 安装 fast-harness 后，复制此文件为 `project-context.md` 并根据实际项目填写。
+> 或运行 `fast-harness/configure.sh` 交互式生成。
+> 此文件被所有 Agent 和 Command 统一引用，修改一处全局生效。
 
 ## 基本信息
 
 - **项目名称**: my-project
-- **项目路径**: /path/to/your/project
-- **技术栈**: Python 3.11 / FastAPI / SQLModel / PostgreSQL
+- **项目路径**: 当前工作目录（Workspace 根目录）
+- **技术栈**: Python 3.11 / FastAPI / SQLModel / MySQL
 - **API 前缀**: /api
 
 ## 目录结构
 
 ```
 app/
-├── routers/     # API 路由
+├── routers/     # API 路由（入口层）
 ├── services/    # 业务逻辑层
 ├── schemas/     # 请求/响应模型
 ├── dao/         # 数据访问层
@@ -22,19 +23,14 @@ app/
 ├── gateways/    # 外部服务集成
 └── config/      # 配置文件
 tests/
-├── {branch}/         # 按 Git 分支组织测试（如 feature_user-points/）
+├── {branch}/    # 按 Git 分支组织测试
 .ai/
-├── design/           # 设计文档
-├── implement/        # implement 流水线文件
-├── fix/              # fix 流水线文件
-└── refactor/         # refactor 流水线文件
+├── design/      # 设计文档
+├── implement/   # implement 流水线文件
+├── fix/         # fix 流水线文件
+├── modify/      # modify 流水线文件
+└── refactor/    # refactor 流水线文件
 ```
-
-## 本地开发环境
-
-- **数据库**: Host: 127.0.0.1 | Port: 3306 | User: root | Pass: 123456 | DB: my-db
-- **开发服务器**: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- **健康检查**: `GET http://localhost:8000/healthz`
 
 ## 分层架构约定
 
@@ -52,3 +48,22 @@ utils/      ← 纯工具函数
 ```
 
 依赖方向：只允许向下引用，严禁向上/跨层引用。
+
+## 本地开发环境
+
+- **虚拟环境激活**: `source .venv/bin/activate`
+- **开发服务器**: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- **健康检查**: `GET http://localhost:8000/healthz`
+
+## 编码约定
+
+- **响应格式**: `{"code": 0, "data": ..., "message": "success"}`
+- **错误处理**: 抛出 `BizException`，全局 handler 捕获
+- **日志**: 使用 `loguru` 的 `logger`，禁止 `print()` 和标准库 `logging`
+- **注释语言**: 中文
+- **Commit 格式**: `<类型>: <简短描述>`（中文）
+
+## 基础设施
+
+> 中间件连接配置（MySQL、Redis、Kafka 等）在 `fast-harness/config/infrastructure.json` 中管理。
+> Agent 通过 Connector Skills（db-connector、redis-connector 等）读取配置并连接。
