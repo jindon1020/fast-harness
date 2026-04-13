@@ -12,9 +12,9 @@ color: cyan
 
 在执行主流程之前，扫描并加载用户扩展：
 
-1. 读取 `fast-harness/agents/integration-test-gen-agent/extensions/` 下所有 `*.md` 文件
+1. 读取 `.ether/agents/integration-test-gen-agent/extensions/` 下所有 `*.md` 文件
 2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority`、`requires-config` 等元数据
-3. 若 frontmatter 中声明了 `requires-config`，读取 `fast-harness/config/infrastructure.json` 中对应配置段
+3. 若 frontmatter 中声明了 `requires-config`，读取 `.ether/config/infrastructure.json` 中对应配置段
 4. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
 5. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
 

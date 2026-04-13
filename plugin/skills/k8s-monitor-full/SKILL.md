@@ -7,12 +7,12 @@ description: K8s 监控诊断全套工具，支持查询 Pod/Deployment/Events/L
 
 ## 配置来源
 
-所有连接参数从 `fast-harness/config/infrastructure.json` 的 `kubernetes` 段读取：
+所有连接参数从 `.ether/config/infrastructure.json` 的 `kubernetes` 段读取：
 
 ```bash
 python3 -c "
 import json
-cfg = json.load(open('fast-harness/config/infrastructure.json'))['kubernetes']
+cfg = json.load(open('.ether/config/infrastructure.json'))['kubernetes']
 print('kubeconfig :', cfg['kubeconfig_path'])
 print('bastion    :', cfg['bastion']['user'] + '@' + cfg['bastion']['host'])
 print('namespaces :', cfg['namespaces'])
@@ -32,12 +32,12 @@ import json, subprocess, socket, time, os, sys
 
 PROJECT_ROOT = subprocess.check_output(
     ['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-cfg_path = os.path.join(PROJECT_ROOT, 'fast-harness/config/infrastructure.json')
+cfg_path = os.path.join(PROJECT_ROOT, '.ether/config/infrastructure.json')
 
 try:
     k8s = json.load(open(cfg_path))['kubernetes']
 except (FileNotFoundError, KeyError):
-    print('未找到 kubernetes 配置，请先运行 fast-harness/configure.sh'); sys.exit(1)
+    print('未找到 kubernetes 配置，请先运行 .ether/configure.sh'); sys.exit(1)
 
 bastion    = k8s['bastion']
 bind       = bastion.get('bind_address', '127.0.0.1')
@@ -118,7 +118,7 @@ import json, subprocess, os
 
 PROJECT_ROOT = subprocess.check_output(
     ['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-k8s = json.load(open(os.path.join(PROJECT_ROOT, 'fast-harness/config/infrastructure.json')))['kubernetes']
+k8s = json.load(open(os.path.join(PROJECT_ROOT, '.ether/config/infrastructure.json')))['kubernetes']
 kubeconfig = os.path.join(PROJECT_ROOT, k8s['kubeconfig_path'])
 env = {**os.environ, 'KUBECONFIG': kubeconfig}
 
@@ -146,7 +146,7 @@ subprocess.run(['kubectl', 'get', 'pods', '-n', ns_prod, '--request-timeout=5s']
 import json, requests, os, subprocess
 
 PROJECT_ROOT = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-k8s = json.load(open(os.path.join(PROJECT_ROOT, 'fast-harness/config/infrastructure.json')))['kubernetes']
+k8s = json.load(open(os.path.join(PROJECT_ROOT, '.ether/config/infrastructure.json')))['kubernetes']
 loki_url  = f"http://127.0.0.1:{k8s['loki']['local_port']}/loki/api/v1/query_range"
 ns_prod   = k8s['namespaces']['prod']
 
@@ -172,7 +172,7 @@ print(resp.json())
 import json, requests, os, subprocess
 
 PROJECT_ROOT = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-k8s = json.load(open(os.path.join(PROJECT_ROOT, 'fast-harness/config/infrastructure.json')))['kubernetes']
+k8s = json.load(open(os.path.join(PROJECT_ROOT, '.ether/config/infrastructure.json')))['kubernetes']
 prom_url = f"http://127.0.0.1:{k8s['prometheus']['local_port']}/api/v1/query_range"
 ns_prod  = k8s['namespaces']['prod']
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fast-harness 项目配置脚本（v2 — 分段交互式）
 # 生成 project-context.md 和 config/infrastructure.json
-# 用法: cd your-project && fast-harness/configure.sh
+# 用法: cd your-project && .ether/configure.sh
 
 set -euo pipefail
 
@@ -324,7 +324,7 @@ tests/
 
 ## 基础设施
 
-> 中间件连接配置（MySQL、Redis、Kafka 等）在 \`fast-harness/config/infrastructure.json\` 中管理。
+> 中间件连接配置（MySQL、Redis、Kafka 等）在 \`.ether/config/infrastructure.json\` 中管理。
 > Agent 通过 Connector Skills（db-connector、redis-connector 等）读取配置并连接。
 CTXEOF
 
@@ -341,8 +341,8 @@ echo "║                   配置完成！                          ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 echo "已生成的配置文件："
-echo "  📄 fast-harness/project-context.md      # 项目上下文（所有 Agent 引用）"
-echo "  📄 fast-harness/config/infrastructure.json  # 基础设施配置"
+echo "  📄 .ether/project-context.md      # 项目上下文（所有 Agent 引用）"
+echo "  📄 .ether/config/infrastructure.json  # 基础设施配置"
 echo ""
 echo "下一步："
 echo "  1. 查看并微调生成的配置文件"

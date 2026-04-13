@@ -241,5 +241,5 @@ feat: {task_card.feature}
 ## Project Context
 
 > 项目上下文已集中管理，不再使用占位符。
-> 所有 Sub-agent 启动时自动读取 `fast-harness/project-context.md` 获取项目路径、目录结构、开发服务器等信息。
-> 中间件连接配置（MySQL、Redis、Kafka 等）从 `fast-harness/config/infrastructure.json` 读取。
+> 所有 Sub-agent 启动时自动读取 `.ether/project-context.md` 获取项目路径、目录结构、开发服务器等信息。
+> 中间件连接配置（MySQL、Redis、Kafka 等）从 `.ether/config/infrastructure.json` 读取。

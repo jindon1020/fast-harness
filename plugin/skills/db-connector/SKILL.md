@@ -5,16 +5,16 @@ description: 统一数据库连接 Skill。从 infrastructure.json 读取 MySQL 
 
 # MySQL 数据库连接器（统一配置）
 
-从 `fast-harness/config/infrastructure.json` 读取 MySQL 连接配置，支持 **local 直连** 和 **bastion SSH 隧道** 两种模式。
+从 `.ether/config/infrastructure.json` 读取 MySQL 连接配置，支持 **local 直连** 和 **bastion SSH 隧道** 两种模式。
 
 ---
 
 ## 配置来源
 
-所有连接参数从 `fast-harness/config/infrastructure.json` 的 `mysql.{env}` 段读取：
+所有连接参数从 `.ether/config/infrastructure.json` 的 `mysql.{env}` 段读取：
 
 ```bash
-cat fast-harness/config/infrastructure.json | python3 -c "
+cat .ether/config/infrastructure.json | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 mysql = config.get('mysql', {})
@@ -58,7 +58,7 @@ for env in mysql:
 # 从 infrastructure.json 读取 local 配置
 CONFIG=$(python3 -c "
 import json
-cfg = json.load(open('fast-harness/config/infrastructure.json'))['mysql']['local']
+cfg = json.load(open('.ether/config/infrastructure.json'))['mysql']['local']
 print(f\"-h {cfg['host']} -P {cfg['port']} -u {cfg['user']} -p'{cfg['password']}' {cfg['database']}\")
 ")
 
@@ -70,7 +70,7 @@ mysql $CONFIG -e "SHOW TABLES"
 ```python
 import json, pymysql
 
-cfg = json.load(open('fast-harness/config/infrastructure.json'))['mysql']['local']
+cfg = json.load(open('.ether/config/infrastructure.json'))['mysql']['local']
 conn = pymysql.connect(
     host=cfg['host'], port=cfg['port'],
     user=cfg['user'], password=cfg['password'],
@@ -85,7 +85,7 @@ conn = pymysql.connect(
 当 `mysql.{env}` 含有 `bastion` 字段时，需先建立 SSH 隧道：
 
 ```bash
-CONFIG_FILE="fast-harness/config/infrastructure.json"
+CONFIG_FILE=".ether/config/infrastructure.json"
 ENV="dev"  # 或 prod
 
 python3 -c "
@@ -129,7 +129,7 @@ print(f'隧道就绪: {bind_addr}:{local_port} → {config[\"host\"]}:{config[\"
 ## Agent 自检清单
 
 - [ ] 已确认目标环境并向用户回显
-- [ ] `fast-harness/config/infrastructure.json` 中存在对应环境的 MySQL 配置
+- [ ] `.ether/config/infrastructure.json` 中存在对应环境的 MySQL 配置
 - [ ] 若需堡垒机：SSH 私钥文件存在，否则提醒用户放置
 - [ ] 连接类型为只读（或已拿到用户对写语句的逐条确认）
 - [ ] prod 环境已输出生产环境醒目提醒

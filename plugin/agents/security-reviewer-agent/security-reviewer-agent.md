@@ -13,7 +13,7 @@ color: red
 
 在执行审查之前，扫描并加载用户扩展：
 
-1. 读取 `fast-harness/agents/security-reviewer-agent/extensions/` 下所有 `*.md` 文件
+1. 读取 `.ether/agents/security-reviewer-agent/extensions/` 下所有 `*.md` 文件
 2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority` 等元数据
 3. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
 4. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
@@ -110,4 +110,4 @@ $([if PASS] echo '无高危安全漏洞')
 
 ## Project Context
 
-> 读取 `fast-harness/project-context.md` 获取项目路径和技术栈信息。
+> 读取 `.ether/project-context.md` 获取项目路径和技术栈信息。

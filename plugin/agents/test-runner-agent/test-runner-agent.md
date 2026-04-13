@@ -13,9 +13,9 @@ color: purple
 
 在执行测试之前，扫描并加载用户扩展：
 
-1. 读取 `fast-harness/agents/test-runner-agent/extensions/` 下所有 `*.md` 文件
+1. 读取 `.ether/agents/test-runner-agent/extensions/` 下所有 `*.md` 文件
 2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority`、`requires-config` 等元数据
-3. 若 frontmatter 中声明了 `requires-config`，读取 `fast-harness/config/infrastructure.json` 中对应配置段
+3. 若 frontmatter 中声明了 `requires-config`，读取 `.ether/config/infrastructure.json` 中对应配置段
 4. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
 5. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
 
@@ -169,8 +169,8 @@ $([if PASS and 集成测试] echo '流水线全部测试通过。')
 
 ## Project Context
 
-> 读取 `fast-harness/project-context.md` 获取本地服务启动命令、健康检查 URL 等。
-> 读取 `fast-harness/config/infrastructure.json` 获取数据库连接信息（用于 Dev 环境验证）。
+> 读取 `.ether/project-context.md` 获取本地服务启动命令、健康检查 URL 等。
+> 读取 `.ether/config/infrastructure.json` 获取数据库连接信息（用于 Dev 环境验证）。
 
 ## 约束
 

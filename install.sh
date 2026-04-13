@@ -18,7 +18,7 @@ set -euo pipefail
 
 # ================================ 配置 ================================
 REPO_URL="https://github.com/jindon1020/fast-harness.git"
-DEFAULT_PLUGIN_DIR="fast-harness"
+DEFAULT_PLUGIN_DIR=".ether"
 BRANCH="main"
 
 # 颜色输出
@@ -302,7 +302,7 @@ SETTINGSJSON
     fi
 
     # 创建/更新 .claude/rules 规则文件
-    local rule_file="$PROJECT_DIR/.claude/rules/fast-harness.mdc"
+    local rule_file="$PROJECT_DIR/.claude/rules/ether.mdc"
     if $FORCE || [[ ! -f "$rule_file" ]]; then
         mkdir -p "$PROJECT_DIR/.claude/rules"
         cat > "$rule_file" << 'MDRULE'
@@ -327,10 +327,10 @@ alwaysApply: true
 
 | 命令 | 用途 | 规范文件 |
 |------|------|----------|
-| `/implement` | 端到端需求实现 | `fast-harness/commands/implement-command.md` |
-| `/fix` | Bug 修复闭环 | `fast-harness/commands/fix-command.md` |
-| `/refactor` | 批量代码重构 | `fast-harness/commands/refactor-command.md` |
-| `/modify` | 存量代码精准修改 | `fast-harness/commands/modify-command.md` |
+| `/implement` | 端到端需求实现 | `.ether/commands/implement-command.md` |
+| `/fix` | Bug 修复闭环 | `.ether/commands/fix-command.md` |
+| `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
+| `/modify` | 存量代码精准修改 | `.ether/commands/modify-command.md` |
 
 ## 历史上下文
 
@@ -419,7 +419,7 @@ HOOKJSON
     fi
 
     # 创建/更新 .cursor/rules 规则文件
-    local rule_file="$PROJECT_DIR/.cursor/rules/fast-harness.mdc"
+    local rule_file="$PROJECT_DIR/.cursor/rules/ether.mdc"
     if $FORCE || [[ ! -f "$rule_file" ]]; then
         mkdir -p "$PROJECT_DIR/.cursor/rules"
         cat > "$rule_file" << 'MDRULE'
@@ -444,10 +444,10 @@ alwaysApply: true
 
 | 命令 | 用途 | 规范文件 |
 |------|------|----------|
-| `/implement` | 端到端需求实现 | `fast-harness/commands/implement-command.md` |
-| `/fix` | Bug 修复闭环 | `fast-harness/commands/fix-command.md` |
-| `/refactor` | 批量代码重构 | `fast-harness/commands/refactor-command.md` |
-| `/modify` | 存量代码精准修改 | `fast-harness/commands/modify-command.md` |
+| `/implement` | 端到端需求实现 | `.ether/commands/implement-command.md` |
+| `/fix` | Bug 修复闭环 | `.ether/commands/fix-command.md` |
+| `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
+| `/modify` | 存量代码精准修改 | `.ether/commands/modify-command.md` |
 
 ## 历史上下文
 
@@ -486,10 +486,10 @@ echo ""
 if [[ "$SKIP_AGENTS_MD" == false ]]; then
     info "配置 AGENTS.md..."
 
-    AGENTS_MARKER="## 开发套件（fast-harness）"
+    AGENTS_MARKER="## 开发套件（.ether）"
 
     AGENTS_CONTENT=$(cat << AGENTSEOF
-## 开发套件（fast-harness）
+## 开发套件（.ether）
 
 本项目配有基于 [Anthropic Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) 的 Generator-Evaluator 分离多 Agent 协作流水线。
 
@@ -644,21 +644,21 @@ case "$PLATFORM" in
         echo "  📁 .cursor/commands/            # Cursor 可识别的命令（/implement 等）"
         echo "  📁 .cursor/hooks/               # Cursor Hook 脚本"
         echo "  📄 .cursor/hooks.json            # Hook 事件配置"
-        echo "  📄 .cursor/rules/fast-harness.mdc" ;;
+        echo "  📄 .cursor/rules/ether.mdc" ;;
     claude)
         echo "  📁 .claude/hooks/               # Claude Code Hook 脚本"
         echo "  📄 .claude/settings.json         # Claude Code Hook 配置"
-        echo "  📄 .claude/rules/fast-harness.mdc" ;;
+        echo "  📄 .claude/rules/ether.mdc" ;;
     both)
         echo "  📁 .cursor/agents/              # Cursor 可识别的 Agent"
         echo "  📁 .cursor/skills/              # Cursor 可识别的 Skill"
         echo "  📁 .cursor/commands/            # Cursor 可识别的命令（/implement 等）"
         echo "  📁 .cursor/hooks/               # Cursor Hook 脚本"
         echo "  📄 .cursor/hooks.json            # Cursor Hook 事件配置"
-        echo "  📄 .cursor/rules/fast-harness.mdc"
+        echo "  📄 .cursor/rules/ether.mdc"
         echo "  📁 .claude/hooks/               # Claude Code Hook 脚本"
         echo "  📄 .claude/settings.json         # Claude Code Hook 配置"
-        echo "  📄 .claude/rules/fast-harness.mdc" ;;
+        echo "  📄 .claude/rules/ether.mdc" ;;
 esac
 
 echo ""

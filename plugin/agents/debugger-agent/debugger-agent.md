@@ -12,9 +12,9 @@ color: orange
 
 在执行主流程之前，扫描并加载用户扩展：
 
-1. 读取 `fast-harness/agents/debugger-agent/extensions/` 下所有 `*.md` 文件
+1. 读取 `.ether/agents/debugger-agent/extensions/` 下所有 `*.md` 文件
 2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority`、`requires-config` 等元数据
-3. 若 frontmatter 中声明了 `requires-config`，读取 `fast-harness/config/infrastructure.json` 中对应配置段，将配置值作为变量注入扩展内容
+3. 若 frontmatter 中声明了 `requires-config`，读取 `.ether/config/infrastructure.json` 中对应配置段，将配置值作为变量注入扩展内容
 4. 按 `priority` 升序，将扩展内容注入到下方对应的 Extension Point 位置
 5. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
 
@@ -340,6 +340,6 @@ curl -X POST http://localhost:8000/drama-api/xxx \
 
 ## Project Context
 
-> 读取 `fast-harness/project-context.md` 获取项目路径、目录结构、开发服务器启动命令、健康检查 URL 等上下文。
-> 读取 `fast-harness/config/infrastructure.json` 获取中间件连接配置（MySQL、Redis、Kafka 等）。
+> 读取 `.ether/project-context.md` 获取项目路径、目录结构、开发服务器启动命令、健康检查 URL 等上下文。
+> 读取 `.ether/config/infrastructure.json` 获取中间件连接配置（MySQL、Redis、Kafka 等）。
 > 数据库连接信息使用 `db-connector` Skill 从 infrastructure.json 中读取，不在此硬编码。

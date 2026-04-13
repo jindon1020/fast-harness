@@ -5,16 +5,16 @@ description: Redis 连接 Skill。从 infrastructure.json 读取 Redis 配置，
 
 # Redis 连接器（统一配置）
 
-从 `fast-harness/config/infrastructure.json` 读取 Redis 连接配置，提供标准化的连接命令和查询模板。
+从 `.ether/config/infrastructure.json` 读取 Redis 连接配置，提供标准化的连接命令和查询模板。
 
 ---
 
 ## 配置来源
 
-所有连接参数从 `fast-harness/config/infrastructure.json` 的 `redis.{env}` 段读取：
+所有连接参数从 `.ether/config/infrastructure.json` 的 `redis.{env}` 段读取：
 
 ```bash
-cat fast-harness/config/infrastructure.json | python3 -c "
+cat .ether/config/infrastructure.json | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 redis_cfg = config.get('redis', {})
@@ -31,7 +31,7 @@ for env in redis_cfg:
 ### redis-cli 直连
 
 ```bash
-CONFIG_FILE="fast-harness/config/infrastructure.json"
+CONFIG_FILE=".ether/config/infrastructure.json"
 ENV="local"
 
 eval $(python3 -c "
@@ -50,7 +50,7 @@ $REDIS_CLI INFO keyspace
 ```python
 import json, redis
 
-cfg = json.load(open('fast-harness/config/infrastructure.json'))['redis']['local']
+cfg = json.load(open('.ether/config/infrastructure.json'))['redis']['local']
 r = redis.Redis(
     host=cfg['host'], port=cfg['port'],
     password=cfg.get('password') or None,

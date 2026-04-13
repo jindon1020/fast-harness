@@ -5,16 +5,16 @@ description: Kafka 连接 Skill。从 infrastructure.json 读取 Kafka 配置，
 
 # Kafka 连接器（统一配置）
 
-从 `fast-harness/config/infrastructure.json` 读取 Kafka 连接配置，提供消费消息和状态查询的命令模板。
+从 `.ether/config/infrastructure.json` 读取 Kafka 连接配置，提供消费消息和状态查询的命令模板。
 
 ---
 
 ## 配置来源
 
-所有连接参数从 `fast-harness/config/infrastructure.json` 的 `kafka.{env}` 段读取：
+所有连接参数从 `.ether/config/infrastructure.json` 的 `kafka.{env}` 段读取：
 
 ```bash
-cat fast-harness/config/infrastructure.json | python3 -c "
+cat .ether/config/infrastructure.json | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 kafka_cfg = config.get('kafka', {})
@@ -31,7 +31,7 @@ for env in kafka_cfg:
 ### kafka-console-consumer（查看消息）
 
 ```bash
-CONFIG_FILE="fast-harness/config/infrastructure.json"
+CONFIG_FILE=".ether/config/infrastructure.json"
 ENV="dev"
 
 eval $(python3 -c "
@@ -56,7 +56,7 @@ kafka-console-consumer \
 import json
 from kafka import KafkaConsumer
 
-cfg = json.load(open('fast-harness/config/infrastructure.json'))['kafka']['dev']
+cfg = json.load(open('.ether/config/infrastructure.json'))['kafka']['dev']
 consumer = KafkaConsumer(
     '{topic_name}',
     bootstrap_servers=cfg['brokers'],

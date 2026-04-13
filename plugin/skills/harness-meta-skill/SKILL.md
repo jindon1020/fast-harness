@@ -100,12 +100,12 @@ done
 
 **Step 4 — 生成文件**：
 
-基于 `fast-harness/agents/_extension-template.md` 模板，填充用户提供的信息，生成扩展文件：
+基于 `.ether/agents/_extension-template.md` 模板，填充用户提供的信息，生成扩展文件：
 
 ```bash
 AGENT="debugger-agent"
 EXT_NAME="data-source-redis"
-TARGET="fast-harness/agents/$AGENT/extensions/${EXT_NAME}.md"
+TARGET=".ether/agents/$AGENT/extensions/${EXT_NAME}.md"
 ```
 
 写入文件内容，包含：
@@ -121,12 +121,12 @@ TARGET="fast-harness/agents/$AGENT/extensions/${EXT_NAME}.md"
 
 ## 3. 管理基础设施配置
 
-帮助用户向 `fast-harness/config/infrastructure.json` 添加新的中间件配置段。
+帮助用户向 `.ether/config/infrastructure.json` 添加新的中间件配置段。
 
 **Step 1 — 检查当前配置**：
 
 ```bash
-cat fast-harness/config/infrastructure.json | python3 -c "
+cat .ether/config/infrastructure.json | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 print('当前已配置的中间件：')
@@ -152,7 +152,7 @@ for key in config:
 **Step 4 — 验证 JSON 格式**：
 
 ```bash
-python3 -c "import json; json.load(open('fast-harness/config/infrastructure.json')); print('JSON 格式正确')"
+python3 -c "import json; json.load(open('.ether/config/infrastructure.json')); print('JSON 格式正确')"
 ```
 
 ---
@@ -227,7 +227,7 @@ echo "**总计**: $total 个扩展"
 → 名称: redis-cache-inspector
 → 描述: 调试时检查 Redis 缓存状态排查不一致
 → requires-config: redis.local
-→ 生成文件: fast-harness/agents/debugger-agent/extensions/data-source-redis.md
+→ 生成文件: .ether/agents/debugger-agent/extensions/data-source-redis.md
 → 用户编辑具体的 Redis 查询策略
 ```
 

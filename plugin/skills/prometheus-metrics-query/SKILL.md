@@ -7,12 +7,12 @@ description: 查询 ARMS Prometheus 监控指标。触发词：查 Prometheus、
 
 ## 配置来源
 
-所有连接参数从 `fast-harness/config/infrastructure.json` 的 `kubernetes` 段读取：
+所有连接参数从 `.ether/config/infrastructure.json` 的 `kubernetes` 段读取：
 
 ```bash
 python3 -c "
 import json
-cfg = json.load(open('fast-harness/config/infrastructure.json'))['kubernetes']
+cfg = json.load(open('.ether/config/infrastructure.json'))['kubernetes']
 prom = cfg.get('prometheus', {})
 print('Prometheus 本地端口:', prom.get('local_port', 19090))
 print('Prometheus namespace:', cfg['namespaces']['prometheus'])
@@ -31,15 +31,15 @@ import json, subprocess, socket, time, os, sys
 
 PROJECT_ROOT = subprocess.check_output(
     ['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-cfg_path = os.path.join(PROJECT_ROOT, 'fast-harness/config/infrastructure.json')
+cfg_path = os.path.join(PROJECT_ROOT, '.ether/config/infrastructure.json')
 
 try:
     k8s = json.load(open(cfg_path))['kubernetes']
 except (FileNotFoundError, KeyError):
-    print('未找到 kubernetes 配置，请先运行 fast-harness/configure.sh'); sys.exit(1)
+    print('未找到 kubernetes 配置，请先运行 .ether/configure.sh'); sys.exit(1)
 
 if 'prometheus' not in k8s:
-    print('未找到 prometheus 配置，请先运行 fast-harness/configure.sh 并启用 Prometheus'); sys.exit(1)
+    print('未找到 prometheus 配置，请先运行 .ether/configure.sh 并启用 Prometheus'); sys.exit(1)
 
 bastion    = k8s['bastion']
 bind       = bastion.get('bind_address', '127.0.0.1')
@@ -96,7 +96,7 @@ else:
 python3 -c "
 import json, subprocess, os
 PROJECT_ROOT = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-port = json.load(open(os.path.join(PROJECT_ROOT, 'fast-harness/config/infrastructure.json')))['kubernetes']['prometheus']['local_port']
+port = json.load(open(os.path.join(PROJECT_ROOT, '.ether/config/infrastructure.json')))['kubernetes']['prometheus']['local_port']
 print(f'Prometheus API: http://127.0.0.1:{port}/api/v1/status/config')
 "
 # 然后执行：
@@ -145,7 +145,7 @@ sum(container_memory_working_set_bytes{namespace="<namespaces.prod>"}) by (pod) 
 import json, subprocess, os, urllib.request, urllib.parse
 
 PROJECT_ROOT = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-k8s      = json.load(open(os.path.join(PROJECT_ROOT, 'fast-harness/config/infrastructure.json')))['kubernetes']
+k8s      = json.load(open(os.path.join(PROJECT_ROOT, '.ether/config/infrastructure.json')))['kubernetes']
 prom_url = f"http://127.0.0.1:{k8s['prometheus']['local_port']}/api/v1/query_range"
 ns_prod  = k8s['namespaces']['prod']
 

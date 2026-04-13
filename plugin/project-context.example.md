@@ -1,7 +1,7 @@
 # 项目上下文配置
 
 > 安装 fast-harness 后，复制此文件为 `project-context.md` 并根据实际项目填写。
-> 或运行 `fast-harness/configure.sh` 交互式生成。
+> 或运行 `.ether/configure.sh` 交互式生成。
 > 此文件被所有 Agent 和 Command 统一引用，修改一处全局生效。
 
 ## 基本信息
@@ -65,5 +65,5 @@ utils/      ← 纯工具函数
 
 ## 基础设施
 
-> 中间件连接配置（MySQL、Redis、Kafka 等）在 `fast-harness/config/infrastructure.json` 中管理。
+> 中间件连接配置（MySQL、Redis、Kafka 等）在 `.ether/config/infrastructure.json` 中管理。
 > Agent 通过 Connector Skills（db-connector、redis-connector 等）读取配置并连接。

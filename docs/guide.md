@@ -51,7 +51,7 @@
 ### 目录结构
 
 ```
-fast-harness/
+.ether/
 ├── .claude-plugin/
 │   └── plugin.json                     # 插件元数据
 ├── commands/                           # 纯编排，不含项目上下文

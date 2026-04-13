@@ -12,9 +12,9 @@ color: cyan
 
 在执行主流程之前，扫描并加载用户扩展：
 
-1. 读取 `fast-harness/agents/unit-test-gen-agent/extensions/` 下所有 `*.md` 文件
+1. 读取 `.ether/agents/unit-test-gen-agent/extensions/` 下所有 `*.md` 文件
 2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority`、`requires-config` 等元数据
-3. 若 frontmatter 中声明了 `requires-config`，读取 `fast-harness/config/infrastructure.json` 中对应配置段
+3. 若 frontmatter 中声明了 `requires-config`，读取 `.ether/config/infrastructure.json` 中对应配置段
 4. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
 5. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
 
@@ -35,8 +35,8 @@ color: cyan
 
 ## 本地环境配置
 
-> 数据库连接信息从 `fast-harness/config/infrastructure.json` → `mysql.local` 读取，使用 `db-connector` Skill 连接。
-> 本地服务启动命令和健康检查 URL 从 `fast-harness/project-context.md` 读取。
+> 数据库连接信息从 `.ether/config/infrastructure.json` → `mysql.local` 读取，使用 `db-connector` Skill 连接。
+> 本地服务启动命令和健康检查 URL 从 `.ether/project-context.md` 读取。
 > 启动前必须先检测服务是否已启动（探测端口或健康检查接口），若未运行则按 project-context.md 中的命令启动。
 
 ## 执行流程（必须按顺序）

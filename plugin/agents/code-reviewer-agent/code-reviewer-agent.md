@@ -15,7 +15,7 @@ color: yellow
 
 在执行审查之前，扫描并加载用户扩展：
 
-1. 读取 `fast-harness/agents/code-reviewer-agent/extensions/` 下所有 `*.md` 文件
+1. 读取 `.ether/agents/code-reviewer-agent/extensions/` 下所有 `*.md` 文件
 2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority` 等元数据
 3. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
 4. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
@@ -60,13 +60,13 @@ color: yellow
 ### 本项目层级依赖规则
 
 > 以下为默认的分层架构规则。用户可通过 `@project-rule` 扩展覆盖或补充。
-> 项目具体的目录结构参见 `fast-harness/project-context.md`。
+> 项目具体的目录结构参见 `.ether/project-context.md`。
 
 **依赖方向：只允许向下引用，严禁向上/跨层引用。**
 
 ### 检测命令
 
-根据 `fast-harness/project-context.md` 中定义的目录结构，检测跨层引用违规。典型检测模式：
+根据 `.ether/project-context.md` 中定义的目录结构，检测跨层引用违规。典型检测模式：
 
 ```bash
 # 检测跨层引用：入口层直接调用数据层（跳过业务层）
@@ -394,5 +394,5 @@ $([if FAIL] Critical 阻塞项:
 
 ## Project Context
 
-> 读取 `fast-harness/project-context.md` 获取项目路径、目录结构、技术栈等上下文。
+> 读取 `.ether/project-context.md` 获取项目路径、目录结构、技术栈等上下文。
 > 审查规则中的层级检测命令应根据 project-context.md 中定义的实际目录结构调整。

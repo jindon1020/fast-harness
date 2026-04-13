@@ -55,7 +55,7 @@ Generator (生成)          Discriminator (鉴别)
 # 进入你的项目目录
 cd /path/to/your/project
 
-# 自动检测平台，安装到 fast-harness/ 目录
+# 自动检测平台，安装到 .ether/ 目录
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash
 
 # 指定平台
@@ -76,7 +76,7 @@ git clone https://github.com/jindon1020/fast-harness.git /tmp/fast-harness
 
 # 进入你的项目目录并运行安装
 cd /path/to/your/project
-bash /tmp/fast-harness/install.sh
+bash /tmp/.ether/install.sh
 
 # 清理
 rm -rf /tmp/fast-harness
@@ -86,7 +86,7 @@ rm -rf /tmp/fast-harness
 
 ```bash
 # 交互式配置项目上下文和基础设施（数据库、Redis、Kafka 等）
-fast-harness/configure.sh
+.ether/configure.sh
 
 # 生成 project-context.md（项目上下文）和 config/infrastructure.json（中间件配置）
 ```
@@ -115,7 +115,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh |
 
 `--force` 模式会**覆盖更新**以下内容：
 
-- `fast-harness/` 目录下所有 commands、agents、skills 规范文件及文档
+- `.ether/` 目录下所有 commands、agents、skills 规范文件及文档
 - `.cursor/rules/fast-harness.mdc` / `.claude/rules/fast-harness.mdc`
 - `.cursor/agents/`、`.cursor/skills/`、`.cursor/commands/` 下的插件文件
 
@@ -123,12 +123,12 @@ curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh |
 
 - `.local/` — 密钥、kubeconfig、bastion 配置
 - `.ai/` — 流水线运行产物（task_card、审查报告、测试结果等）
-- `fast-harness/project-context.md` — 项目上下文（如已自定义）
-- `fast-harness/config/infrastructure.json` — 基础设施配置（如已自定义）
-- `fast-harness/agents/*/extensions/` — 用户自定义扩展文件
+- `.ether/project-context.md` — 项目上下文（如已自定义）
+- `.ether/config/infrastructure.json` — 基础设施配置（如已自定义）
+- `.ether/agents/*/extensions/` — 用户自定义扩展文件
 - `AGENTS.md` — 不重复追加 fast-harness 章节
 
-> 大版本更新后建议重新运行 `fast-harness/configure.sh`，检查是否有新配置项需要填写。
+> 大版本更新后建议重新运行 `.ether/configure.sh`，检查是否有新配置项需要填写。
 
 ## 目录结构
 
@@ -143,7 +143,7 @@ your-project/
 │   ├── skills/                        # Cursor 自动识别的 Skill（5 个）
 │   └── commands/                      # Cursor 斜杠命令（/implement /modify /fix /refactor）
 ├── .claude/rules/fast-harness.mdc     # Claude 规则（仅 Claude 平台）
-└── fast-harness/                      # 插件原文目录（规范详细版）
+└── .ether/                      # 插件原文目录（规范详细版）
     ├── .claude-plugin/
     │   └── plugin.json                # Claude Code 插件清单
     ├── commands/                      # 纯编排，不含项目细节
@@ -249,7 +249,7 @@ fast-harness v2.0 引入 Spring 式扩展点架构，用户可在不修改框架
 
 ### 使用扩展
 
-1. 在 `fast-harness/agents/{agent}/extensions/` 下创建 `.md` 文件
+1. 在 `.ether/agents/{agent}/extensions/` 下创建 `.md` 文件
 2. 用 YAML frontmatter 声明挂载的扩展点（如 `@data-source`、`@coding-convention`）
 3. Agent 启动时自动扫描并按优先级加载
 
@@ -276,7 +276,7 @@ fast-harness v2.0 引入 Spring 式扩展点架构，用户可在不修改框架
 cd /path/to/your/project
 
 # 删除插件目录
-rm -rf fast-harness/
+rm -rf .ether/
 
 # 删除 IDE 规则文件
 rm -f .cursor/rules/fast-harness.mdc
@@ -290,7 +290,7 @@ rm -f .claude/rules/fast-harness.mdc
 安装后查看完整使用指南：
 
 ```bash
-cat fast-harness/docs/guide.md
+cat .ether/docs/guide.md
 ```
 
 包含：架构全景、命令详解、实战场景（新需求实现、线上故障排查、批量重构消化审查建议）等。

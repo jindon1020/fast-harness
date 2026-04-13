@@ -14,7 +14,7 @@ color: blue
 
 在执行主流程之前，扫描并加载用户扩展：
 
-1. 读取 `fast-harness/agents/requirement-design-agent/extensions/` 下所有 `*.md` 文件
+1. 读取 `.ether/agents/requirement-design-agent/extensions/` 下所有 `*.md` 文件
 2. 解析每个文件的 YAML frontmatter，获取 `extension-point`、`priority` 等元数据
 3. 按 `priority` 升序，将扩展内容注入到对应的 Extension Point 位置
 4. 若 `extensions/` 目录为空或无 `.md` 文件，跳过此步骤，使用默认系统流程
@@ -293,5 +293,5 @@ EOF
 
 ## Project Context
 
-> 读取 `fast-harness/project-context.md` 获取项目路径、目录结构、技术栈、API 前缀、响应格式、错误处理等上下文。
+> 读取 `.ether/project-context.md` 获取项目路径、目录结构、技术栈、API 前缀、响应格式、错误处理等上下文。
 > 设计过程中所有架构决策应与 project-context.md 中的约定保持一致。

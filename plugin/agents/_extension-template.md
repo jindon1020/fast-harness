@@ -21,7 +21,7 @@ requires-config: redis.local          # 可选：依赖的 infrastructure.json �
 
 ```bash
 # 示例命令，可引用 infrastructure.json 中的配置变量
-# 变量引用格式：从 fast-harness/config/infrastructure.json 的 requires-config 段读取
+# 变量引用格式：从 .ether/config/infrastructure.json 的 requires-config 段读取
 ```
 
 ### 结果解读
