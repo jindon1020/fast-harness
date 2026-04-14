@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --project <path>                 项目根目录（默认: 当前目录）"
             echo "  --skip-agents                    跳过 AGENTS.md 生成"
             echo "  --force                          强制更新插件文件（覆盖已有，保留 .local/ 和 project-context.md）"
-            echo "  --local [path]                   使用本地仓库（默认: 脚本所在目录）跳过 git clone"
+            echo "  --local [path]                   使用本地 fast-harness 目录（默认: 脚本所在目录）跳过 git clone；不设此项则从 GitHub 拉取"
             echo "  -h, --help                       显示帮助"
             exit 0 ;;
         *)
@@ -212,6 +212,26 @@ safe_copy_dir() {
     done
 }
 
+# Skill 重命名或下线后，safe_copy_dir 不会在目标侧删除旧目录；安装时主动清理以免 Cursor 仍加载旧 Skill
+OBSOLETE_SKILL_DIRS=(
+    db-bastion-query
+    kubectl-readonly
+    k8s-monitor-full
+    api-skill
+)
+
+remove_obsolete_skill_dirs() {
+    local base="$1"
+    [[ -d "$base" ]] || return 0
+    local d
+    for d in "${OBSOLETE_SKILL_DIRS[@]}"; do
+        if [[ -d "$base/$d" ]]; then
+            rm -rf "$base/$d"
+            ok "已移除弃用 Skill 目录: $base/$d"
+        fi
+    done
+}
+
 # 追加内容到文件（不重复）
 safe_append() {
     local file="$1"
@@ -234,6 +254,9 @@ info "安装插件文件到 $PLUGIN_DIR/ ..."
 
 # 复制插件核心文件
 safe_copy_dir "$TEMP_DIR/fast-harness/plugin" "$PROJECT_DIR/$PLUGIN_DIR"
+if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/skills" ]]; then
+    remove_obsolete_skill_dirs "$PROJECT_DIR/$PLUGIN_DIR/skills"
+fi
 
 # 复制文档
 mkdir -p "$PROJECT_DIR/$PLUGIN_DIR/docs"
@@ -388,6 +411,7 @@ install_cursor() {
     # 复制 Skills → .cursor/skills/
     if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/skills" ]]; then
         safe_copy_dir "$PROJECT_DIR/$PLUGIN_DIR/skills" "$PROJECT_DIR/.cursor/skills"
+        remove_obsolete_skill_dirs "$PROJECT_DIR/.cursor/skills"
     fi
 
     # 复制 Commands → .cursor/commands/（去掉 -command 后缀使 /implement 生效）
