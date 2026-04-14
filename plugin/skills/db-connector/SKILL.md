@@ -117,15 +117,6 @@ print(f'隧道就绪: {bind_addr}:{local_port} → {config[\"host\"]}:{config[\"
 
 ---
 
-## 与旧版 db-bastion-query 的关系
-
-此 Skill 替代 `db-bastion-query`，区别在于：
-- 配置从 `infrastructure.json` 集中读取，不再依赖 `.local/bastion.env` 等分散文件
-- 堡垒机 SSH 私钥路径在 `infrastructure.json` 的 `bastion.key_path` 中配置
-- 支持任意数量的环境（不限于 dev/prod）
-
----
-
 ## Agent 自检清单
 
 - [ ] 已确认目标环境并向用户回显

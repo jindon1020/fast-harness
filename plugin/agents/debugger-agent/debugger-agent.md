@@ -212,11 +212,11 @@ Sub-agent 指令：
 
 ### B-Step 2: 数据库比对（按需启用）
 
-若日志分析涉及数据状态异常、字段值不一致、数据缺失等情况，开启 Sub-agent 调用 **skill `db-bastion-query`**：
+若日志分析涉及数据状态异常、字段值不一致、数据缺失等情况，开启 Sub-agent 调用 **skill `db-connector`**：
 
 ```
 Sub-agent 指令（只读查询，环境与 B-Step 0 确认的一致）：
-- 目标环境：{drama-dev / drama-prod}（对应 .local/bastion.env 或 .local/bastion-prod.env）
+- 目标环境：{dev / prod}（从 .ether/config/infrastructure.json 读取配置）
 - 根据日志中的关键 ID（episode_id / shot_id / project_id 等）
 - 查询相关表的实际数据状态
 - 重点核查：软删除标记、状态字段、关联外键完整性、时间戳

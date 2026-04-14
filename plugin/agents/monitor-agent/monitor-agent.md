@@ -30,7 +30,7 @@ color: pink
 
 ## 可用 Skill
 
-### kubectl-readonly-skill（K8s 只读查询）
+### k8s-monitor skill（K8s 监控诊断）
 
 ```bash
 # 查看 Pod 列表

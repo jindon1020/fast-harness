@@ -1,5 +1,5 @@
 ---
-name: api-skill
+name: api-spec-generator
 description: Produces minimal backend API specs as JSON with only an apis array; each request parameter includes in=query|body. Use for 后端对接文档, 接口规范, API 变更说明, or PRD-to-contract without frontend method names.
 ---
 

@@ -169,9 +169,7 @@ your-project/
     │   ├── redis-connector/           # Redis 连接
     │   ├── kafka-connector/           # Kafka 连接
     │   ├── harness-meta-skill/        # 扩展点管理元技能
-    │   ├── db-bastion-query/          # MySQL 堡垒机查询（旧版兼容）
-    │   ├── kubectl-readonly/          # K8s 只读查询
-    │   ├── k8s-monitor-full/          # K8s 诊断全套
+    │   ├── k8s-monitor/               # K8s 监控诊断（含 Loki/Prometheus）
     │   ├── loki-log-keyword-search/   # Loki 日志检索
     │   ├── prometheus-metrics-query/  # Prometheus 指标
     │   └── xmind-test-extractor/      # XMind 测试用例提取
