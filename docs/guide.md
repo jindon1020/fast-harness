@@ -81,7 +81,8 @@
 │   ├── k8s-monitor/                    # K8s 监控诊断（含 Loki/Prometheus）
 │   ├── loki-log-keyword-search/        # Loki 日志关键词检索
 │   ├── prometheus-metrics-query/       # Prometheus 指标查询
-│   └── xmind-test-extractor/           # XMind 测试用例提取
+│   ├── xmind-test-extractor/           # XMind 测试用例提取
+│   └── feishu-doc-reader/              # 飞书云文档提取（含下载直链）
 └── configure.sh                        # 交互式项目配置脚本
 ```
 
@@ -123,8 +124,9 @@
 | 运维 | `k8s-monitor` | K8s + Loki + Prometheus 一体化监控诊断 | 只读 |
 | 运维 | `loki-log-keyword-search` | Loki 日志关键词检索 | 只读 |
 | 运维 | `prometheus-metrics-query` | ARMS Prometheus 监控指标查询 | 只读 |
+| 协作 | `feishu-doc-reader` | 飞书文档全文提取（lark-cli）；支持 HTTP 导出/下载直链拉取后解析 | 依赖本机 lark 认证 |
 
-所有运维 Skill 均为**只读操作**，通过 RBAC 权限 + 堡垒机隧道双重保障，不会误操作生产数据。
+所有运维 Skill 均为**只读操作**，通过 RBAC 权限 + 堡垒机隧道双重保障，不会误操作生产数据。`feishu-doc-reader` 为文档读取与本地下载，不写入飞书侧数据。
 
 ### 扩展点机制（v2.0 新增）
 
@@ -780,3 +782,4 @@ utils/      ← 纯工具函数，无业务状态
 | k8s-monitor | `plugin/skills/k8s-monitor/` | K8s 监控诊断 |
 | loki-log-keyword-search | `plugin/skills/loki-log-keyword-search/` | 日志检索 |
 | prometheus-metrics-query | `plugin/skills/prometheus-metrics-query/` | 指标查询 |
+| feishu-doc-reader | `plugin/skills/feishu-doc-reader/` | 飞书文档提取与下载直链 |

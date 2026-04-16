@@ -90,6 +90,7 @@ purge_file "plugin/skills/redis-connector/SKILL.md"
 purge_file "plugin/skills/kafka-connector/SKILL.md"
 purge_file "plugin/skills/harness-meta-skill/SKILL.md"
 purge_file "plugin/skills/api-spec-generator/SKILL.md"
+purge_file "plugin/skills/feishu-doc-reader/SKILL.md"
 echo ""
 
 echo "╔══════════════════════════════════════════════════════╗"

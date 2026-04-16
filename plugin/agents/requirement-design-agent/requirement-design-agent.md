@@ -29,8 +29,10 @@ color: blue
 
 ## 输入
 
-- 需求描述文本 / 飞书文档链接 / XMind 文件路径 / PRD 截图
+- 需求描述文本 / 飞书云文档链接 / XMind 文件路径 / PRD 截图
 - 可选参数：`branch=<分支名（自动检测，通常无需传入）>` `module=<模块名>`
+
+**飞书云文档（需求文档）**：若用户以飞书 Doc/Docx/Wiki 链接、或飞书导出/下载直链作为需求来源，**必须先**读取并严格遵循 `plugin/skills/feishu-doc-reader/SKILL.md` 完成正文与附件的提取（lark CLI 优先，HTTP 直链按该 skill 的 Step 2b），再基于提取结果做需求理解；禁止在未按该 skill 拉取内容的情况下凭空推断文档正文。
 
 ## 执行流程
 
@@ -42,7 +44,8 @@ color: blue
 
 ### Step 1: 需求理解与多模态对齐
 
-- 深度读取用户的文字描述、飞书文档、截图、PRD 等多模态内容
+- 若输入含飞书云文档 URL 或飞书文件下载链接：按 `plugin/skills/feishu-doc-reader/SKILL.md` 全流程提取后再分析；Wiki 链接须先解析 `obj_token`；大文档按需分页 `+fetch`；内嵌图片/文件/画板按该 skill 处理。
+- 深度读取用户的文字描述、已提取的飞书正文（Markdown）、截图、PRD 等多模态内容
 - 结合当前 Workspace 代码库，评估需求上下文，提取核心需求要点
 - 主动发现潜在边界 case 或与现有逻辑的冲突点
 - **Sub-agent 并行分析**（复杂需求启用）：

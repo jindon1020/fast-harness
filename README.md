@@ -171,8 +171,9 @@ your-project/
     │   ├── harness-meta-skill/        # 扩展点管理元技能
     │   ├── k8s-monitor/               # K8s 监控诊断（含 Loki/Prometheus）
     │   ├── loki-log-keyword-search/   # Loki 日志检索
-    │   ├── prometheus-metrics-query/  # Prometheus 指标
-    │   └── xmind-test-extractor/      # XMind 测试用例提取
+│   ├── prometheus-metrics-query/  # Prometheus 指标
+│   ├── xmind-test-extractor/      # XMind 测试用例提取
+│   └── feishu-doc-reader/         # 飞书文档提取（含 HTTP 下载直链）
     ├── configure.sh                   # 交互式项目配置脚本
     ├── project-context.example.md     # 项目上下文模板
     └── docs/
