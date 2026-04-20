@@ -147,14 +147,14 @@ git stash list > .ai/refactor/{refactor_id}/stash_before.txt
 **Agent**: `test-runner-agent` (Sub-agent)
 
 **测试范围根据开关动态裁剪**:
-- `unit_test=off` → 跳过 `{module}_unit_test.py` 基线采集
+- `unit_test=off` → 跳过 `tests/{router}/` 单元测试基线采集
 - `inte_test=off` → 跳过 `{module}_api_test.py` 基线采集
-- `unit_test={module_name}` → 仅采集 `{module_name}_unit_test.py`
+- `unit_test={router_name}` → 仅采集 `tests/{router_name}/` 下单元测试
 - `inte_test={module_name}` → 仅采集 `{module_name}_api_test.py`
 
 **Prompt**:
 > 运行以下测试建立基线快照（不做 VERDICT 判断，只记录结果）：
-> 1) tests/{branch}/{test_target_module}_unit_test.py（若 unit_test 未关闭）
+> 1) tests/{router}/（若 unit_test 未关闭；`unit_test={router_name}` 时仅该目录；否则由 orchestrator 根据重构范围解析 router 列表）
 > 2) tests/{branch}/{test_target_module}_api_test.py（若 inte_test 未关闭）
 > 3) 重构范围相关测试
 > 写入 baseline_snapshot.md，格式：每用例 ID/名称/状态(PASS/FAIL/SKIP)/耗时。
@@ -214,7 +214,7 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 **Prompt**:
 > 为重构后的代码补充回归测试。重构计划：refactor_plan.md，改动文件：changed_files.txt。
 > 重点覆盖：1) 被提取的公共函数入参出参一致性 2) 被简化的逻辑各分支行为不变 3) 被移动的模块调用链路不变
-> 追加到 tests/{branch}/{module}_unit_test.py，标记 @pytest.mark.refactor + @pytest.mark.unit
+> 追加到 tests/{router}/{router}_unit_test.py（router 由 changed_files 中 `app/routers/*.py` 推导），标记 @pytest.mark.refactor + @pytest.mark.unit
 
 补充后再执行一轮 test-runner-agent 验证。
 
@@ -314,7 +314,7 @@ refactor: {重构目标一句话}
 1. **历史重构**: 查找同模块/同 scope 的历史 refactor 记录，读取 `refactor_plan.md` 和 `metrics_comparison.md` 了解已完成的改善和残留技术债
 2. **接口契约**: 通过历史 implement/modify 记录的 `task_card.json`/`change_card.json` 确认不可触碰的接口边界
 3. **审查积压**: 参考历史 `review_feedback.md` 中的 Improvements/Nitpicks，纳入重构范围一并解决
-4. **测试基线**: 复用已有测试用例（`tests/{branch}/`）作为行为等价验证的基线
+4. **测试基线**: 单元测试复用 `tests/{router}/`；集成测试复用 `tests/{branch}/`，作为行为等价验证基线
 
 > 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。
 

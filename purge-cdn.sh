@@ -13,6 +13,9 @@ REPO="jindon1020/fast-harness"
 BRANCH="main"
 BASE_URL="https://purge.jsdelivr.net/gh/${REPO}@${BRANCH}"
 
+# purge 接口偶发 HTTP 520/522（CDN 瞬时故障），不因单次失败中断整批
+PURGE_FAIL=0
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -25,8 +28,27 @@ info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 
 purge_file() {
     local path="$1"
-    local result
-    result=$(curl -fsSL "${BASE_URL}/${path}")
+    local result=""
+    local attempt max=6
+    local wait_sec=2
+
+    for ((attempt = 1; attempt <= max; attempt++)); do
+        if result=$(curl -fsSL --connect-timeout 20 --max-time 120 "${BASE_URL}/${path}" 2>/dev/null); then
+            break
+        fi
+        if [[ "$attempt" -lt "$max" ]]; then
+            echo -e "${YELLOW}[RETRY]${NC} $path（${attempt}/${max}，purge.jsdelivr 瞬时错误，${wait_sec}s 后重试）"
+            sleep "$wait_sec"
+            wait_sec=$((wait_sec + 2))
+        fi
+    done
+
+    if [[ -z "$result" ]]; then
+        fail "$path（curl 失败，常见为 HTTP 520/522；属 jsDelivr 侧短暂故障，请数分钟后重试本脚本）"
+        PURGE_FAIL=$((PURGE_FAIL + 1))
+        return 0
+    fi
+
     local throttled status
     throttled=$(echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); p=list(d['paths'].values())[0]; print(p.get('throttled','?'))" 2>/dev/null || echo "?")
     status=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "?")
@@ -36,8 +58,10 @@ purge_file() {
     elif [[ "$throttled" == "True" || "$throttled" == "true" ]]; then
         echo -e "${YELLOW}[SKIP]${NC} $path (被限流，稍后重试)"
     else
-        fail "$path (status=$status)"
+        fail "$path (status=$status，响应非预期 JSON 时请稍后重试)"
+        PURGE_FAIL=$((PURGE_FAIL + 1))
     fi
+    return 0
 }
 
 echo ""
@@ -93,10 +117,20 @@ purge_file "plugin/skills/api-spec-generator/SKILL.md"
 purge_file "plugin/skills/feishu-doc-reader/SKILL.md"
 echo ""
 
-echo "╔══════════════════════════════════════════════════════╗"
-echo "║                   清除完成！                          ║"
-echo "╚══════════════════════════════════════════════════════╝"
+if [[ "$PURGE_FAIL" -eq 0 ]]; then
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║                   清除完成！                          ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+else
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║  清除未全部成功（失败 ${PURGE_FAIL} 项），请稍后重试脚本   ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+fi
 echo ""
 echo "用户现在通过以下命令安装将获取最新代码："
 echo "  curl -fsSL https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/install.sh | bash"
 echo ""
+
+if [[ "$PURGE_FAIL" -gt 0 ]]; then
+    exit 1
+fi

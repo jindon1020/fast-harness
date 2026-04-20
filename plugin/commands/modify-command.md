@@ -26,7 +26,7 @@
 | `changed_files.txt` | Generator | Reviewer/Tester | 改动文件列表 |
 | `review_feedback.md` | Reviewer | Debugger | 审查反馈 |
 | `unit_test_results.md` | Test Runner | Debugger | 单元测试结果 |
-| `tests/{branch}/{module}_unit_test.py` | unit-test-gen-agent | Test Runner | 持久化测试用例 |
+| `tests/{router}/{router}_unit_test.py` 等 | unit-test-gen-agent | Test Runner | 单元测试（按 router 分目录，见 unit-test-gen-agent） |
 
 ### change_card.json 结构
 
@@ -75,7 +75,7 @@
 | 参数 | 默认值 | 取值 | 说明 |
 |------|--------|------|------|
 | `mode` | `full` | `full` / `fast` | `fast` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
-| `unit_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 3；传模块名仅运行该模块的单元测试 |
+| `unit_test` | `on` | `on` / `off` / `<router>` | `off` 跳过 Phase 3；传 **router 目录名**（`tests/<router>/`）时仅运行该目录下单元测试 |
 | `inte_test` | `off` | `on` / `off` / `<module>` | `on` 启用已有集成测试回归（Phase 3c）；传模块名仅运行该模块的集成测试。默认关闭：modify 为局部变更，通常无需集成测试 |
 
 > `branch` 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
@@ -88,7 +88,7 @@
 4. `from=implement` → 从 `.ai/implement/{branch}_{module}/task_card.json` 读取接口上下文，导入 `existing_interfaces`，复用已有测试文件
 5. 解析运行模式，向用户确认流水线配置：
    - `mode=fast` → 跳过 Phase 2 GAN 审查
-   - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={module_name}` → Phase 3 仅运行指定模块
+   - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={router_name}` → Phase 3 仅运行 `tests/{router_name}/`
    - `inte_test=on` → 追加 Phase 3c 集成测试回归（若存在 `tests/{branch}/{module}_api_test.py`）；`inte_test={module_name}` → 仅运行指定模块的集成测试
 6. 告知用户流水线路径：
    - 完整模式（默认）：「变更分析 → 代码修改 → GAN 审查 → 单元测试。关键节点暂停确认」
@@ -158,7 +158,7 @@ mkdir -p .ai/modify/{branch}_{module}
 ### Phase 3: 单元测试（Discriminator Round 2）
 
 **Skip if**: `unit_test=off`（报告中标注「⏭️ 单元测试已跳过（unit_test=off）」）
-**Scope**: `unit_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_unit_test.py`，报告标注「🎯 单元测试范围：{module_name}」
+**Scope**: `unit_test={router_name}` 时仅运行 `tests/{router_name}/`，报告标注「🎯 单元测试范围：router={router_name}」
 
 #### Step 3a: 生成测试用例
 
@@ -171,7 +171,7 @@ mkdir -p .ai/modify/{branch}_{module}
 > 2. 「回归保护用例」— 验证未修改功能仍正常
 > 3. backward_compatibility 为「不兼容」时增加旧参数格式异常处理用例
 > 4. 识别改动面、推导数据依赖、查询真实样本
-> 5. 保存到 tests/{branch}/{module}_unit_test.py（已存在则追加）+ tests/{branch}/{module}_unit_data.yaml
+> 5. 按 change_card 推导 router，保存到 tests/{router}/{router}_unit_test.py（已存在且未完全覆盖则追加）+ tests/{router}/{router}_unit_data.yaml；若已有用例已覆盖本次变更则 SKIPPED_GENERATION
 > 6. 标记 @pytest.mark.modify + @pytest.mark.unit
 > 输出标准验证报告。
 
@@ -180,11 +180,10 @@ mkdir -p .ai/modify/{branch}_{module}
 **Agent**: `test-runner-agent` (Sub-agent)
 
 **Prompt**:
-> 执行 tests/{branch}/{test_target_module}_unit_test.py，测试类型：单元测试（变更验证）。
+> 从 change_card / changed_files.txt 解析涉及的 **router** 列表；传入 pytest 路径：`tests/{router}/`（多目录则空格拼接）。若 `unit_test={router_name}` 则仅传入该目录。
+> 测试类型：单元测试（变更验证）。
 > change_card: .ai/modify/{branch}_{module}/change_card.json。
 > 结果写入 unit_test_results.md，输出 VERDICT。
-
-> 其中 `test_target_module` = unit_test 参数值（若为模块名）或当前 module。
 
 **Verdict**: PASS → Phase 3c/4 | FAIL → Retry Loop
 **Retry Loop** (MAX=2): `debugger-agent` 根据 unit_test_results.md + change_card 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 2 轮：[列出]。(A) 人工修复 (B) 终止」
@@ -217,7 +216,7 @@ mkdir -p .ai/modify/{branch}_{module}
 {mode=fast：⚡ 快速模式（已跳过 GAN 审查）}
 {unit_test=off：⏭️ 单元测试已跳过}
 {inte_test=on/module_name：已启用集成测试回归}
-{unit_test/inte_test 为模块名：🎯 测试范围已限定}
+{unit_test 为 router / inte_test 为模块名：🎯 测试范围已限定}
 
 ### 概览
 | 阶段 | Agent | VERDICT | 重试 |
@@ -262,7 +261,7 @@ modify: {变更描述一句话}
 - **默认仅单元测试**: 集成测试默认关闭（`inte_test=off`），可通过 `inte_test=on` 启用已有集成测试回归
 - **2 轮上限**: GAN/测试修复各限 2 轮，超限升级人类（修改是局部变更，超限说明方案有问题）
 - **Context Reset**: Agent 间通过文件契约通信，不继承对话历史
-- **测试持久化**: 保存到 `tests/{branch}/`，新增用例追加不覆盖
+- **测试持久化**: 单元测试保存到 `tests/{router}/`，新增用例追加不整文件覆盖
 - **歧义必须停下**: 遇到缺失/歧义暂停确认，禁止猜测
 
 ## Historical Context
@@ -272,7 +271,7 @@ modify: {变更描述一句话}
 1. **原始设计**: 查找当前 `module` 的历史 implement 记录，读取 `task_card.json` 了解接口的原始设计意图和 DB Schema，确保变更方案与整体架构一致
 2. **变更历史**: 查找同接口的历史 modify 记录，读取 `change_card.json` 了解已执行过的变更，评估累计影响和兼容性风险
 3. **审查经验**: 参考历史 `review_feedback.md` 的审查意见，在 Phase 1 代码修改阶段主动规避已知问题
-4. **测试资产**: 复用已有的单元测试用例（`tests/{branch}/`），Phase 3 只生成增量变更验证和回归保护用例
+4. **测试资产**: 复用 `tests/{router}/` 下已有单元测试；Phase 3 在缺口时追加变更验证与回归保护用例
 
 > 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。
 

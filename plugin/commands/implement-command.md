@@ -21,13 +21,14 @@
 | `review_feedback.md` | Reviewer | Debugger/Generator | 审查反馈 |
 | `unit_test_results.md` | Test Runner | Debugger | 单元测试结果 |
 | `integration_test_results.md` | Test Runner | Debugger | 集成测试结果 |
-| `tests/{branch}/` | api-test/tester-gen | Test Runner | 持久化测试用例 |
+| `tests/{router}/` | unit-test-gen-agent | Test Runner | 单元测试（`router` = `app/routers/<name>.py` 去路径与 `.py`） |
+| `tests/{branch}/` | integration-test-gen-agent | Test Runner | 集成测试（xmind，仍按 branch 目录） |
 
 ### Test Categories
 
 | 类型 | 生成方式 | Agent | 产出 |
 |------|----------|-------|------|
-| 单元测试（自发性） | 查询本地 DB 真实数据 | `unit-test-gen-agent` | `tests/{branch}/{module}_unit_test.py` |
+| 单元测试（自发性） | 查询本地 DB 真实数据 | `unit-test-gen-agent` | `tests/{router}/{router}_unit_test.py` 与 `{router}_unit_data.yaml`（多 router 时多套路径；已覆盖则可跳过写入） |
 | 集成测试（外部） | 解析 xmind 脑图 | `integration-test-gen-agent` | `tests/{branch}/{module}_api_test.py` |
 
 ## Command Format
@@ -56,7 +57,7 @@
 | 参数 | 默认值 | 取值 | 说明 |
 |------|--------|------|------|
 | `mode` | `full` | `full` / `fast` | `fast` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
-| `unit_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 3；传模块名仅运行该模块的单元测试 |
+| `unit_test` | `on` | `on` / `off` / `<router>` | `off` 跳过 Phase 3；传 **router 目录名**（与 `tests/<router>/` 一致，如 `project`）时 Phase 3 仅 `pytest tests/<router>/` |
 | `inte_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 4；传模块名仅运行该模块的集成测试 |
 
 > `branch` 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
@@ -68,7 +69,7 @@
 3. 传入 `task_card=...` 且文件存在 → 跳过 Phase 0
 4. 解析运行模式，向用户确认流水线配置：
    - `mode=fast` → 跳过 Phase 2 GAN 审查
-   - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={module_name}` → Phase 3 仅运行指定模块
+   - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={router_name}` → Phase 3 仅运行 `tests/{router_name}/` 下单元测试
    - `inte_test=off` → 跳过 Phase 4 集成测试；`inte_test={module_name}` → Phase 4 仅运行指定模块
 5. 告知用户流水线路径：
    - 完整模式（默认）：「需求设计 → 代码生成 → GAN 审查 → 单元测试 → 集成测试。关键节点暂停确认」
@@ -115,7 +116,7 @@
 ### Phase 3: 单元测试（Discriminator Round 2）
 
 **Skip if**: `unit_test=off`（报告中标注「⏭️ 单元测试已跳过（unit_test=off）」）
-**Scope**: `unit_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_unit_test.py`，报告标注「🎯 单元测试范围：{module_name}」
+**Scope**: `unit_test={router_name}` 时仅运行 `tests/{router_name}/`（如 `pytest tests/project/ -v -m unit`），报告标注「🎯 单元测试范围：router={router_name}」
 
 #### Step 3a: 生成测试用例
 
@@ -124,21 +125,20 @@
 **Prompt**:
 > 请根据 .ai/implement/{branch}_{module}/task_card.json 中的接口变更和 changed_files.txt，
 > 连接本地 MySQL 查询真实数据，生成 pytest 单元测试。
-> 要求：识别改动面、推导数据依赖、查询真实样本、构建测试参数。
-> 保存到 tests/{branch}/{module}_unit_test.py 和 tests/{branch}/{module}_unit_data.yaml。输出标准验证报告。
+> 要求：识别改动面、按 `app/routers/*.py` 推导 router 列表、执行已有用例覆盖扫描（见 unit-test-gen-agent 步骤 7.5）、推导数据依赖、查询真实样本、构建测试参数。
+> 持久化到 `tests/{router}/{router}_unit_test.py` 与 `tests/{router}/{router}_unit_data.yaml`（每 router 一套；已完全覆盖则 SKIPPED_GENERATION）。输出标准验证报告。
 
-**Done when**: 测试文件 + 数据文件已生成
+**Done when**: unit-test-gen-agent 已输出 VERDICT（含 GENERATED / APPENDED / SKIPPED_GENERATION）；若写入磁盘则对应 `tests/{router}/` 已更新
 
 #### Step 3b: 执行测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
 
 **Prompt**:
-> 执行 tests/{branch}/{test_target_module}_unit_test.py，测试类型：单元测试（自发性测试）。
+> 从 task_card 的 `affected_files` / changed_files.txt 解析本次涉及的 **router** 列表；向本 Agent 传入要执行的 pytest 路径（单 router：`tests/{router}/`；多 router：`pytest tests/r1/ tests/r2/ -v -m unit`）。若 `unit_test={router_name}` 则仅传入该目录。
+> 测试类型：单元测试（自发性测试）。
 > task_card 位于 .ai/implement/{branch}_{module}/task_card.json。
 > 结果写入 .ai/implement/{branch}_{module}/unit_test_results.md，输出 VERDICT。
-
-> 其中 `test_target_module` = unit_test 参数值（若为模块名）或当前 module。
 
 **Verdict**: PASS → Phase 4 | FAIL → Retry Loop
 **Retry Loop** (MAX=3): `debugger-agent` 根据 unit_test_results.md 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 3 轮：[列出失败]。(A) 人工修复 (B) 跳过继续集成测试 (C) 终止」
@@ -182,7 +182,7 @@
 {mode=fast：⚡ 快速模式（已跳过 GAN 审查）}
 {unit_test=off：⏭️ 单元测试已跳过}
 {inte_test=off：⏭️ 集成测试已跳过}
-{unit_test/inte_test 为模块名：🎯 测试范围已限定}
+{unit_test 为 router 名 / inte_test 为模块名：🎯 测试范围已限定}
 
 ### 概览
 | 阶段 | Agent | VERDICT | 重试 |
@@ -197,7 +197,7 @@
 $(cat .ai/implement/{branch}_{module}/changed_files.txt)
 
 ### 测试覆盖
-- 单元测试：tests/{branch}/{module}_unit_test.py — {N} 用例，通过率 {X}%
+- 单元测试：tests/{router}/{router}_unit_test.py（逐 router 列出）— {N} 用例，通过率 {X}%
 - 集成测试：tests/{branch}/{module}_api_test.py — {N} 用例，通过率 {X}%
 
 ### 审查摘要
@@ -222,7 +222,7 @@ feat: {task_card.feature}
 - **Context Reset**: Sub-agent 从文件契约获取上下文，不继承对话历史
 - **GAN 分离**: Generator 不自评，Reviewer/Tester 独立评判；Debugger 只修复已报告问题，不做额外重构
 - **渐进式鉴别**: Round 1 静态审查 → Round 2 单元测试 → Round 3 集成测试
-- **测试持久化**: 保存到 `tests/{branch}/`，后续可复用
+- **测试持久化**: 单元测试保存到 `tests/{router}/`（按路由文件分目录），集成测试仍保存到 `tests/{branch}/`
 - **人类卡点**: Phase 0 后、GAN/测试超限时、Phase 4 跳过判断时、最终报告后
 - **最多 3 轮重试**: 超限升级人类，防止无限循环消耗 Token
 - **歧义必须停下**: Agent 遇到缺失/歧义必须暂停确认，禁止猜测
@@ -233,7 +233,7 @@ feat: {task_card.feature}
 
 1. **同模块历史**: 查找与当前 `module` 相关的历史 implement 记录，复用已有 `task_card.json` 中的接口设计、DB Schema 和技术方案（`.ai/design/`），避免从零设计
 2. **审查经验**: 参考历史 `review_feedback.md` 的 Critical/Improvements，在 Phase 1 代码生成阶段主动规避已知问题
-3. **测试资产**: 复用 `tests/{branch}/` 下已有的测试用例和数据文件，Phase 3/4 只生成增量测试
+3. **测试资产**: 复用 `tests/{router}/` 下已有单元测试（unit-test-gen-agent 可先判定覆盖并跳过写入）；集成侧复用 `tests/{branch}/`，Phase 4 只生成增量集成测试
 4. **设计文档**: 若涉及跨模块依赖，通过归档索引定位相关模块的 `task_card.json` 了解接口契约
 
 > 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。

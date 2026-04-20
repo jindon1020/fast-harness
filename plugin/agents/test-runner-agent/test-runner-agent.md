@@ -31,7 +31,7 @@ color: purple
 ## 输入
 
 - `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{branch}_{module}/task_card.json`）
-- 测试文件路径（通过 prompt 参数传入，如 `tests/{branch}/team_api_test.py`）
+- **测试目标路径**（通过 prompt 参数传入，**禁止硬编码**）：单元测试为 `tests/{router}/` 目录或显式文件列表（如 `tests/project/project_unit_test.py`）；集成测试多为 `tests/{branch}/{module}_api_test.py`（由 integration-test-gen-agent 约定）
 - **测试类型**（通过 prompt 参数传入）：`unit`（单元测试）或 `integration`（集成测试）
 - **结果输出路径**（通过 prompt 参数传入，如 `.ai/implement/{branch}_{module}/unit_test_results.md`）
 
@@ -41,7 +41,7 @@ color: purple
 
 | 类型 | 文件命名规则 | pytest marker | 结果输出文件 | 来源 |
 |------|-------------|---------------|-------------|------|
-| 单元测试 | `{module}_unit_test.py` | `@pytest.mark.unit` | `{contract_dir}/unit_test_results.md` | unit-test-gen-agent 自动生成 |
+| 单元测试 | `tests/{router}/{router}_unit_test.py`（或整目录 `tests/{router}/`） | `@pytest.mark.unit` | `{contract_dir}/unit_test_results.md` | unit-test-gen-agent 按 router 分目录生成 |
 | 集成测试 | `{module}_api_test.py` | `@pytest.mark.p1` / `p2` / `p3` | `{contract_dir}/integration_test_results.md` | integration-test-gen-agent 从 xmind 生成 |
 
 根据传入的测试类型或文件名自动识别：
@@ -71,9 +71,12 @@ curl -s http://127.0.0.1:8000/healthz
 
 ### Phase 2: 本地验证
 
+使用 **Command prompt 传入的 pytest 目标**（文件或目录，可多个）。示例（占位符，执行时替换为实际路径）：
+
 ```bash
 source .venv/bin/activate
-pytest tests/{branch}/team_api_test.py -v --tb=short 2>&1
+pytest <PROMPT传入的测试路径...> -v --tb=short -m unit 2>&1   # 单元：常见为 tests/{router1}/ tests/{router2}/
+# 集成测试则通常带 -m p1 等，以 prompt 为准
 ```
 
 **验证覆盖**：
@@ -99,7 +102,7 @@ mysql -h 127.0.0.1 -P 13306 -u readonly_user -p -e \
 ## 测试执行结果
 
 **测试类型**: 单元测试 / 集成测试
-**测试文件**: tests/{branch}/{module}_unit_test.py
+**测试文件/目录**: <prompt 传入，如 tests/project/ 或 tests/project/project_unit_test.py>
 
 | Case ID | 用例名称 | 类型 | 优先级 | 状态 | 实际响应 |
 |---------|----------|------|--------|------|----------|
