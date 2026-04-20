@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "{ISO8601}",
+  "generator": "code-wiki-gen",
+  "project_root": "{abs_path}",
+  "last_full_generation_commit": "{commit_hash}",
+  "sections": [
+    {
+      "wiki_file": ".wiki/00-overview.md",
+      "section_id": "system-type",
+      "source_files": ["src/main.py", "pyproject.toml"],
+      "source_hash": "{md5_of_concatenated_contents}",
+      "last_verified_commit": "{commit_hash}",
+      "stale": false
+    },
+    {
+      "wiki_file": ".wiki/00-overview.md",
+      "section_id": "tech-stack",
+      "source_files": ["pyproject.toml", "src/main.py", "src/db/session.py"],
+      "source_hash": "{hash}",
+      "last_verified_commit": "{commit_hash}",
+      "stale": false
+    },
+    {
+      "wiki_file": ".wiki/01-modules.md",
+      "section_id": "drama-module",
+      "source_files": [
+        "src/drama/router.py",
+        "src/drama/service.py",
+        "src/drama/canvas_manager.py",
+        "src/drama/interactive_manager.py"
+      ],
+      "source_hash": "{hash}",
+      "last_verified_commit": "{commit_hash}",
+      "stale": false,
+      "stale_reason": null
+    },
+    {
+      "wiki_file": ".wiki/02-interfaces.md",
+      "section_id": "internal-api-contracts",
+      "source_files": [
+        "src/common/router.py",
+        "src/common/schemas.py"
+      ],
+      "source_hash": "{hash}",
+      "last_verified_commit": "{commit_hash}",
+      "stale": false
+    }
+  ],
+
+  "_notes": {
+    "source_hash": "MD5 of all source_files contents concatenated in listed order",
+    "stale": "Set to true when source_hash no longer matches current file contents",
+    "stale_reason": "Human-readable explanation of why it was marked stale"
+  }
+}

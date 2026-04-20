@@ -200,6 +200,7 @@ your-project/
     │   ├── db-connector/
     │   ├── redis-connector/
     │   ├── kafka-connector/
+    │   ├── code-wiki-gen/             # 代码知识库生成
     │   ├── harness-meta-skill/
     │   ├── k8s-monitor/
     │   ├── loki-log-keyword-search/
