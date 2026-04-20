@@ -75,6 +75,19 @@
    - 完整模式（默认）：「需求设计 → 代码生成 → GAN 审查 → 单元测试 → 集成测试。关键节点暂停确认」
    - 快速模式（mode=fast）：「需求设计 → 代码生成 → 单元测试 → 集成测试」
    - 根据 unit_test/inte_test 开关动态裁剪路径展示
+6. **Wiki 鲜度检查**：若 `.wiki/MANIFEST.json` 存在，检测过期 section：
+   ```bash
+   python3 -c "
+   import json
+   with open('.wiki/MANIFEST.json') as f: m = json.load(f)
+   stale = [s['section_id'] for s in m['sections'] if s.get('stale')]
+   if stale: print('STALE:' + ','.join(stale))
+   " 2>/dev/null
+   ```
+   - 若输出包含 `STALE:`，向用户告警（不阻断流水线）：
+     「⚠️ 以下 wiki sections 已过期（源文件已变更）：[列表]。
+     建议先执行 `/init force` 刷新，当前将以过期知识为背景继续执行。」
+   - 若 `.wiki/MANIFEST.json` 不存在，跳过此步骤（wiki 尚未初始化，运行 `/init` 可激活）
 
 ## Execution Steps
 

@@ -359,7 +359,7 @@ alwaysApply: true
 
 ## 按需读取原则
 
-收到 `/implement`、`/fix`、`/refactor`、`/modify` 命令时，按以下规则加载：
+收到 `/implement`、`/fix`、`/refactor`、`/modify`、`/init` 命令时，按以下规则加载：
 1. 读取对应的 command 文件获取流水线规范
 2. 由 command 按需调度 agent（Sub-agent 方式启动）
 3. 不要预加载所有 agent 指令
@@ -368,6 +368,7 @@ alwaysApply: true
 
 | 命令 | 用途 | 规范文件 |
 |------|------|----------|
+| `/init` | Code Wiki 初始化 / 刷新 | `.ether/commands/init-command.md` |
 | `/implement` | 端到端需求实现 | `.ether/commands/implement-command.md` |
 | `/fix` | Bug 修复闭环 | `.ether/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
@@ -477,7 +478,7 @@ alwaysApply: true
 
 ## 按需读取原则
 
-收到 `/implement`、`/fix`、`/refactor`、`/modify` 命令时，按以下规则加载：
+收到 `/implement`、`/fix`、`/refactor`、`/modify`、`/init` 命令时，按以下规则加载：
 1. 读取对应的 command 文件获取流水线规范
 2. 由 command 按需调度 agent（Sub-agent 方式启动）
 3. 不要预加载所有 agent 指令
@@ -486,6 +487,7 @@ alwaysApply: true
 
 | 命令 | 用途 | 规范文件 |
 |------|------|----------|
+| `/init` | Code Wiki 初始化 / 刷新 | `.ether/commands/init-command.md` |
 | `/implement` | 端到端需求实现 | `.ether/commands/implement-command.md` |
 | `/fix` | Bug 修复闭环 | `.ether/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
@@ -541,6 +543,7 @@ if [[ "$SKIP_AGENTS_MD" == false ]]; then
 
 | 命令 | 用途 | 触发条件 | 详细规范 |
 |------|------|----------|----------|
+| \`/init\` | Code Wiki 初始化 / 刷新 | 项目首次配置 / 重大重构后刷新 | [$PLUGIN_DIR/commands/init-command.md]($PLUGIN_DIR/commands/init-command.md) |
 | \`/implement\` | 端到端需求实现 | 用户描述新功能需求 | [$PLUGIN_DIR/commands/implement-command.md]($PLUGIN_DIR/commands/implement-command.md) |
 | \`/fix\` | Bug 修复闭环 | 测试 FAIL / 审查 Critical / 线上异常 / 手动报告 | [$PLUGIN_DIR/commands/fix-command.md]($PLUGIN_DIR/commands/fix-command.md) |
 | \`/refactor\` | 批量代码重构 | 技术债清理 / 审查 Improvements 积压 | [$PLUGIN_DIR/commands/refactor-command.md]($PLUGIN_DIR/commands/refactor-command.md) |
@@ -711,12 +714,16 @@ echo ""
 echo "  2. 查看完整使用说明:"
 echo "     cat $PLUGIN_DIR/docs/guide.md"
 echo ""
-echo "  3. 开始使用:"
+echo "  3. 初始化 Code Wiki（推荐）:"
+echo "     /init"
+echo "     (生成 .wiki/ 代码知识库，激活 AI 流水线 wiki 感知能力)"
+echo ""
+echo "  4. 开始使用:"
 echo "     /implement 我需要实现 XXX 功能"
 echo "     /fix 线上报 500 错误 request_id=abc-123"
 echo "     /refactor 把 XXX 模块的重复代码抽取为公共函数"
 echo ""
-echo "  4. 添加自定义扩展（可选）:"
+echo "  5. 添加自定义扩展（可选）:"
 echo "     使用 harness-meta-skill 管理扩展点，或直接在"
 echo "     $PLUGIN_DIR/agents/{agent-name}/extensions/ 下添加 .md 文件"
 echo ""
