@@ -359,7 +359,7 @@ alwaysApply: true
 
 ## 按需读取原则
 
-收到 `/implement`、`/fix`、`/refactor`、`/modify`、`/init` 命令时，按以下规则加载：
+收到 `/implement`、`/fix`、`/refactor`、`/modify`、`/init`、`/test` 命令时，按以下规则加载：
 1. 读取对应的 command 文件获取流水线规范
 2. 由 command 按需调度 agent（Sub-agent 方式启动）
 3. 不要预加载所有 agent 指令
@@ -373,6 +373,7 @@ alwaysApply: true
 | `/fix` | Bug 修复闭环 | `.ether/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
 | `/modify` | 存量代码精准修改 | `.ether/commands/modify-command.md` |
+| `/test` | 提交前快速单元测试 | `.ether/commands/test-command.md` |
 
 ## 历史上下文
 
@@ -478,7 +479,7 @@ alwaysApply: true
 
 ## 按需读取原则
 
-收到 `/implement`、`/fix`、`/refactor`、`/modify`、`/init` 命令时，按以下规则加载：
+收到 `/implement`、`/fix`、`/refactor`、`/modify`、`/init`、`/test` 命令时，按以下规则加载：
 1. 读取对应的 command 文件获取流水线规范
 2. 由 command 按需调度 agent（Sub-agent 方式启动）
 3. 不要预加载所有 agent 指令
@@ -492,6 +493,7 @@ alwaysApply: true
 | `/fix` | Bug 修复闭环 | `.ether/commands/fix-command.md` |
 | `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
 | `/modify` | 存量代码精准修改 | `.ether/commands/modify-command.md` |
+| `/test` | 提交前快速单元测试 | `.ether/commands/test-command.md` |
 
 ## 历史上下文
 
@@ -548,6 +550,7 @@ if [[ "$SKIP_AGENTS_MD" == false ]]; then
 | \`/fix\` | Bug 修复闭环 | 测试 FAIL / 审查 Critical / 线上异常 / 手动报告 | [$PLUGIN_DIR/commands/fix-command.md]($PLUGIN_DIR/commands/fix-command.md) |
 | \`/refactor\` | 批量代码重构 | 技术债清理 / 审查 Improvements 积压 | [$PLUGIN_DIR/commands/refactor-command.md]($PLUGIN_DIR/commands/refactor-command.md) |
 | \`/modify\` | 存量代码精准修改 | 修改现有功能 / 调整业务逻辑 / 接口改造 | [$PLUGIN_DIR/commands/modify-command.md]($PLUGIN_DIR/commands/modify-command.md) |
+| \`/test\` | 提交前快速单元测试 | 手动改动代码后 / 纯对话 AI 修改后 | [$PLUGIN_DIR/commands/test-command.md]($PLUGIN_DIR/commands/test-command.md) |
 
 > **⚡ 快速模式**: 四个命令均支持 \`fast=true\` 可选参数，跳过 GAN 对抗审查/质量审计环节，节省 30%-40% Token。
 
