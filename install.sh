@@ -41,6 +41,7 @@ PROJECT_DIR="$(pwd)"
 SKIP_AGENTS_MD=false
 FORCE=false
 LOCAL_SRC=""
+WIKI_LLM=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -61,6 +62,8 @@ while [[ $# -gt 0 ]]; do
             else
                 LOCAL_SRC="$(cd "$(dirname "$0")" && pwd)"; shift
             fi ;;
+        --wiki-llm)
+            WIKI_LLM=true; shift ;;
         -h|--help)
             echo "用法: install.sh [选项]"
             echo ""
@@ -70,6 +73,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --project <path>                 项目根目录（默认: 当前目录）"
             echo "  --skip-agents                    跳过 AGENTS.md 生成"
             echo "  --force                          强制更新插件文件（覆盖已有，保留 .local/ 和 project-context.md）"
+            echo "  --wiki-llm                       启用 wiki 自动 LLM 更新（git commit 后自动调用 claude 更新 wiki）"
             echo "  --local [path]                   使用本地 fast-harness 目录（默认: 脚本所在目录）跳过 git clone；不设此项则从 GitHub 拉取"
             echo "  -h, --help                       显示帮助"
             exit 0 ;;
@@ -290,12 +294,17 @@ install_claude() {
         for hook_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.sh; do
             [[ -f "$hook_file" ]] && copy_file "$hook_file" "$PROJECT_DIR/.claude/hooks/$(basename "$hook_file")"
         done
+        # 复制 Python 脚本
+        for py_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.py; do
+            [[ -f "$py_file" ]] && copy_file "$py_file" "$PROJECT_DIR/.claude/hooks/$(basename "$py_file")"
+        done
         chmod +x "$PROJECT_DIR/.claude/hooks/"*.sh 2>/dev/null || true
     fi
 
     # 配置 .claude/settings.json 中的 hooks
     local settings_file="$PROJECT_DIR/.claude/settings.json"
     local archive_hook_cmd="bash \$CLAUDE_PROJECT_DIR/.claude/hooks/archive-to-agents.sh"
+    local wiki_hook_cmd="bash \$CLAUDE_PROJECT_DIR/.claude/hooks/wiki-update-on-commit.sh"
     if [[ -f "$settings_file" ]]; then
         if grep -qF "archive-to-agents" "$settings_file" 2>/dev/null; then
             skip "$settings_file (archive hook 已配置)"
@@ -310,10 +319,12 @@ except:
     data = {}
 hooks = data.setdefault('hooks', {})
 stop = hooks.setdefault('Stop', [])
-stop.append({
-    'matcher': '',
-    'hooks': [{'type': 'command', 'command': '$archive_hook_cmd'}]
-})
+# 添加两个 hooks
+for cmd in ['$archive_hook_cmd', '$wiki_hook_cmd']:
+    stop.append({
+        'matcher': '',
+        'hooks': [{'type': 'command', 'command': cmd}]
+    })
 with open('$settings_file', 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
 " && ok "合并 hook 到: $settings_file" || warn "无法自动合并 hooks，请手动添加 Stop hook 到 $settings_file"
@@ -374,6 +385,7 @@ alwaysApply: true
 | `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
 | `/modify` | 存量代码精准修改 | `.ether/commands/modify-command.md` |
 | `/test` | 提交前快速单元测试 | `.ether/commands/test-command.md` |
+| `/wiki-update` | Wiki 增量更新 | `.ether/commands/wiki-update-command.md` |
 
 ## 历史上下文
 
@@ -389,6 +401,60 @@ MDRULE
         ok "创建: $rule_file"
     else
         skip "$rule_file"
+    fi
+
+    # 创建 git post-commit hook（wiki 自动更新）
+    if [[ -d "$PROJECT_DIR/.git" ]]; then
+        local post_commit_hook="$PROJECT_DIR/.git/hooks/post-commit"
+        if [[ ! -f "$post_commit_hook" ]]; then
+            cat > "$post_commit_hook" << 'POSTHOOK'
+#!/bin/bash
+# fast-harness wiki auto-update hook
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+if [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" HEAD~1..HEAD
+fi
+POSTHOOK
+            chmod +x "$post_commit_hook"
+            ok "创建: .git/hooks/post-commit (wiki 自动更新)"
+        else
+            skip ".git/hooks/post-commit (已存在)"
+        fi
+    fi
+
+    # 若启用 --wiki-llm，配置 WIKI_AUTO_LLM_UPDATE 环境变量
+    if $WIKI_LLM; then
+        local settings_local="$PROJECT_DIR/.claude/settings.local.json"
+        if [[ -f "$settings_local" ]]; then
+            # 合并到已有文件
+            if command -v python3 &>/dev/null; then
+                python3 -c "
+import json
+try:
+    with open('$settings_local', 'r') as f:
+        data = json.load(f)
+except:
+    data = {}
+env = data.setdefault('env', {})
+env['WIKI_AUTO_LLM_UPDATE'] = '1'
+with open('$settings_local', 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+" && ok "已启用 wiki LLM 自动更新: $settings_local"
+            fi
+        else
+            # 创建新文件
+            mkdir -p "$PROJECT_DIR/.claude"
+            cat > "$settings_local" << LOCALSET
+{
+  "env": {
+    "WIKI_AUTO_LLM_UPDATE": "1"
+  }
+}
+LOCALSET
+            ok "创建: $settings_local (wiki LLM 自动更新已启用)"
+        fi
     fi
 }
 
@@ -433,16 +499,22 @@ install_cursor() {
         for hook_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.sh; do
             [[ -f "$hook_file" ]] && copy_file "$hook_file" "$PROJECT_DIR/.cursor/hooks/$(basename "$hook_file")"
         done
+        # 复制 Python 脚本
+        for py_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.py; do
+            [[ -f "$py_file" ]] && copy_file "$py_file" "$PROJECT_DIR/.cursor/hooks/$(basename "$py_file")"
+        done
         chmod +x "$PROJECT_DIR/.cursor/hooks/"*.sh 2>/dev/null || true
     fi
 
     # 创建/更新 .cursor/hooks.json
     local hooks_json="$PROJECT_DIR/.cursor/hooks.json"
     local archive_hook=".cursor/hooks/archive-to-agents.sh"
+    local wiki_hook=".cursor/hooks/wiki-update-on-commit.sh"
     if [[ -f "$hooks_json" ]]; then
         if ! grep -qF "$archive_hook" "$hooks_json" 2>/dev/null; then
             warn "hooks.json 已存在，请手动将以下 hook 添加到 stop 事件中:"
             echo "  {\"command\": \"$archive_hook\"}"
+            echo "  {\"command\": \"$wiki_hook\"}"
         else
             skip "$hooks_json (archive hook 已配置)"
         fi
@@ -454,6 +526,9 @@ install_cursor() {
     "stop": [
       {
         "command": "$archive_hook"
+      },
+      {
+        "command": "$wiki_hook"
       }
     ]
   }
@@ -494,6 +569,7 @@ alwaysApply: true
 | `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
 | `/modify` | 存量代码精准修改 | `.ether/commands/modify-command.md` |
 | `/test` | 提交前快速单元测试 | `.ether/commands/test-command.md` |
+| `/wiki-update` | Wiki 增量更新 | `.ether/commands/wiki-update-command.md` |
 
 ## 历史上下文
 
@@ -509,6 +585,30 @@ MDRULE
         ok "创建: $rule_file"
     else
         skip "$rule_file"
+    fi
+
+    # 创建 git post-commit hook（wiki 自动更新）- Cursor 也使用相同逻辑
+    if [[ -d "$PROJECT_DIR/.git" ]]; then
+        local post_commit_hook="$PROJECT_DIR/.git/hooks/post-commit"
+        if [[ ! -f "$post_commit_hook" ]]; then
+            cat > "$post_commit_hook" << 'POSTHOOK'
+#!/bin/bash
+# fast-harness wiki auto-update hook
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+# 优先使用 .cursor/hooks，fallback 到 .claude/hooks
+if [[ -f "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" HEAD~1..HEAD
+elif [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" HEAD~1..HEAD
+fi
+POSTHOOK
+            chmod +x "$post_commit_hook"
+            ok "创建: .git/hooks/post-commit (wiki 自动更新)"
+        else
+            skip ".git/hooks/post-commit (已存在)"
+        fi
     fi
 }
 
@@ -551,6 +651,7 @@ if [[ "$SKIP_AGENTS_MD" == false ]]; then
 | \`/refactor\` | 批量代码重构 | 技术债清理 / 审查 Improvements 积压 | [$PLUGIN_DIR/commands/refactor-command.md]($PLUGIN_DIR/commands/refactor-command.md) |
 | \`/modify\` | 存量代码精准修改 | 修改现有功能 / 调整业务逻辑 / 接口改造 | [$PLUGIN_DIR/commands/modify-command.md]($PLUGIN_DIR/commands/modify-command.md) |
 | \`/test\` | 提交前快速单元测试 | 手动改动代码后 / 纯对话 AI 修改后 | [$PLUGIN_DIR/commands/test-command.md]($PLUGIN_DIR/commands/test-command.md) |
+| \`/wiki-update\` | Wiki 增量更新 | 手动触发 wiki 更新 / git hook 未启用 LLM 模式 | [$PLUGIN_DIR/commands/wiki-update-command.md]($PLUGIN_DIR/commands/wiki-update-command.md) |
 
 > **⚡ 快速模式**: 四个命令均支持 \`fast=true\` 可选参数，跳过 GAN 对抗审查/质量审计环节，节省 30%-40% Token。
 

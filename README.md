@@ -65,6 +65,9 @@ curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh |
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform cursor
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform claude
 
+# 启用 wiki 自动 LLM 更新（git commit 后自动调用 claude 更新 wiki）
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --wiki-llm
+
 # 自定义插件目录名
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --dir my-ai-plugin
 ```
@@ -260,6 +263,7 @@ Phase 5  最终报告     → 汇总结果 ✋ 确认提交
 | `/fix` | Bug 修复 | `/fix 线上报 500 request_id=abc-123` |
 | `/refactor` | 代码重构 | `/refactor 把分页逻辑抽取到 utils` |
 | `/test` | 提交前快速单元测试 | `/test` 或 `/test scope=staged` |
+| `/wiki-update` | Wiki 增量更新 | `/wiki-update` 或 `/wiki-update files=src/auth/service.py` |
 
 `/implement`、`/modify`、`/fix`、`/refactor` 均支持 `mode=fast` 快速模式（跳过 GAN 审查，节省 30-40% Token）。
 
@@ -303,8 +307,16 @@ Phase 5  最终报告     → 汇总结果 ✋ 确认提交
 `MANIFEST.json` 记录每个 section 的源文件 hash。代码变更后：
 
 - `/implement` 启动时自动检测 stale sections 并告警
-- 积累较多变更后运行 `/init force` 全量刷新
+- 积累较多变更后运行 `/init force` 全量刷新或 `/wiki-update` 增量更新
 - `.wiki/` 建议提交 git，作为项目知识资产持续维护
+
+**Wiki 自动更新**（可选）：
+
+安装时带 `--wiki-llm` 参数，每次 `git commit` 后自动触发增量更新：
+- **基础模式**（默认）：post-commit hook 自动标记 stale sections，`/implement` 时提示过期
+- **LLM 模式**（`--wiki-llm`）：commit 后自动调用 claude 更新受影响的 wiki sections
+
+手动触发更新：`/wiki-update` 或 `bash .claude/hooks/wiki-update-on-commit.sh HEAD~1..HEAD`
 
 ### Wiki 注入方式
 

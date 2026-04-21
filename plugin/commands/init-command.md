@@ -6,7 +6,7 @@
 ## Context
 
 `/init` 是安装 fast-harness 插件后的**首次初始化命令**，负责：
-1. 调用 `wiki-agent` 生成 `.wiki/` 代码知识库
+1. 调用 `code-wiki-gen` 生成 `.wiki/` 代码知识库
 2. 将 wiki 知识注入流水线三个关键扩展点：
    - `@pre-generation`（generator-agent）— 代码生成前加载模块上下文
    - `@coding-convention`（generator-agent）— 编码规范自动对齐
@@ -51,7 +51,7 @@
 
 3. 告知用户执行计划：
    「开始 /init 初始化，将执行：
-   ① wiki 生成（wiki-agent 扫描全库）
+   ① wiki 生成（code-wiki-gen 扫描全库）
    ② generator-agent 扩展配置（@pre-generation + @coding-convention）
    ③ requirement-design-agent 扩展配置（@design-convention）
    完成后流水线 Agent 将自动感知项目代码结构。」
@@ -60,9 +60,9 @@
 
 ### Step 1: 生成 Code Wiki
 
-使用 **Skill 工具**调用 `wiki-agent`，对当前项目根目录进行全量 wiki 生成。
+使用 **Skill 工具**调用 `code-wiki-gen`，对当前项目根目录进行全量 wiki 生成。
 
-wiki-agent 将在项目根目录下生成：
+code-wiki-gen 将在项目根目录下生成：
 
 | 文件 | 内容 |
 |------|------|

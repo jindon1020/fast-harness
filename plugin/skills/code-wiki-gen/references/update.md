@@ -10,7 +10,7 @@ Use git diff to scope the blast radius, then surgically update only affected sec
 Run incremental update when:
 - User mentions specific changed files/directories
 - User says "merge了一个PR" / "刚改了X模块"
-- Automated post-commit hook runs wiki-agent
+- Automated post-commit hook runs code-wiki-gen
 
 Do NOT use incremental update when:
 - Major architectural change (new modules, module merges, renamed services)
