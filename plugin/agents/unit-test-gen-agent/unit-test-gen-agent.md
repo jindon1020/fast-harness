@@ -2,7 +2,7 @@
 name: unit-test-gen-agent
 description: 单元测试生成专家。根据当前上下文识别接口改动，连接本地数据库查询真实数据，构建接口测试参数并验证改动是否符合预期，同时将测试用例持久化为可复用的 pytest 文件。use proactively 在涉及接口入参、出参、字段映射、查询条件、分页、排序、状态流转变更后立即调用。
 tools: Read, Write, Bash, Grep, Glob
-model: opus
+model: inherit
 color: cyan
 ---
 
