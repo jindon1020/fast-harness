@@ -34,6 +34,20 @@ color: cyan
 
 > **路径规则**：所有路径由 Command 通过 prompt 传入，本 Agent 不硬编码路径。
 
+## Router 推导（目录名）
+
+**目录名 `{router}`** = 路由 Python 文件去路径、去 `.py` 后的 basename（与代码里路由所在文件 `app/routers/project.py` 对应 → `tests/project/`）。
+
+从下列来源**合并去重**收集 `app/routers/*.py` 或 `**/routers/*.py` 路径（以项目 `project-context` 为准）：
+
+| 上下文 | 读取字段 |
+|--------|----------|
+| 有 `task_card.json` | `affected_files` 中匹配 `*/routers/*.py` 的路径 |
+| 仅有 xmind + `affected_apis` | 按 `affected_apis[].path` 反查路由文件 |
+| 均缺失 | 通过 `rg "router\|APIRouter" app/` 结合 xmind 业务域推断 |
+
+对每个匹配到的路径取 `{router}`；**多个 router 时分别**执行 Step 2.5 与 Step 3（各自目录、各自测试文件）。`task_card.module` 仅用于报告文案，**不作为**测试目录名。
+
 ## 使用的 Skill
 
 执行前，读取并严格遵循 `plugin/skills/xmind-test-extractor/SKILL.md` 中的完整指南。
@@ -79,20 +93,37 @@ cat {task_card_path} | python3 -m json.tool | grep -A 20 "affected_apis"
 
 从 `affected_apis` 中为每个 tc-* 节点匹配 `method`、`path`、`request_schema`、`response_schema`。
 
+### Step 2.5：已有用例覆盖扫描（按每个 `router`）
+
+在生成测试文件之前执行，避免重复生成已覆盖的用例。
+
+1. 确认 `tests/{router}/` 是否存在（`Glob` / `list_dir`）；**不存在**则本 router 视为无基线 → 进入 Step 3 **新建**目录与文件。
+2. 构建**本次需覆盖的接口集合 `S`**：从 `affected_apis` 中取每项的 `(method, path)`。
+3. 扫描 `tests/{router}/**/*_integration_test.py`（`Glob` + `Grep` / `Read`）：
+   - 对每个 `(method, path)`：测试代码中须能识别 **path**（完整或可被 `grep` 到的关键路径段），且存在与 **method** 一致的 `client.{method}` 调用。
+   - **变更语义**：从 xmind tc-* 节点名称中提取**关键词**；在现有测试文件中 `grep`。若 path 已覆盖但缺少与本次 xmind 用例相关的关键断言或场景 → **未完全覆盖**。
+4. **判定**（对该 `router`）：
+   - `S` 全满足且 xmind 关键词已在现有用例中体现 → **SKIPPED_GENERATION**（不写新文件；在输出中列出沿用路径）。
+   - 部分满足 → **仅追加**到已有 `tests/{router}/{router}_integration_test.py` 与 `{router}_integration_data.yaml` 的对应位置（禁止整文件覆盖删除旧用例）。
+   - 无满足 → Step 3 **新建**完整文件。
+5. **多 router**：对每个 `router` 重复 2.5.1～2.5.4，分别给出覆盖结论。
+
 ### Step 3：创建目录，生成测试文件
 
 > **Extension Point `@test-context`**：此处加载所有声明 `extension-point: test-context` 的扩展。
 > 用户可添加测试环境额外配置（自定义 conftest.py 内容、环境变量、外部服务 Mock 等）。
 
+> **跳过条件**：若 Step 2.5 对该 router 判定 **SKIPPED_GENERATION**，则本 Step 跳过写文件，但仍须在输出与 VERDICT 中列出沿用路径。
+
 ```bash
-mkdir -p tests/{branch}/
+mkdir -p tests/{router}/
 ```
 
-**生成 `tests/{branch}/{module}_api_test.py`**（完整模板）：
+**生成 `tests/{router}/{router}_integration_test.py`**（完整模板）：
 
 ```python
 """
-{module} 模块 API 集成测试
+{router} 路由集成测试
 由 integration-test-gen-agent 自动生成
 源文件: {xmind_filename}
 Sprint: {sprint}
@@ -157,10 +188,10 @@ class Test{DomainCamelCase}:
         # assert "expected_field" in result
 ```
 
-### Step 4：生成 `tests/{branch}/{module}_test_data.yaml`
+### Step 4：生成 `tests/{router}/{router}_integration_data.yaml`
 
 ```yaml
-# {module} 模块测试数据
+# Router: {router}
 # 由 integration-test-gen-agent 自动生成
 # 源文件: {xmind_filename}
 
@@ -222,11 +253,32 @@ skipped_cases:
 ### Step 5：语法验证
 
 ```bash
-# 验证 Python 文件语法正确
-python3 -m py_compile tests/{branch}/{module}_api_test.py && echo "语法 OK"
+# 验证 Python 文件语法正确（仅对非 SKIPPED 的 router）
+python3 -m py_compile tests/{router}/{router}_integration_test.py && echo "语法 OK"
 
 # 验证 YAML 可被标准加载器解析
-python3 -c "import yaml; yaml.safe_load(open('tests/{branch}/{module}_test_data.yaml'))" && echo "YAML OK"
+python3 -c "import yaml; yaml.safe_load(open('tests/{router}/{router}_integration_data.yaml'))" && echo "YAML OK"
+```
+
+## VERDICT 协议（流水线模式下必须遵守）
+
+```markdown
+## Integration Test VERDICT
+**VERDICT: PASS**
+- 涉及 router: {router 列表}
+- 生成用例数: {N}
+- 持久化: GENERATED | APPENDED | SKIPPED_GENERATION（按 router 分列）
+- 文件: tests/{router}/{router}_integration_test.py（及 yaml；SKIPPED 时写「沿用既有」）
+
+或
+
+**VERDICT: FAIL**
+- 语法校验失败的文件: [列出]
+- 失败详情: [列出]
+
+**VERDICT: SKIPPED_GENERATION**（可与 PASS 并列说明）
+- 原因: 已有 tests/{router}/ 下用例已覆盖本次 S 与 xmind 关键词
+- 沿用文件: [列出路径]
 ```
 
 ## 输出
@@ -237,9 +289,11 @@ python3 -c "import yaml; yaml.safe_load(open('tests/{branch}/{module}_test_data.
 SendMessage(to="planner-agent", message="
 ## integration-test-gen-agent 完成
 
-**生成文件**:
-- tests/{branch}/{module}_api_test.py
-- tests/{branch}/{module}_test_data.yaml
+**VERDICT**: [PASS/FAIL]（持久化: GENERATED / APPENDED / SKIPPED_GENERATION）
+**涉及 router**: {router 列表}
+**生成或沿用文件**（逐 router）:
+- tests/{router}/{router}_integration_test.py
+- tests/{router}/{router}_integration_data.yaml
 
 **用例清单**:
 | Case ID | 优先级 | 业务域 | 用例名称 |
@@ -249,17 +303,19 @@ SendMessage(to="planner-agent", message="
 
 **跳过用例**: {n} 条（纯前端）
 
-**运行命令**:
-pytest tests/{branch}/{module}_api_test.py -v -m p1
+**运行命令**（多 router 时由 Command 拼接，示例）:
+pytest tests/{router_a}/ tests/{router_b}/ -v -m p1
 ")
 ```
 
 ## 约束
 
 - **必须**读取并遵循 `plugin/skills/xmind-test-extractor/SKILL.md`
+- **必须**执行 Step 2.5 覆盖扫描；Step 3 在 **SKIPPED_GENERATION** 时可不创建新文件，但须在 VERDICT 与输出中明确列出沿用路径与覆盖依据
 - 测试基于 `TestClient` + `dependency_overrides`，不使用 `httpx.AsyncClient`
 - 每个用例必须有 `@pytest.mark.p1/p2/p3` 标记
 - 每个用例断言必须覆盖：`status_code` + `code` 字段 + 关键返回字段
 - YAML **禁止**使用 `!custom`、`!contains` 等自定义 tag
 - 鉴权 Token / 用户 ID 使用 fixture 中的 `dependency_overrides`，不硬编码真实值
 - 纯前端用例不生成 pytest 代码，仅列入 YAML `skipped_cases`
+- **追加模式**下禁止整文件覆盖删除旧用例，仅在文件末尾对应 class 内追加缺口用例
