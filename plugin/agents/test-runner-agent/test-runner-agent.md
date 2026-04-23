@@ -131,16 +131,19 @@ mysql -h 127.0.0.1 -P 13306 -u readonly_user -p -e \
 
 ## 结果持久化
 
-根据测试类型将结果写入 Command prompt 指定的路径（implement 流水线模式下必须执行）：
+根据测试类型将结果写入 `.ai/report/` 目录下（implement 流水线模式下必须执行）：
 
 ```bash
-# 单元测试结果（路径由 prompt 传入）
-cat > {contract_dir}/unit_test_results.md << 'EOF'
+# 确保报告目录存在
+mkdir -p .ai/report
+
+# 单元测试结果
+cat > .ai/report/unit_test_results.md << 'EOF'
 （上述输出格式内容）
 EOF
 
-# 集成测试结果（路径由 prompt 传入）
-cat > {contract_dir}/integration_test_results.md << 'EOF'
+# 集成测试结果
+cat > .ai/report/integration_test_results.md << 'EOF'
 （上述输出格式内容）
 EOF
 ```
@@ -181,4 +184,4 @@ $([if PASS and 集成测试] echo '流水线全部测试通过。')
 - 失败时必须提供：失败用例 ID、错误类型、关键错误信息
 - 本地验证失败才执行 Dev 验证
 - 必须在输出中标注测试类型（单元/集成），便于流水线区分处理
-- 结果必须写入 Command prompt 指定的 `{contract_dir}/*_test_results.md` 文件
+- 结果必须写入 `.ai/report/unit_test_results.md` 或 `.ai/report/integration_test_results.md`
