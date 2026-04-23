@@ -764,6 +764,7 @@ fi
 
 # ================================ 设置可执行权限 ================================
 chmod +x "$PROJECT_DIR/$PLUGIN_DIR/configure.sh" 2>/dev/null || true
+chmod +x "$PROJECT_DIR/$PLUGIN_DIR/update.sh" 2>/dev/null || true
 
 # ================================ 完成 ================================
 echo ""
@@ -817,19 +818,22 @@ echo "  1. 配置项目上下文和基础设施:"
 echo "     运行 $PLUGIN_DIR/configure.sh 交互式配置"
 echo "     (生成 project-context.md 和 config/infrastructure.json)"
 echo ""
-echo "  2. 查看完整使用说明:"
+echo "  2. 更新插件到最新版本:"
+echo "     bash $PLUGIN_DIR/update.sh"
+echo ""
+echo "  3. 查看完整使用说明:"
 echo "     cat $PLUGIN_DIR/docs/guide.md"
 echo ""
-echo "  3. 初始化 Code Wiki（推荐）:"
+echo "  4. 初始化 Code Wiki（推荐）:"
 echo "     /init"
 echo "     (生成 .wiki/ 代码知识库，激活 AI 流水线 wiki 感知能力)"
 echo ""
-echo "  4. 开始使用:"
+echo "  5. 开始使用:"
 echo "     /implement 我需要实现 XXX 功能"
 echo "     /fix 线上报 500 错误 request_id=abc-123"
 echo "     /refactor 把 XXX 模块的重复代码抽取为公共函数"
 echo ""
-echo "  5. 添加自定义扩展（可选）:"
+echo "  6. 添加自定义扩展（可选）:"
 echo "     使用 harness-meta-skill 管理扩展点，或直接在"
 echo "     $PLUGIN_DIR/agents/{agent-name}/extensions/ 下添加 .md 文件"
 echo ""

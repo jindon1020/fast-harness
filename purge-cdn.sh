@@ -83,11 +83,16 @@ purge_file "plugin/commands/implement-command.md"
 purge_file "plugin/commands/fix-command.md"
 purge_file "plugin/commands/refactor-command.md"
 purge_file "plugin/commands/modify-command.md"
+purge_file "plugin/commands/init-command.md"
+purge_file "plugin/commands/test-command.md"
+purge_file "plugin/commands/wiki-update-command.md"
 echo ""
 
 # Hooks
 info "[ Hooks ]"
 purge_file "plugin/hooks/archive-to-agents.sh"
+purge_file "plugin/hooks/mark_stale.py"
+purge_file "plugin/hooks/wiki-update-on-commit.sh"
 echo ""
 
 # Agents
@@ -115,6 +120,7 @@ purge_file "plugin/skills/kafka-connector/SKILL.md"
 purge_file "plugin/skills/harness-meta-skill/SKILL.md"
 purge_file "plugin/skills/api-spec-generator/SKILL.md"
 purge_file "plugin/skills/feishu-doc-reader/SKILL.md"
+purge_file "plugin/skills/code-wiki-gen/SKILL.md"
 echo ""
 
 if [[ "$PURGE_FAIL" -eq 0 ]]; then
