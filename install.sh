@@ -3,12 +3,14 @@
 # fast-harness 一键安装脚本
 #
 # 基于 Anthropic Harness Design 的 Generator-Evaluator 多 Agent 协作开发套件
-# 支持 Cursor 和 Claude Code 两种 AI IDE
+# 支持 Cursor、Claude Code 和 Qoder 三种 AI IDE
 #
 # 用法:
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform cursor
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform claude
+#   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform qoder
+#   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform all
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --dir my-plugin
 #
 # 注：使用 jsDelivr CDN 可避免 raw.githubusercontent.com 的缓存问题
@@ -46,7 +48,10 @@ WIKI_LLM=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --platform)
-            PLATFORM="$2"; shift 2 ;;
+            PLATFORM="$2"
+            # 兼容旧版 both（等同于 all）
+            [[ "$PLATFORM" == "both" ]] && PLATFORM="all"
+            shift 2 ;;
         --dir)
             PLUGIN_DIR="$2"; shift 2 ;;
         --project)
@@ -68,7 +73,7 @@ while [[ $# -gt 0 ]]; do
             echo "用法: install.sh [选项]"
             echo ""
             echo "选项:"
-            echo "  --platform <cursor|claude|both>  指定 IDE 平台（默认: 自动检测）"
+            echo "  --platform <cursor|claude|qoder|all>  指定 IDE 平台（默认: 自动检测）"
             echo "  --dir <name>                     插件目录名（默认: .ether）"
             echo "  --project <path>                 项目根目录（默认: 当前目录）"
             echo "  --skip-agents                    跳过 AGENTS.md 生成"
@@ -86,6 +91,7 @@ done
 detect_platform() {
     local has_cursor=false
     local has_claude=false
+    local has_qoder=false
 
     # 检测 Cursor
     if [[ -d "$PROJECT_DIR/.cursor" ]] || command -v cursor &>/dev/null; then
@@ -97,14 +103,26 @@ detect_platform() {
         has_claude=true
     fi
 
-    if $has_cursor && $has_claude; then
-        echo "both"
+    # 检测 Qoder
+    if [[ -d "$PROJECT_DIR/.qoder" ]] || command -v qoder &>/dev/null; then
+        has_qoder=true
+    fi
+
+    local detected_count=0
+    $has_cursor && ((detected_count++))
+    $has_claude && ((detected_count++))
+    $has_qoder && ((detected_count++))
+
+    if [[ $detected_count -ge 2 ]]; then
+        echo "all"
     elif $has_cursor; then
         echo "cursor"
     elif $has_claude; then
         echo "claude"
+    elif $has_qoder; then
+        echo "qoder"
     else
-        echo "both"
+        echo "all"
     fi
 }
 
@@ -597,7 +615,7 @@ MDRULE
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 
-# 优先使用 .cursor/hooks，fallback 到 .claude/hooks
+# 优先使用 .cursor/hooks，fallback 到 .claude/hooks，再 fallback 到 .qoder 不支持 hooks
 if [[ -f "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" ]]; then
     bash "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" HEAD~1..HEAD
 elif [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
@@ -612,17 +630,107 @@ POSTHOOK
     fi
 }
 
+# ---------- Qoder 配置 ----------
+install_qoder() {
+    info "配置 Qoder 环境..."
+
+    # 复制 Agents → .qoder/agents/（从目录化结构中提取 .md 文件）
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/agents" ]]; then
+        mkdir -p "$PROJECT_DIR/.qoder/agents"
+        for agent_dir in "$PROJECT_DIR/$PLUGIN_DIR/agents/"/*/; do
+            [[ -d "$agent_dir" ]] || continue
+            local agent_name
+            agent_name="$(basename "$agent_dir")"
+            local agent_md="$agent_dir/${agent_name}.md"
+            if [[ -f "$agent_md" ]]; then
+                copy_file "$agent_md" "$PROJECT_DIR/.qoder/agents/${agent_name}.md"
+            fi
+        done
+    fi
+
+    # 复制 Skills → .qoder/skills/
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/skills" ]]; then
+        safe_copy_dir "$PROJECT_DIR/$PLUGIN_DIR/skills" "$PROJECT_DIR/.qoder/skills"
+        remove_obsolete_skill_dirs "$PROJECT_DIR/.qoder/skills"
+    fi
+
+    # 复制 Commands → .qoder/commands/（去掉 -command 后缀使 /implement 生效）
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/commands" ]]; then
+        mkdir -p "$PROJECT_DIR/.qoder/commands"
+        for cmd_file in "$PROJECT_DIR/$PLUGIN_DIR/commands/"*-command.md; do
+            [[ -f "$cmd_file" ]] || continue
+            local base
+            base="$(basename "$cmd_file" | sed 's/-command\.md$/.md/')"
+            copy_file "$cmd_file" "$PROJECT_DIR/.qoder/commands/$base"
+        done
+    fi
+
+    # 创建/更新 .qoder/rules 规则文件
+    local rule_file="$PROJECT_DIR/.qoder/rules/ether.mdc"
+    if $FORCE || [[ ! -f "$rule_file" ]]; then
+        mkdir -p "$PROJECT_DIR/.qoder/rules"
+        cat > "$rule_file" << 'MDRULE'
+---
+description: fast-harness 开发套件规则
+globs:
+alwaysApply: true
+---
+
+# fast-harness 开发套件
+
+本项目已安装 fast-harness 多 Agent 协作开发套件。
+
+## 按需读取原则
+
+收到 `/implement`、`/fix`、`/refactor`、`/modify`、`/init`、`/test` 命令时，按以下规则加载：
+1. 读取对应的 command 文件获取流水线规范
+2. 由 command 按需调度 agent（Sub-agent 方式启动）
+3. 不要预加载所有 agent 指令
+
+## 命令入口
+
+| 命令 | 用途 | 规范文件 |
+|------|------|----------|
+| `/init` | Code Wiki 初始化 / 刷新 | `.ether/commands/init-command.md` |
+| `/implement` | 端到端需求实现 | `.ether/commands/implement-command.md` |
+| `/fix` | Bug 修复闭环 | `.ether/commands/fix-command.md` |
+| `/refactor` | 批量代码重构 | `.ether/commands/refactor-command.md` |
+| `/modify` | 存量代码精准修改 | `.ether/commands/modify-command.md` |
+| `/test` | 提交前快速单元测试 | `.ether/commands/test-command.md` |
+| `/wiki-update` | Wiki 增量更新 | `.ether/commands/wiki-update-command.md` |
+
+## 历史上下文
+
+流水线执行后，hook 脚本会自动将 `.ai/` 下的过程文件归档到 `AGENTS.md`。
+执行命令前应检查 `AGENTS.md` 的「流水线执行归档」章节，复用历史设计文档和审查经验。
+
+## 编码规约
+
+- 所有代码注释使用**中文**
+- git commit message 使用**中文**，格式：`<类型>: <简短描述>`
+- 遇到歧义**必须停下询问**，禁止猜测
+MDRULE
+        ok "创建: $rule_file"
+    else
+        skip "$rule_file"
+    fi
+}
+
 case "$PLATFORM" in
     cursor)
         install_cursor ;;
     claude)
         install_claude ;;
-    both)
+    qoder)
+        install_qoder ;;
+    all)
         install_cursor
         echo ""
-        install_claude ;;
+        install_claude
+        echo ""
+        install_qoder ;;
     *)
-        err "无效平台: $PLATFORM（cursor/claude/both）"
+        err "无效平台: $PLATFORM（cursor/claude/qoder/all）"
         exit 1 ;;
 esac
 
@@ -800,7 +908,12 @@ case "$PLATFORM" in
         echo "  📁 .claude/hooks/               # Claude Code Hook 脚本"
         echo "  📄 .claude/settings.json         # Claude Code Hook 配置"
         echo "  📄 .claude/rules/ether.mdc" ;;
-    both)
+    qoder)
+        echo "  📁 .qoder/agents/               # Qoder 可识别的 Agent"
+        echo "  📁 .qoder/skills/               # Qoder 可识别的 Skill"
+        echo "  📁 .qoder/commands/             # Qoder 可识别的命令（/implement 等）"
+        echo "  📄 .qoder/rules/ether.mdc" ;;
+    all)
         echo "  📁 .cursor/agents/              # Cursor 可识别的 Agent"
         echo "  📁 .cursor/skills/              # Cursor 可识别的 Skill"
         echo "  📁 .cursor/commands/            # Cursor 可识别的命令（/implement 等）"
@@ -809,7 +922,11 @@ case "$PLATFORM" in
         echo "  📄 .cursor/rules/ether.mdc"
         echo "  📁 .claude/hooks/               # Claude Code Hook 脚本"
         echo "  📄 .claude/settings.json         # Claude Code Hook 配置"
-        echo "  📄 .claude/rules/ether.mdc" ;;
+        echo "  📄 .claude/rules/ether.mdc"
+        echo "  📁 .qoder/agents/               # Qoder 可识别的 Agent"
+        echo "  📁 .qoder/skills/               # Qoder 可识别的 Skill"
+        echo "  📁 .qoder/commands/             # Qoder 可识别的命令（/implement 等）"
+        echo "  📄 .qoder/rules/ether.mdc" ;;
 esac
 
 echo ""
