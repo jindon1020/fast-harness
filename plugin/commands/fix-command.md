@@ -116,6 +116,9 @@ mkdir -p .ai/fix/{fix_id}
 ### Phase 1: 诊断与修复（Debugger）
 
 **Agent**: `debugger-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行读取代码、直接进行修复或替代 debugger-agent 执行诊断。
+> 未收到 debugger-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 请根据 Bug 报告进行诊断和修复。
@@ -135,6 +138,9 @@ mkdir -p .ai/fix/{fix_id}
 **Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — 修复审查已跳过」）
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须同时委托两个 Sub-agent 并行执行审查。
+> Planner 禁止自行执行审查、直接输出 VERDICT 或跳过任意一个 Agent。
+> 未同时收到两个 Agent 的 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt** (both):
 > 请审查以下修复代码（Bug 修复），重点关注：
@@ -160,6 +166,9 @@ mkdir -p .ai/fix/{fix_id}
 **Scope**: `unit_test={router_name}` 时仅为指定 router 目录生成/运行单元测试，报告标注「🎯 单元测试范围：router={router_name}」
 
 **Agent**: `unit-test-gen-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行生成回归测试用例、直接写入测试文件或跳过委托。
+> 未收到 unit-test-gen-agent 的书面 VERDICT 响应前，禁止进入 Step 3b。
 
 **Prompt**:
 > 基于 Bug 修复内容生成回归测试用例。
@@ -178,6 +187,9 @@ mkdir -p .ai/fix/{fix_id}
 **Skip if**: `unit_test=off`
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行执行 pytest 命令或替代 test-runner-agent 输出回归测试结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 执行回归测试。测试范围：1) fix 标记用例 2) 传入的 `tests/{router}/` 目录（从 changed_files 解析 router；`unit_test={router_name}` 时仅该目录）。
@@ -193,6 +205,9 @@ mkdir -p .ai/fix/{fix_id}
 **Scope**: `inte_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_api_test.py`，报告标注「🎯 集成测试范围：{module_name}」
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行执行集成测试命令或替代输出结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 执行集成测试回归：tests/{branch}/{test_target_module}_api_test.py。
@@ -236,7 +251,9 @@ $(cat .ai/fix/{fix_id}/changed_files.txt)
 - 集成回归：{N} 用例，通过率 {X}%（若执行）
 ```
 
-**Checkpoint**: AskQuestion —「修复流水线完毕。(A) 确认 commit (B) 需要调整 (C) 终止」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「修复流水线完毕。(A) 确认 commit (B) 需要调整 (C) 终止」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 选 (A) 输出 commit message：
 ```
@@ -253,9 +270,16 @@ fix: {根因一句话}
 - **回归必覆盖**: 验证原 Bug 已修复 + 相邻功能未被破坏
 - **2 轮上限**: 修复 GAN 循环比 implement 更严格（2 轮 vs 3 轮），超限升级人类
 - **线上场景强制卡点**: 涉及线上环境的修复，根因分析必须经人类确认后才执行
-- **证据驱动**: 禁止"试错式"修改，所有修复基于日志/堆栈/数据比对等证据
+- **证据驱动**: 禁止“试错式”修改，所有修复基于日志/堆栈/数据比对等证据
 - **Context Reset**: Agent 间通过文件契约通信，不继承对话历史
 - **歧义必须停下**: 遇到缺失/歧义暂停确认，禁止猜测
+
+### 禁止行为（无论任务复杂度如何，一律适用）
+- 禁止以「任务简单」「改动很小」为由跳过标注 (Sub-agent) 的步骤
+- 禁止 Planner 自行执行诊断修复、审查或测试（即便能力上可行）
+- 禁止自动通过 HARD STOP 卡点，必须等待用户明确响应
+- 禁止在未收到上一阶段 VERDICT 的情况下进入下一阶段
+- 禁止省略 Pre-flight 的流水线配置确认步骤
 
 ## Historical Context
 

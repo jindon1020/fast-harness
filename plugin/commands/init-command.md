@@ -189,3 +189,9 @@ code-wiki-gen 将在项目根目录下生成：
 - **wiki 属于项目资产**：`.wiki/` 建议提交 git，扩展文件写入 `.ether/`（与代码分离，不进 git）
 - **按需读取**：扩展文件指示 agent 读取特定 wiki section，不做全量加载
 - **鲜度自愈**：`/implement` Pre-flight 检测到 stale section 时主动提示，wiki 不会静默腐化
+
+### 禁止行为（无论初始化情况如何，一律适用）
+- 禁止跳过 Pre-flight 的已有 wiki 检测与用户确认步骤
+- 禁止在用户没有回答“跳过”前略过历史遗留问题收集（Step 1.5）
+- 禁止假设用户不需要某个配置项而自动跳过 AskQuestion
+- 禁止在未调用 code-wiki-gen Skill 的情况下直接写入 wiki 文件

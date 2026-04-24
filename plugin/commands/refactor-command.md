@@ -101,6 +101,9 @@ git stash list > .ai/refactor/{refactor_id}/stash_before.txt
 
 **若来自审查反馈**: 从 `review_feedback.md` 提取 Improvements/Nitpicks
 **若来自用户指令**: `code-reviewer-agent` (Sub-agent，只读诊断) 对目标范围扫描：
+> ⛔ **MANDATORY DELEGATION**: 诊断扫描必须通过 Sub-agent 委托执行。
+> Planner 禁止自行扫描代码、直接生成重构计划或跳过委托。
+> 未收到 code-reviewer-agent 的扫描完成响应前，禁止写入 refactor_plan.md。
 
 **Prompt**:
 > 对以下范围执行诊断扫描，不输出 VERDICT，只输出改善建议：
@@ -138,13 +141,18 @@ git stash list > .ai/refactor/{refactor_id}/stash_before.txt
 {列表}
 ```
 
-**Checkpoint**: AskQuestion —「重构计划已生成。(A) 确认范围开始 (B) 调整范围 (C) 终止」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「重构计划已生成。(A) 确认范围开始 (B) 调整范围 (C) 终止」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 ### Phase 1: 基线快照（Baseline Capture）
 
 #### Step 1a: 运行已有测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行运行测试或替代 test-runner-agent 输出基线结果。
+> 未收到 test-runner-agent 的基线完成响应前，禁止进入 Phase 2。
 
 **测试范围根据开关动态裁剪**:
 - `unit_test=off` → 跳过 `tests/{router}/` 单元测试基线采集
@@ -192,6 +200,9 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 #### Step 3a: 运行全量测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行运行测试或替代输出行为等价验证结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入 Step 3b。
 
 **测试范围与 Phase 1 基线一致**（跟随 unit_test/inte_test 开关裁剪）
 
@@ -211,6 +222,10 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 
 若重构涉及的代码路径无测试覆盖，启动 `unit-test-gen-agent` (Sub-agent) 补充回归测试：
 
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行生成测试或直接写入测试文件。
+> 未收到 unit-test-gen-agent 的 VERDICT 前不得继续验证。
+
 **Prompt**:
 > 为重构后的代码补充回归测试。重构计划：refactor_plan.md，改动文件：changed_files.txt。
 > 重点覆盖：1) 被提取的公共函数入参出参一致性 2) 被简化的逻辑各分支行为不变 3) 被移动的模块调用链路不变
@@ -223,6 +238,9 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 **Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — 质量审计已跳过」）
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须同时委托两个 Sub-agent 并行执行质量审计。
+> Planner 禁止自行执行审查、直接输出 VERDICT 或跳过任意一个 Agent。
+> 未同时收到两个 Agent 的 VERDICT 响应前，禁止进入 Phase 5。
 
 **Prompt** (both):
 > 审查以下重构代码（结构优化，非新功能/非 Bug 修复），重点关注：
@@ -284,7 +302,9 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 $(cat .ai/refactor/{refactor_id}/changed_files.txt)
 ```
 
-**Checkpoint**: AskQuestion —「重构流水线完毕。(A) 确认 commit (B) 需要调整 (C) 回退所有改动」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「重构流水线完毕。(A) 确认 commit (B) 需要调整 (C) 回退所有改动」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 选 (A) 输出 commit message：
 ```
@@ -306,6 +326,13 @@ refactor: {重构目标一句话}
 - **批量有序**: 固定执行顺序 restructure→move→extract→deduplicate→simplify→rename
 - **审计不强阻塞**: Phase 4 FAIL 不阻断提交（行为已验证），但报告中显著标注
 - **Context Reset**: Agent 间通过文件契约通信，不继承对话历史
+
+### 禁止行为（无论任务复杂度如何，一律适用）
+- 禁止以「重构小」「改动少」为由跳过标注 (Sub-agent) 的步骤
+- 禁止 Planner 自行进行诊断扫描、测试执行或质量审计（即便能力上可行）
+- 禁止自动通过 HARD STOP 卡点，必须等待用户明确响应
+- 禁止在未收到上一阶段 VERDICT 的情况下进入下一阶段
+- 禁止省略 Pre-flight 的流水线配置确认步骤
 
 ## Historical Context
 

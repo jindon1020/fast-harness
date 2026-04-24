@@ -117,11 +117,16 @@ mkdir -p .ai/modify/{branch}_{module}
 
 **Step 0d**: 将分析结构化写入 `change_card.json`，status 设为 `inbox`
 
-**Checkpoint**: AskQuestion —「变更分析已完成。涉及接口：[列出]，影响文件：[列出]，向后兼容：[兼容/不兼容]，DB 变更：[有/无]。是否进入代码修改阶段？」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「变更分析已完成。涉及接口：[列出]，影响文件：[列出]，向后兼容：[兼容/不兼容]，DB 变更：[有/无]。是否进入代码修改阶段？」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 ### Phase 1: 代码修改（Generator）
 
 **Agent**: `generator-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行读取现有代码、直接修改业务文件或替代 generator-agent 执行下去。
+> 未收到 generator-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 请根据 .ai/modify/{branch}_{module}/change_card.json 修改已有接口代码。
@@ -140,6 +145,9 @@ mkdir -p .ai/modify/{branch}_{module}
 **Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须同时委托两个 Sub-agent 并行执行审查。
+> Planner 禁止自行执行审查、直接输出 VERDICT 或跳过任意一个 Agent。
+> 未同时收到两个 Agent 的 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt** (both):
 > 请审查以下接口修改代码（已有接口变更，非新建/非 Bug 修复），重点关注：
@@ -163,6 +171,9 @@ mkdir -p .ai/modify/{branch}_{module}
 #### Step 3a: 生成测试用例
 
 **Agent**: `unit-test-gen-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行生成测试用例、直接写入测试文件或跳过委托。
+> 未收到 unit-test-gen-agent 的书面 VERDICT 响应前，禁止进入 Step 3b。
 
 **Prompt**:
 > 根据 .ai/modify/{branch}_{module}/change_card.json 和 changed_files.txt，连接本地 MySQL 查询真实数据生成 pytest 单元测试。
@@ -178,6 +189,9 @@ mkdir -p .ai/modify/{branch}_{module}
 #### Step 3b: 执行测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行执行 pytest 命令或替代 test-runner-agent 输出测试结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 从 change_card / changed_files.txt 解析涉及的 **router** 列表；传入 pytest 路径：`tests/{router}/`（多目录则空格拼接）。若 `unit_test={router_name}` 则仅传入该目录。
@@ -195,6 +209,9 @@ mkdir -p .ai/modify/{branch}_{module}
 **Scope**: `inte_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_api_test.py`，报告标注「🎯 集成测试范围：{module_name}」
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行执行集成测试命令或替代输出结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 执行集成测试回归：tests/{branch}/{test_target_module}_api_test.py。
@@ -241,7 +258,9 @@ $(cat .ai/modify/{branch}_{module}/changed_files.txt)
 - 代码审查：{Critical} Critical / {Improvement} Improvements | 安全审查：{结论}
 ```
 
-**Checkpoint**: AskQuestion —「变更流水线完毕。(A) 确认 commit (B) 需要调整 (C) 终止」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「变更流水线完毕。(A) 确认 commit (B) 需要调整 (C) 终止」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 选 (A) 输出 commit message：
 ```
@@ -263,6 +282,13 @@ modify: {变更描述一句话}
 - **Context Reset**: Agent 间通过文件契约通信，不继承对话历史
 - **测试持久化**: 单元测试保存到 `tests/{router}/`，新增用例追加不整文件覆盖
 - **歧义必须停下**: 遇到缺失/歧义暂停确认，禁止猜测
+
+### 禁止行为（无论任务复杂度如何，一律适用）
+- 禁止以「任务简单」「改动很小」为由跳过标注 (Sub-agent) 的步骤
+- 禁止 Planner 自行执行代码修改、审查或测试（即便能力上可行）
+- 禁止自动通过 HARD STOP 卡点，必须等待用户明确响应
+- 禁止在未收到上一阶段 VERDICT 的情况下进入下一阶段
+- 禁止省略 Pre-flight 的流水线配置确认步骤
 
 ## Historical Context
 

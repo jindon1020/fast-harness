@@ -83,6 +83,9 @@
 ### Phase 1: 生成单元测试
 
 **Agent**: `unit-test-gen-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行生成测试用例、直接写入测试文件或跳过委托。
+> 未收到 unit-test-gen-agent 的书面 VERDICT 响应前，禁止进入 Phase 2。
 
 **Prompt**:
 > 请根据 `.ai/test/{branch}/changed_files.txt` 识别本次接口改动，连接本地 MySQL 查询真实数据，
@@ -103,6 +106,9 @@
 ### Phase 2: 执行测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行执行 pytest 命令或替代 test-runner-agent 输出测试结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入最终报告。
 
 从 unit-test-gen-agent 的输出中解析本次涉及的 **router 列表**和对应的 **测试路径**，拼接 pytest 命令传入。
 
@@ -152,7 +158,9 @@
 {[if FAIL after retry] 经 {N} 轮修复仍有失败，详见 .ai/test/{branch}/unit_test_results.md}
 ```
 
-**Checkpoint（仅 PASS 时）**: AskQuestion —「测试全部通过，是否直接提交？(A) 确认 commit (B) 不提交」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「测试全部通过，是否直接提交？(A) 确认 commit (B) 不提交」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 选 (A) 输出 commit message 建议：
 ```
@@ -166,3 +174,10 @@
 - **测试持久化复用**：生成的测试文件写入 `tests/{router}/`，后续 `/implement` / `/fix` 流水线中的 unit-test-gen-agent 会自动执行覆盖扫描（步骤 7.5），识别为已覆盖并跳过重复生成
 - **契约隔离**：结果文件写入 `.ai/test/{branch}/`，与 `.ai/implement/`、`.ai/fix/` 等目录完全隔离，互不干扰
 - **歧义必须停下**：改动文件无法关联到 router 时主动询问，不猜测
+
+### 禁止行为（无论任务复杂度如何，一律适用）
+- 禁止以「测试简单」「改动很小」为由跳过标注 (Sub-agent) 的步骤
+- 禁止 Planner 自行生成测试或执行 pytest（即便能力上可行）
+- 禁止自动通过 HARD STOP 卡点，必须等待用户明确响应
+- 禁止在未收到 Phase 1 VERDICT 的情况下直接进入 Phase 2
+- 禁止在未收到 Phase 2 VERDICT 的情况下输出最终报告

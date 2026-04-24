@@ -94,16 +94,25 @@
 ### Phase 0: 需求设计（Planner）
 
 **Agent**: `requirement-design-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行替代执行需求设计、直接写入 task_card.json 或跳过委托。
+> 未收到 requirement-design-agent 的完成响应前，禁止进入下一阶段。
+
 **Skip if**: `task_card` 参数指向已存在文件
 
 传入用户需求描述、branch、可选参数（module、xmind）。Agent 内部含多步骤人类确认流程（需求理解 → 技术方案 → DB 设计 → API 设计 → 业务逻辑 → 侵入性检查）。
 
 **Done when**: `task_card.json` 已写入（status: inbox） + `.ai/design/{branch}_{feature}.md` 已生成
-**Checkpoint**: AskQuestion — 「需求设计已完成，task_card.json 已生成。是否进入代码生成阶段？」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「需求设计已完成，task_card.json 已生成。是否进入代码生成阶段？」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 ### Phase 1: 代码生成（Generator）
 
 **Agent**: `generator-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行读取代码文件、直接修改或创建业务文件、替代 generator-agent 执行代码生成。
+> 未收到 generator-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 请根据 .ai/implement/{branch}_{module}/task_card.json 实现代码。完成后将改动文件列表写入 .ai/implement/{branch}_{module}/changed_files.txt，并更新 task_card.json 的 status 为 in_progress。
@@ -116,6 +125,9 @@
 **Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须同时委托两个 Sub-agent 并行执行审查。
+> Planner 禁止自行执行审查、直接输出 VERDICT 或跳过任意一个 Agent。
+> 未同时收到两个 Agent 的 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt** (both):
 > 请审查以下改动文件，task_card 位于 .ai/implement/{branch}_{module}/task_card.json。
@@ -134,6 +146,9 @@
 #### Step 3a: 生成测试用例
 
 **Agent**: `unit-test-gen-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行生成测试用例、直接写入测试文件或跳过委托。
+> 未收到 unit-test-gen-agent 的书面 VERDICT 响应前，禁止进入 Step 3b。
 
 **Prompt**:
 > 请根据 .ai/implement/{branch}_{module}/task_card.json 中的接口变更和 changed_files.txt，
@@ -146,6 +161,9 @@
 #### Step 3b: 执行测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行执行 pytest 命令或替代 test-runner-agent 输出测试结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
 > 从 task_card 的 `affected_files` / changed_files.txt 解析本次涉及的 **router** 列表；向本 Agent 传入要执行的 pytest 路径（单 router：`tests/{router}/`；多 router：`pytest tests/r1/ tests/r2/ -v -m unit`）。若 `unit_test={router_name}` 则仅传入该目录。
@@ -165,6 +183,9 @@
 #### Step 4a: 生成测试用例
 
 **Agent**: `integration-test-gen-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行解析 xmind 或直接生成集成测试文件。
+> 未收到 integration-test-gen-agent 的书面完成响应前，禁止进入 Step 4b。
 
 **Prompt**:
 > 解析 xmind 生成 pytest 集成测试。xmind: {task_card.test_cases}，task_card: .ai/implement/{branch}_{module}/task_card.json。
@@ -174,6 +195,9 @@
 #### Step 4b: 执行测试
 
 **Agent**: `test-runner-agent` (Sub-agent)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
+> Planner 禁止自行执行测试命令或替代输出集成测试结果。
+> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入 Phase 5。
 
 **Prompt**:
 > 执行 tests/{branch}/{test_target_module}_api_test.py，测试类型：集成测试（外部测试 - xmind）。
@@ -221,7 +245,9 @@ $(cat .ai/implement/{branch}_{module}/changed_files.txt)
 .ai/implement/{branch}_{module}/task_card.json → done
 ```
 
-**Checkpoint**: AskQuestion —「流水线完毕，是否确认提交？(A) 确认 commit (B) 需要调整 (C) 终止」
+🔴 **HARD STOP — 人类确认卡点**
+**必须执行 AskQuestion**：「流水线完毕，是否确认提交？(A) 确认 commit (B) 需要调整 (C) 终止」
+禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
 
 选 (A) 输出 commit message：
 ```
@@ -239,6 +265,13 @@ feat: {task_card.feature}
 - **人类卡点**: Phase 0 后、GAN/测试超限时、Phase 4 跳过判断时、最终报告后
 - **最多 3 轮重试**: 超限升级人类，防止无限循环消耗 Token
 - **歧义必须停下**: Agent 遇到缺失/歧义必须暂停确认，禁止猜测
+
+### 禁止行为（无论任务复杂度如何，一律适用）
+- 禁止以「任务简单」「改动很小」为由跳过标注 (Sub-agent) 的步骤
+- 禁止 Planner 自行执行代码生成、审查或测试（即便能力上可行）
+- 禁止自动通过 HARD STOP 卡点，必须等待用户明确响应
+- 禁止在未收到上一阶段 VERDICT 的情况下进入下一阶段
+- 禁止省略 Pre-flight 的流水线配置确认步骤
 
 ## Historical Context
 
