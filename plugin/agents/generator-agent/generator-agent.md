@@ -30,11 +30,11 @@ color: green
 
 ## 输入
 
-- `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{branch}_{module}/task_card.json`）
+- `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{module}/{branch}/task_card.json`）
 - 需实现的 API 列表和数据库变更
 
 > **路径规则**：所有文件路径由 Command 通过 prompt 传入，本 Agent 不硬编码路径。
-> 典型路径格式：`.ai/implement/{branch}_{module}/`
+> 典型路径格式：`.ai/implement/{module}/{branch}/`
 
 ## 执行流程
 

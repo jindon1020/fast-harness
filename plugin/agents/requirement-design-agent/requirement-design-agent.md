@@ -185,7 +185,7 @@ sequenceDiagram
 
 ### Step 7: 序列化输出 task_card.json
 
-整合前 6 步所有共识，输出标准任务卡，**写入 `.ai/implement/{branch}_{module}/task_card.json`**：
+整合前 6 步所有共识，输出标准任务卡，**写入 `.ai/implement/{module}/{branch}/task_card.json`**：
 
 ```json
 {
@@ -220,7 +220,7 @@ sequenceDiagram
     "app/models/xxx.py"
   ],
   "test_cases": "xmind/{branch}/xxx.xmind",
-  "design_doc": ".ai/design/{branch}_xxx.md",
+  "design_doc": ".ai/design/{module}/{branch}_xxx.md",
   "impact_report": {
     "affected_modules": [],
     "regression_risk": "low|medium|high",
@@ -234,8 +234,8 @@ sequenceDiagram
 ```bash
 # 自动检测当前分支名（将 / 替换为 _，如 feature/user-points → feature_user-points）
 BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')
-mkdir -p .ai/implement/${BRANCH}_{module}
-cat > .ai/implement/${BRANCH}_{module}/task_card.json << 'EOF'
+mkdir -p .ai/implement/{module}/${BRANCH}
+cat > .ai/implement/{module}/${BRANCH}/task_card.json << 'EOF'
 { ... }
 EOF
 ```
@@ -244,7 +244,7 @@ EOF
 
 ### Step 8: 整合输出详细设计文档
 
-将前 7 步所有共识整合为 Markdown 格式《详细设计文档》，写入 `.ai/design/{branch}_{feature}.md`（branch 同上自动检测）：
+将前 7 步所有共识整合为 Markdown 格式《详细设计文档》，写入 `.ai/design/{module}/{branch}_{feature}.md`（branch 同上自动检测）：
 
 ```markdown
 # 详细设计文档：<功能名称>
@@ -268,7 +268,7 @@ EOF
 ...
 
 ## task_card.json 路径
-.ai/implement/{branch}_{module}/task_card.json
+.ai/implement/{module}/{branch}/task_card.json
 ```
 
 ---
@@ -276,8 +276,8 @@ EOF
 ## 完成后通知
 
 ```
-任务卡已就绪：.ai/implement/{branch}_{module}/task_card.json
-详细设计文档：.ai/design/{branch}_{feature}.md
+任务卡已就绪：.ai/implement/{module}/{branch}/task_card.json
+详细设计文档：.ai/design/{module}/{branch}_{feature}.md
 
 下一步：请启动 Generator Agent 执行编码。
 启动方式：将 task_card.json 路径传入 generator-agent
@@ -292,7 +292,7 @@ EOF
 - **强制卡点 = AskQuestion**：每个 Step 结尾必须调用 `AskQuestion` 工具，用户不确认则不进入下一步
 - **task_card.json 是契约**：所有下游 Agent（generator/tester/reviewer）从任务卡取上下文，不依赖对话历史
 - **affected_files 必须精确**：列出所有需要新增或修改的文件，不遗漏、不多列
-- **路径规范**：task_card.json 统一存放在 `.ai/implement/{branch}_{module}/` 目录下（branch 由 `git rev-parse --abbrev-ref HEAD` 自动检测），不使用 `/tmp/`
+- **路径规范**：task_card.json 统一存放在 `.ai/implement/{module}/{branch}/` 目录下（branch 由 `git rev-parse --abbrev-ref HEAD` 自动检测），不使用 `/tmp/`
 
 ## Project Context
 

@@ -12,7 +12,7 @@
 
 ### File Contracts
 
-**Path**: `.ai/implement/{branch}_{module}/`
+**Path**: `.ai/implement/{module}/{branch}/`
 
 | 文件 | 写入方 | 读取方 | 用途 |
 |------|--------|--------|------|
@@ -102,7 +102,7 @@
 
 传入用户需求描述、branch、可选参数（module、xmind）。Agent 内部含多步骤人类确认流程（需求理解 → 技术方案 → DB 设计 → API 设计 → 业务逻辑 → 侵入性检查）。
 
-**Done when**: `task_card.json` 已写入（status: inbox） + `.ai/design/{branch}_{feature}.md` 已生成
+**Done when**: `task_card.json` 已写入（status: inbox） + `.ai/design/{module}/{branch}_{feature}.md` 已生成
 🔴 **HARD STOP — 人类确认卡点**
 **必须执行 AskQuestion**：「需求设计已完成，task_card.json 已生成。是否进入代码生成阶段？」
 禁止推断用户意图自动继续。未收到用户明确回复前，流水线在此终止等待。
@@ -115,7 +115,7 @@
 > 未收到 generator-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
-> 请根据 .ai/implement/{branch}_{module}/task_card.json 实现代码。完成后将改动文件列表写入 .ai/implement/{branch}_{module}/changed_files.txt，并更新 task_card.json 的 status 为 in_progress。
+> 请根据 .ai/implement/{module}/{branch}/task_card.json 实现代码。完成后将改动文件列表写入 .ai/implement/{module}/{branch}/changed_files.txt，并更新 task_card.json 的 status 为 in_progress。
 
 **Done when**: `changed_files.txt` 已生成 + status → `in_progress` + 改动不超出 `affected_files` 范围
 **On block**: 暂停流水线，展示阻塞原因
@@ -130,10 +130,10 @@
 > 未同时收到两个 Agent 的 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt** (both):
-> 请审查以下改动文件，task_card 位于 .ai/implement/{branch}_{module}/task_card.json。
-> 改动文件列表：$(cat .ai/implement/{branch}_{module}/changed_files.txt)
+> 请审查以下改动文件，task_card 位于 .ai/implement/{module}/{branch}/task_card.json。
+> 改动文件列表：$(cat .ai/implement/{module}/{branch}/changed_files.txt)
 > 请严格按六维度/安全维度审查，输出 VERDICT: PASS 或 FAIL。
-> 将审查结果同时写入 .ai/implement/{branch}_{module}/review_feedback.md。
+> 将审查结果同时写入 .ai/implement/{module}/{branch}/review_feedback.md。
 
 **Verdict**: 两者都 PASS → Phase 3 | 任一 FAIL → Retry Loop
 **Retry Loop** (MAX=3): 提取 review_feedback.md 中 Critical → `debugger-agent` 最小化修复（只改 Critical，不重构不改风格，更新 changed_files.txt）→ 重新并行审查。超限 → AskQuestion「已循环 3 轮仍有 Critical：[列出]。(A) 人工修复后继续 (B) 忽略继续测试 (C) 终止」
@@ -151,7 +151,7 @@
 > 未收到 unit-test-gen-agent 的书面 VERDICT 响应前，禁止进入 Step 3b。
 
 **Prompt**:
-> 请根据 .ai/implement/{branch}_{module}/task_card.json 中的接口变更和 changed_files.txt，
+> 请根据 .ai/implement/{module}/{branch}/task_card.json 中的接口变更和 changed_files.txt，
 > 连接本地 MySQL 查询真实数据，生成 pytest 单元测试。
 > 要求：识别改动面、按 `app/routers/*.py` 推导 router 列表、执行已有用例覆盖扫描（见 unit-test-gen-agent 步骤 7.5）、推导数据依赖、查询真实样本、构建测试参数。
 > 持久化到 `tests/{router}/{router}_unit_test.py` 与 `tests/{router}/{router}_unit_data.yaml`（每 router 一套；已完全覆盖则 SKIPPED_GENERATION）。输出标准验证报告。
@@ -168,8 +168,8 @@
 **Prompt**:
 > 从 task_card 的 `affected_files` / changed_files.txt 解析本次涉及的 **router** 列表；向本 Agent 传入要执行的 pytest 路径（单 router：`tests/{router}/`；多 router：`pytest tests/r1/ tests/r2/ -v -m unit`）。若 `unit_test={router_name}` 则仅传入该目录。
 > 测试类型：单元测试（自发性测试）。
-> task_card 位于 .ai/implement/{branch}_{module}/task_card.json。
-> 结果写入 .ai/implement/{branch}_{module}/unit_test_results.md，输出 VERDICT。
+> task_card 位于 .ai/implement/{module}/{branch}/task_card.json。
+> 结果写入 .ai/implement/{module}/{branch}/unit_test_results.md，输出 VERDICT。
 
 **Verdict**: PASS → Phase 4 | FAIL → Retry Loop
 **Retry Loop** (MAX=3): `debugger-agent` 根据 unit_test_results.md 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 3 轮：[列出失败]。(A) 人工修复 (B) 跳过继续集成测试 (C) 终止」
@@ -188,7 +188,7 @@
 > 未收到 integration-test-gen-agent 的书面完成响应前，禁止进入 Step 4b。
 
 **Prompt**:
-> 解析 xmind 生成 pytest 集成测试。xmind: {task_card.test_cases}，task_card: .ai/implement/{branch}_{module}/task_card.json。
+> 解析 xmind 生成 pytest 集成测试。xmind: {task_card.test_cases}，task_card: .ai/implement/{module}/{branch}/task_card.json。
 > 优先从 task_card 获取 API 上下文。
 > 生成 tests/{branch}/{module}_api_test.py 和 tests/{branch}/{module}_test_data.yaml。
 
@@ -201,8 +201,8 @@
 
 **Prompt**:
 > 执行 tests/{branch}/{test_target_module}_api_test.py，测试类型：集成测试（外部测试 - xmind）。
-> task_card 位于 .ai/implement/{branch}_{module}/task_card.json。
-> 结果写入 .ai/implement/{branch}_{module}/integration_test_results.md，输出 VERDICT。
+> task_card 位于 .ai/implement/{module}/{branch}/task_card.json。
+> 结果写入 .ai/implement/{module}/{branch}/integration_test_results.md，输出 VERDICT。
 
 > 其中 `test_target_module` = inte_test 参数值（若为模块名）或当前 module。
 
@@ -231,7 +231,7 @@
 | Phase 4: 集成测试 | integration-test-gen-agent + test-runner | PASS/FAIL/⏭️SKIP | 0-3 |
 
 ### 改动文件
-$(cat .ai/implement/{branch}_{module}/changed_files.txt)
+$(cat .ai/implement/{module}/{branch}/changed_files.txt)
 
 ### 测试覆盖
 - 单元测试：tests/{router}/{router}_unit_test.py（逐 router 列出）— {N} 用例，通过率 {X}%
@@ -242,7 +242,7 @@ $(cat .ai/implement/{branch}_{module}/changed_files.txt)
 - 安全审查：{结论}
 
 ### task_card 状态
-.ai/implement/{branch}_{module}/task_card.json → done
+.ai/implement/{module}/{branch}/task_card.json → done
 ```
 
 🔴 **HARD STOP — 人类确认卡点**

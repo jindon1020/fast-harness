@@ -28,7 +28,7 @@ color: cyan
 
 ## 输入
 
-- `task_card.json` 路径（通过 prompt 传入，如 `.ai/implement/{branch}_{module}/task_card.json`）
+- `task_card.json` 路径（通过 prompt 传入，如 `.ai/implement/{module}/{branch}/task_card.json`）
 - `xmind` 文件路径（通过 prompt 传入）
 - `branch` 和 `module` 名称（通过 prompt 传入）
 

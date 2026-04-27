@@ -18,7 +18,7 @@
 
 ### File Contracts
 
-**Path**: `.ai/modify/{branch}_{module}/`
+**Path**: `.ai/modify/{module}/{branch}/`
 
 | 文件 | 写入方 | 读取方 | 用途 |
 |------|--------|--------|------|
@@ -85,7 +85,7 @@
 1. 检查参数：至少需要变更描述或 `change_card` 路径
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`，`module` 未传入时自动推断
 3. 传入 `change_card=...` 且文件存在 → 跳过 Phase 0
-4. `from=implement` → 从 `.ai/implement/{branch}_{module}/task_card.json` 读取接口上下文，导入 `existing_interfaces`，复用已有测试文件
+4. `from=implement` → 从 `.ai/implement/{module}/{branch}/task_card.json` 读取接口上下文，导入 `existing_interfaces`，复用已有测试文件
 5. 解析运行模式，向用户确认流水线配置：
    - `mode=fast` → 跳过 Phase 2 GAN 审查
    - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={router_name}` → Phase 3 仅运行 `tests/{router_name}/`
@@ -103,7 +103,7 @@
 **Skip if**: `change_card` 参数指向已存在文件
 
 ```bash
-mkdir -p .ai/modify/{branch}_{module}
+mkdir -p .ai/modify/{module}/{branch}
 ```
 
 **Step 0a — 定位接口**:
@@ -129,7 +129,7 @@ mkdir -p .ai/modify/{branch}_{module}
 > 未收到 generator-agent 的书面 VERDICT 响应前，禁止进入下一阶段。
 
 **Prompt**:
-> 请根据 .ai/modify/{branch}_{module}/change_card.json 修改已有接口代码。
+> 请根据 .ai/modify/{module}/{branch}/change_card.json 修改已有接口代码。
 > 核心要求：
 > 1. 先读取现有代码理解当前实现后再修改（非从零实现）
 > 2. 只修改 target_changes 指定的变更点，不做额外重构或优化
@@ -156,8 +156,8 @@ mkdir -p .ai/modify/{branch}_{module}
 > 3. 向后兼容性评估是否准确
 > 4. 参数校验和边界处理是否完备
 > 5. Schema 变更与 Service/DAO 层是否一致
-> change_card: .ai/modify/{branch}_{module}/change_card.json
-> 改动文件：$(cat .ai/modify/{branch}_{module}/changed_files.txt)
+> change_card: .ai/modify/{module}/{branch}/change_card.json
+> 改动文件：$(cat .ai/modify/{module}/{branch}/changed_files.txt)
 > 输出 VERDICT: PASS 或 FAIL，写入 review_feedback.md。
 
 **Verdict**: 两者都 PASS → Phase 3 | 任一 FAIL → Retry Loop
@@ -176,7 +176,7 @@ mkdir -p .ai/modify/{branch}_{module}
 > 未收到 unit-test-gen-agent 的书面 VERDICT 响应前，禁止进入 Step 3b。
 
 **Prompt**:
-> 根据 .ai/modify/{branch}_{module}/change_card.json 和 changed_files.txt，连接本地 MySQL 查询真实数据生成 pytest 单元测试。
+> 根据 .ai/modify/{module}/{branch}/change_card.json 和 changed_files.txt，连接本地 MySQL 查询真实数据生成 pytest 单元测试。
 > 要求：
 > 1. 「变更验证用例」— 验证新行为符合 target_changes
 > 2. 「回归保护用例」— 验证未修改功能仍正常
@@ -196,7 +196,7 @@ mkdir -p .ai/modify/{branch}_{module}
 **Prompt**:
 > 从 change_card / changed_files.txt 解析涉及的 **router** 列表；传入 pytest 路径：`tests/{router}/`（多目录则空格拼接）。若 `unit_test={router_name}` 则仅传入该目录。
 > 测试类型：单元测试（变更验证）。
-> change_card: .ai/modify/{branch}_{module}/change_card.json。
+> change_card: .ai/modify/{module}/{branch}/change_card.json。
 > 结果写入 unit_test_results.md，输出 VERDICT。
 
 **Verdict**: PASS → Phase 3c/4 | FAIL → Retry Loop
@@ -215,7 +215,7 @@ mkdir -p .ai/modify/{branch}_{module}
 
 **Prompt**:
 > 执行集成测试回归：tests/{branch}/{test_target_module}_api_test.py。
-> change_card: .ai/modify/{branch}_{module}/change_card.json。
+> change_card: .ai/modify/{module}/{branch}/change_card.json。
 > 结果写入 integration_test_results.md，输出 VERDICT。
 
 > 其中 `test_target_module` = inte_test 参数值（若为模块名）或当前 module。
@@ -248,7 +248,7 @@ mkdir -p .ai/modify/{branch}_{module}
 - 模块: {module} | 接口: {列表} | 向后兼容: {是/否} | 风险: {low/medium/high}
 
 ### 改动文件
-$(cat .ai/modify/{branch}_{module}/changed_files.txt)
+$(cat .ai/modify/{module}/{branch}/changed_files.txt)
 
 ### 测试覆盖
 - 单元测试：{N} 用例（变更验证 {N} + 回归保护 {N}），通过率 {X}%

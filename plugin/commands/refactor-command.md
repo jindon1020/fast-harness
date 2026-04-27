@@ -29,7 +29,7 @@
 
 ### File Contracts
 
-**Path**: `.ai/refactor/{refactor_id}/`（refactor_id = `{branch}_{scope}_{序号}`）
+**Path**: `.ai/refactor/{module}/{branch}_{序号}/`（refactor_id = `{module}/{branch}_{序号}`）
 
 | 文件 | 写入方 | 读取方 | 用途 |
 |------|--------|--------|------|
@@ -78,7 +78,7 @@
 
 1. 检查参数：至少需要重构目标描述或审查反馈文件
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`
-3. `from=implement` → 从 `.ai/implement/{branch}_{module}/review_feedback.md` 读取 Improvements/Nitpicks + task_card.json 上下文 + 复用已有测试文件
+3. `from=implement` → 从 `.ai/implement/{module}/{branch}/review_feedback.md` 读取 Improvements/Nitpicks + task_card.json 上下文 + 复用已有测试文件
 4. 解析运行模式，向用户确认流水线配置：
    - `mode=fast` → 跳过 Phase 4 质量审计
    - `unit_test=off` → Phase 1/3 跳过单元测试基线采集与行为验证；`unit_test={module_name}` → 仅运行指定模块的单元测试
@@ -89,6 +89,7 @@
    - 根据 unit_test/inte_test 开关动态裁剪基线采集和验证范围
 6. 创建 Git 安全检查点：
 ```bash
+mkdir -p .ai/refactor/{refactor_id}
 git rev-parse HEAD > .ai/refactor/{refactor_id}/git_checkpoint.txt
 git stash list > .ai/refactor/{refactor_id}/stash_before.txt
 ```
@@ -121,7 +122,7 @@ git stash list > .ai/refactor/{refactor_id}/stash_before.txt
 
 ## 来源
 - 类型: 审查反馈/复杂度告警/重复代码/架构违规/技术债务/用户指令
-- 关联 implement: .ai/implement/{branch}_{module}/（若有）
+- 关联 implement: .ai/implement/{module}/{branch}/（若有）
 
 ## 重构项清单
 | ID | 类型 | 文件 | 位置 | 问题描述 | 重构方案 | 优先级 |

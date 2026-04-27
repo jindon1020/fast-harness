@@ -29,7 +29,7 @@ color: red
 ## 输入
 
 - 改动文件列表（通过 prompt 参数传入）
-- `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{branch}_{module}/task_card.json`）
+- `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{module}/{branch}/task_card.json`）
 
 > **路径规则**：所有文件路径由 Command 通过 prompt 传入，本 Agent 不硬编码路径。
 

@@ -30,10 +30,10 @@ color: purple
 
 ## 输入
 
-- `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{branch}_{module}/task_card.json`）
+- `task_card.json` 路径（通过 prompt 参数传入，如 `.ai/implement/{module}/{branch}/task_card.json`）
 - **测试目标路径**（通过 prompt 参数传入，**禁止硬编码**）：单元测试为 `tests/{router}/` 目录或显式文件列表（如 `tests/project/project_unit_test.py`）；集成测试多为 `tests/{branch}/{module}_api_test.py`（由 integration-test-gen-agent 约定）
 - **测试类型**（通过 prompt 参数传入）：`unit`（单元测试）或 `integration`（集成测试）
-- **结果输出路径**（通过 prompt 参数传入，如 `.ai/implement/{branch}_{module}/unit_test_results.md`）
+- **结果输出路径**（通过 prompt 参数传入，如 `.ai/implement/{module}/{branch}/unit_test_results.md`）
 
 > **路径规则**：所有文件路径由 Command 通过 prompt 传入，本 Agent 不硬编码路径。
 
