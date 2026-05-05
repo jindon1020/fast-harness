@@ -378,6 +378,83 @@ description: 项目特定的日志格式规范
 
 使用 `harness-meta-skill` 可交互式管理所有扩展点：「帮我查看所有可用扩展点」。
 
+## AHE：Harness 自动演化
+
+> 参考论文：[Agentic Harness Engineering (arXiv:2604.25850)](https://arxiv.org/abs/2604.25850)
+
+AHE 是 fast-harness 内置的**观测驱动的 harness 自动演化框架**。它让框架的 Extension 组件能够基于真实运行数据自动改进，形成"观测 → 分析 → 演化"的闭环。
+
+### 三大可观测性支柱
+
+| 支柱 | 实现方式 |
+|------|---------|
+| **组件可观测性** | Extension Protocol 本身就是组件级抽象，每个扩展点对应一个可独立版本化的组件 |
+| **轨迹可观测性** | 每次 Command 执行后，Observer 自动记录结构化轨迹到 `.ai/harness-trace/` |
+| **效果可观测性** | 每次改动通过 A/B Eval 量化效果（pass@1 delta），McNemar 检验判断统计显著性 |
+
+### 演化流程
+
+**第一步：积累轨迹**
+
+正常执行 Command，轨迹自动记录：
+
+```
+/implement 实现资产转让接口 [module=asset]
+→ 执行完毕
+→ 轨迹写入 .ai/harness-trace/{trace_id}_implement_asset_feature.jsonl
+```
+
+积累 **20-30 条**之后开始有分析价值。
+
+**第二步：分析根因**
+
+```
+/ahe-analyze limit=50
+```
+
+输出：
+- 失败模式聚类（按 phase、按归因标签）
+- Root Cause 归因（定位到具体 Extension 组件，如 `generator-agent.@coding-convention`）
+- Edit Candidate 候选（每个 RCA 生成 3 个 variant：最小改动 / 中改动 / 大改动）
+
+输出文件：`.ai/harness-evolution/{timestamp}_analysis.md`
+
+**第三步：预览 & 应用**
+
+```bash
+# 预览改动（不改任何文件）
+/ahe-evo dry-run CAND-001-A
+
+# 应用改动（创建实验分支，执行 A/B Eval）
+/ahe-evo apply CAND-001-A
+```
+
+A/B Eval 结果：
+- pass@1 delta > +2% 且 p < 0.05 → 统计显著，建议合并
+- delta 在 ±2% → 人工决策
+- delta < -2% → 丢弃
+
+### AHE 相关文件
+
+| 文件 | 用途 |
+|------|------|
+| `.ai/harness-trace/` | 轨迹数据（每次 Command 执行后自动写入） |
+| `.ai/harness-evolution/` | 演化记录（分析报告 + Evo 日志） |
+| `plugin/skills/ahe-observer/` | 观测组件——被动收集轨迹 |
+| `plugin/skills/ahe-analyzer/` | 分析组件——根因分析 + 候选生成 |
+| `plugin/skills/ahe-evo/` | 演化组件——patch 应用 + A/B Eval |
+| `plugin/skills/ahe-observer/benchmarks/ahe-eval-set.jsonl` | A/B Eval 基准测试集 |
+
+### A/B Eval 测试集维护
+
+`ahe-eval-set.jsonl` 记录代表性任务。积累轨迹后，可将典型任务加入测试集：
+
+```json
+{"task_id":"EVAL-001","command":"implement","module":"project","difficulty":"medium","description":"实现项目创建API","expected_fail_pattern":"tool_desc_incomplete","history":{"pass_count":3,"fail_count":2}}
+```
+
+---
+
 ## Token 消耗估算
 
 | 流水线 | 典型消耗 | 典型耗时 |
