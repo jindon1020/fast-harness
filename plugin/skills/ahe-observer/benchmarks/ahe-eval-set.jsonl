@@ -1,0 +1,26 @@
+# AHE Eval Set - Representative Task Set for Harness A/B Testing
+
+这个测试集从 fast-harness 历史执行轨迹中筛选而出，覆盖主要 command 类型和模块，用于评估 harness 改动的效果。
+
+## 筛选标准
+
+- 每个 command 类型（implement / refactor / fix）至少 5 个任务
+- 每个任务必须有明确的 task_card.json 和可复现的测试结果
+- 优先选择覆盖多种失败模式的轨迹
+
+## 字段说明
+
+```jsonl
+{"task_id":"EVAL-001","command":"implement","module":"project","difficulty":"medium","description":"实现项目创建API","task_card_path":".ai/implement/project/eval_branch/task_card.json","expected_fail_pattern":"tool_desc_incomplete","history":{"pass_count":3,"fail_count":2}}
+{"task_id":"EVAL-002","command":"implement","module":"assets","difficulty":"medium","description":"实现资产列表查询接口","task_card_path":".ai/implement/assets/eval_branch/task_card.json","expected_fail_pattern":"context_insufficient","history":{"pass_count":4,"fail_count":1}}
+```
+
+## 维护
+
+- 每当积累新的成功/失败轨迹时，更新此测试集
+- 删除已经过于简单（pass_count > 10）且无失败记录的任务
+- 新增代表新型失败模式的评估任务
+
+---
+
+*This benchmark is part of the AHE (Agentic Harness Engineering) framework.*

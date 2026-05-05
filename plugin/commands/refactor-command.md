@@ -1,3 +1,9 @@
+---
+name: refactor-command
+description: 批量代码重构流水线
+skill: ahe-observer
+---
+
 # refactor-command
 
 ## Task
@@ -87,14 +93,50 @@
    - 完整模式（默认）：「范围定义 → 基线快照 → 批量重构 → 行为验证 → 质量审计。**不会改变任何接口外部行为**」
    - 快速模式（mode=fast）：「范围定义 → 基线快照 → 批量重构 → 行为验证。**不会改变任何接口外部行为**」
    - 根据 unit_test/inte_test 开关动态裁剪基线采集和验证范围
-6. 创建 Git 安全检查点：
+6. **AHE 轨迹初始化**（记录本次 Command 执行的元数据）：
+   ```bash
+   mkdir -p .ai/harness-trace
+   python3 -c "
+   import json, time, uuid
+   meta = {
+       'trace_id': str(uuid.uuid4()),
+       'command': 'refactor',
+       'module': '\$module',
+       'branch': '\$BRANCH',
+       'mode': '\$mode',
+       'unit_test': '\$unit_test',
+       'inte_test': '\$inte_test',
+       'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+       'preflight_done': False,
+       'phase_events': []
+   }
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
+   > **AHE**: 此步骤由 `ahe-observer` skill 声明后自动触发。
+7. 创建 Git 安全检查点：
 ```bash
 mkdir -p .ai/refactor/{refactor_id}
 git rev-parse HEAD > .ai/refactor/{refactor_id}/git_checkpoint.txt
 git stash list > .ai/refactor/{refactor_id}/stash_before.txt
 ```
+8. **AHE Pre-flight 完成标记**：更新 `.preflight_meta.json` 中 `preflight_done=True`：
+   ```bash
+   python3 -c "
+   import json, time
+   with open('.ai/harness-trace/.preflight_meta.json') as f:
+       meta = json.load(f)
+   meta['preflight_done'] = True
+   meta['preflight_duration_sec'] = time.time() - time.mktime(time.strptime(meta['preflight_at'], '%Y-%m-%dT%H:%M:%SZ'))
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
 
 ## Execution Steps
+
+> **AHE Phase 事件**：每个 Phase 开始前，Command 框架自动向 `.ai/harness-trace/.preflight_meta.json` 追加 `phase_events` 记录。Observer Skill 在 Command 执行完毕后统一消费这些事件写入完整轨迹。
 
 ### Phase 0: 范围定义与重构计划
 
@@ -257,6 +299,9 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 **Retry Loop** (MAX=1): `debugger-agent` 修复 Critical → 重新执行 Phase 3 + Phase 4。仍 FAIL → 标记问题，**不阻塞提交**但在报告中显著标注
 
 > 审计循环仅 1 轮。重构不应产生 Critical，1 轮修不好说明方案本身有问题
+> **AHE**: 每次 Retry Loop 触发时，记录 `{"phase": "Phase 4", "event": "retry", "retry_count": N}` 到轨迹 `phase_events` 中。
+
+### Phase 5: 重构报告
 
 ### Phase 5: 重构报告
 
@@ -301,6 +346,11 @@ rg "from app\.services" app/dao/ -c --glob "*.py" 2>/dev/null || echo "0"
 
 ### 改动文件
 $(cat .ai/refactor/{refactor_id}/changed_files.txt)
+
+### AHE 轨迹信息
+- **轨迹文件**：`.ai/harness-trace/{trace_id}_refactor_{module}_{branch}.jsonl`
+- **分析触发**：执行 `/ahe-analyze limit=30` 进行根因分析
+- **演化触发**：分析后执行 `/ahe-evo apply <candidate_id>` 应用改进候选
 ```
 
 🔴 **HARD STOP — 人类确认卡点**

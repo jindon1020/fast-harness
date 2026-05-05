@@ -1,3 +1,9 @@
+---
+name: implement-command
+description: 端到端需求实现流水线
+skill: ahe-observer
+---
+
 # implement-command
 
 ## Task
@@ -75,7 +81,28 @@
    - 完整模式（默认）：「需求设计 → 代码生成 → GAN 审查 → 单元测试 → 集成测试。关键节点暂停确认」
    - 快速模式（mode=fast）：「需求设计 → 代码生成 → 单元测试 → 集成测试」
    - 根据 unit_test/inte_test 开关动态裁剪路径展示
-6. **Wiki 鲜度检查**：若 `.wiki/MANIFEST.json` 存在，检测过期 section：
+6. **AHE 轨迹初始化**：记录本次 Command 执行的元数据到临时文件（供 Observer Skill 读取）：
+   ```bash
+   mkdir -p .ai/harness-trace
+   python3 -c "
+   import json, time, uuid
+   meta = {
+       'trace_id': str(uuid.uuid4()),
+       'command': 'implement',
+       'module': '$module',
+       'branch': '$BRANCH',
+       'mode': '$mode',
+       'unit_test': '$unit_test',
+       'inte_test': '$inte_test',
+       'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+       'preflight_done': False
+   }
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
+   > **AHE**: 此步骤由 `ahe-observer` skill 声明后自动触发，记录 preflight_started 事件。
+7. **Wiki 鲜度检查**：若 `.wiki/MANIFEST.json` 存在，检测过期 section：
    ```bash
    python3 -c "
    import json
@@ -89,7 +116,23 @@
      建议先执行 `/init force` 刷新，当前将以过期知识为背景继续执行。」
    - 若 `.wiki/MANIFEST.json` 不存在，跳过此步骤（wiki 尚未初始化，运行 `/init` 可激活）
 
+8. **AHE Pre-flight 完成标记**：更新 `.preflight_meta.json` 中 `preflight_done=True`，记录耗时：
+   ```bash
+   python3 -c "
+   import json, time
+   with open('.ai/harness-trace/.preflight_meta.json') as f:
+       meta = json.load(f)
+   meta['preflight_done'] = True
+   meta['preflight_duration_sec'] = time.time() - time.mktime(time.strptime(meta['preflight_at'], '%Y-%m-%dT%H:%M:%SZ'))
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
+   > **AHE**: Observer Skill 读取此标记后，写入 `preflight_completed` 事件到轨迹。
+
 ## Execution Steps
+
+> **AHE Phase 事件**：每个 Phase 开始前，Command 框架自动向 `.ai/harness-trace/.preflight_meta.json` 追加 `phase_events` 记录：`{"phase": "Phase 0", "event": "phase_started", "timestamp": "ISO8601"}`。Observer Skill 在 Command 执行完毕后统一消费这些事件写入完整轨迹。
 
 ### Phase 0: 需求设计（Planner）
 
@@ -137,6 +180,8 @@
 
 **Verdict**: 两者都 PASS → Phase 3 | 任一 FAIL → Retry Loop
 **Retry Loop** (MAX=3): 提取 review_feedback.md 中 Critical → `debugger-agent` 最小化修复（只改 Critical，不重构不改风格，更新 changed_files.txt）→ 重新并行审查。超限 → AskQuestion「已循环 3 轮仍有 Critical：[列出]。(A) 人工修复后继续 (B) 忽略继续测试 (C) 终止」
+
+> **AHE**: 每次 Retry Loop 触发时，记录 `{"phase": "Phase 2", "event": "retry", "retry_count": N, "reason": "Critical/N"}` 到 `.ai/harness-trace/.preflight_meta.json` 的 `phase_events` 数组中。
 
 ### Phase 3: 单元测试（Discriminator Round 2）
 
@@ -243,6 +288,11 @@ $(cat .ai/implement/{module}/{branch}/changed_files.txt)
 
 ### task_card 状态
 .ai/implement/{module}/{branch}/task_card.json → done
+
+### AHE 轨迹信息
+- **轨迹文件**：`.ai/harness-trace/{trace_id}_{command}_{module}_{branch}.jsonl`
+- **分析触发**：执行 `/ahe-analyze limit=30` 进行根因分析
+- **演化触发**：分析后执行 `/ahe-evo apply <candidate_id>` 应用改进候选
 ```
 
 🔴 **HARD STOP — 人类确认卡点**
