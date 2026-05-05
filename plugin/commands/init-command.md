@@ -1,3 +1,9 @@
+---
+name: init-command
+description: 新项目首次 Code Wiki 构建
+skill: ahe-observer
+---
+
 # init-command
 
 ## Task
@@ -58,6 +64,37 @@
    ③ generator-agent 扩展配置（@pre-generation + @coding-convention）
    ④ requirement-design-agent 扩展配置（@design-convention）
    完成后流水线 Agent 将自动感知项目代码结构与已知风险点。」
+4. **AHE 轨迹初始化**：
+   ```bash
+   mkdir -p .ai/harness-trace
+   python3 -c "
+   import json, time, uuid
+   meta = {
+       'trace_id': str(uuid.uuid4()),
+       'command': 'init',
+       'module': 'n/a',
+       'branch': '$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "local")',
+       'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+       'preflight_done': False,
+       'phase_events': [],
+       'verdicts': []
+   }
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
+   > **AHE**: Observer Skill 读取此文件，在 Command 执行完毕后生成轨迹。
+5. **AHE Pre-flight 完成标记**：
+   ```bash
+   python3 -c "
+   import json, time
+   with open('.ai/harness-trace/.preflight_meta.json') as f:
+       meta = json.load(f)
+   meta['preflight_done'] = True
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
 
 ## Execution Steps
 
@@ -181,6 +218,11 @@ code-wiki-gen 将在项目根目录下生成：
 - `/implement` 等命令在 Pre-flight 阶段会自动检测 wiki 是否过期（基于 MANIFEST.json）
 - 当积累大量代码变更后，运行 `/init force` 重新全量刷新 wiki
 - `.wiki/` 建议提交到 git，作为项目知识资产持续维护
+
+### AHE 轨迹信息
+- **轨迹文件**：`.ai/harness-trace/{trace_id}_init_{branch}.jsonl`
+- **分析触发**：执行 `/ahe-analyze limit=30` 进行根因分析
+- **演化触发**：分析后执行 `/ahe-evo apply <candidate_id>` 应用改进候选
 ```
 
 ## Key Principles

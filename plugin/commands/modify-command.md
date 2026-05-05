@@ -1,3 +1,9 @@
+---
+name: modify-command
+description: 已有接口功能变更流水线
+skill: ahe-observer
+---
+
 # modify-command
 
 ## Task
@@ -94,8 +100,44 @@
    - 完整模式（默认）：「变更分析 → 代码修改 → GAN 审查 → 单元测试。关键节点暂停确认」
    - 快速模式（mode=fast）：「变更分析 → 代码修改 → 单元测试」
    - 根据 unit_test/inte_test 开关动态裁剪路径展示
+7. **AHE 轨迹初始化**：
+   ```bash
+   mkdir -p .ai/harness-trace
+   python3 -c "
+   import json, time, uuid
+   meta = {
+       'trace_id': str(uuid.uuid4()),
+       'command': 'modify',
+       'module': '\$module',
+       'branch': '\$BRANCH',
+       'mode': '\$mode',
+       'unit_test': '\$unit_test',
+       'inte_test': '\$inte_test',
+       'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+       'preflight_done': False,
+       'phase_events': [],
+       'verdicts': []
+   }
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
+   > **AHE**: Observer Skill 读取此文件，在 Command 执行完毕后生成轨迹。
+8. **AHE Pre-flight 完成标记**：
+   ```bash
+   python3 -c "
+   import json, time
+   with open('.ai/harness-trace/.preflight_meta.json') as f:
+       meta = json.load(f)
+   meta['preflight_done'] = True
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
 
 ## Execution Steps
+
+> **AHE Phase 事件**：每个 Phase 开始前，Command 框架自动向 `.ai/harness-trace/.preflight_meta.json` 追加 `phase_events` 记录。Observer Skill 在 Command 执行完毕后统一消费写入轨迹。
 
 ### Phase 0: 变更分析（Change Analysis）
 
@@ -163,6 +205,8 @@ mkdir -p .ai/modify/{module}/{branch}
 **Verdict**: 两者都 PASS → Phase 3 | 任一 FAIL → Retry Loop
 **Retry Loop** (MAX=2): 提取 Critical → `debugger-agent` 最小化修复 → 重新审查。超限 → AskQuestion「已循环 2 轮：[列出]。(A) 人工修复 (B) 忽略继续测试 (C) 终止」
 
+> **AHE**: 每次 Retry Loop 触发时，记录 `{"phase": "Phase 2", "event": "retry", "retry_count": N}` 到轨迹 `phase_events` 中。
+
 ### Phase 3: 单元测试（Discriminator Round 2）
 
 **Skip if**: `unit_test=off`（报告中标注「⏭️ 单元测试已跳过（unit_test=off）」）
@@ -201,6 +245,8 @@ mkdir -p .ai/modify/{module}/{branch}
 
 **Verdict**: PASS → Phase 3c/4 | FAIL → Retry Loop
 **Retry Loop** (MAX=2): `debugger-agent` 根据 unit_test_results.md + change_card 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 2 轮：[列出]。(A) 人工修复 (B) 终止」
+
+> **AHE**: 每次 Retry Loop 触发时，记录 `{"phase": "Phase 3", "event": "retry", "retry_count": N}` 到轨迹 `phase_events` 中。
 
 ### Phase 3c: 集成测试回归（可选）
 
@@ -256,6 +302,11 @@ $(cat .ai/modify/{module}/{branch}/changed_files.txt)
 
 ### 审查摘要
 - 代码审查：{Critical} Critical / {Improvement} Improvements | 安全审查：{结论}
+
+### AHE 轨迹信息
+- **轨迹文件**：`.ai/harness-trace/{trace_id}_modify_{module}_{branch}.jsonl`
+- **分析触发**：执行 `/ahe-analyze limit=30` 进行根因分析
+- **演化触发**：分析后执行 `/ahe-evo apply <candidate_id>` 应用改进候选
 ```
 
 🔴 **HARD STOP — 人类确认卡点**

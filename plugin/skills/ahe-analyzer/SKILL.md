@@ -1,160 +1,250 @@
-# AHE Analyzer Skill
+---
+name: ahe-analyzer
+description: AHE 根因分析——读取 .ai/harness-trace/ 下的轨迹数据，聚类失败模式并生成改进候选。触发于：分析 harness、分析 AHE、根因分析、harness 改进、生成改进候选、ahe analyze。
+---
 
-## Purpose
+# AHE Analyzer
 
-AHE 分析引擎——消费 AHE Observer 记录的结构化轨迹，自动进行**失败根因分析**（Root Cause Analysis）和**改进候选生成**（Edit Candidate Generation）。
+AHE 分析引擎——消费 AHE Observer 记录的结构化轨迹，自动进行**失败模式聚类**和**改进候选生成**。
 
-## What It Does
+---
 
-当 `.ai/harness-trace/` 目录下积累了一定数量的轨迹数据后，AHE Analyzer 可以：
-1. 读取轨迹数据，识别失败模式
-2. 将失败轨迹按根因分类（prompt 措辞问题 / 工具描述不清 / 流程顺序不当 / skill 缺失）
-3. 为每个失败模式生成具体可操作的 harness 改进建议
-4. 输出可执行的 patch 方案（对 Agent prompt / extension / skill 的修改）
+## 能力一览
 
-## Integration Points
+| 能力 | 触发词 | 说明 |
+|------|--------|------|
+| **分析轨迹** | ahe analyze、分析 harness、根因分析 | 批量读取轨迹，聚类失败模式，生成 RCA + CAND |
+| **聚类报告** | 聚类报告、失败模式 | 输出按 phase 和归因标签分类的失败统计 |
+| **RCA 详情** | 根因、rca 详情 | 对单条 RCA 进行深入分析，输出归因证据链 |
+| **候选预览** | 候选预览、cand 预览 | 预览生成的 Edit Candidate，不实际生成 patch |
 
-Analyzer 不是流水线的常驻组件，而是**按需调用**：
+---
+
+## 1. 分析轨迹
+
+**触发词**：ahe analyze、分析 harness、分析 AHE、根因分析
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `limit` | 50 | 分析最近 N 条轨迹 |
+| `cluster_by` | phase | 聚类维度：`phase` / `component` / `failure_type` |
+
+### 执行步骤
+
+**Step 1: 收集轨迹**
 
 ```bash
-# 手动触发（分析最近 N 条轨迹）
-/ahe-analyze [limit=50]
+TRACE_DIR=".ai/harness-trace"
+LIMIT=${limit:-50}
+CLUSTER_BY=${cluster_by:-phase}
 
-# 自动触发（每 N 条命令执行后）
-# → 由 Command 框架在执行完一定数量后自动触发
+echo "## AHE 分析报告"
+echo "分析时间：$(date '+%Y-%m-%d %H:%M:%S')"
+echo "分析范围：最近 $LIMIT 条轨迹"
+echo ""
+
+# 收集所有轨迹文件（按时间倒序）
+TRACES=$(ls -t "$TRACE_DIR"/*.jsonl 2>/dev/null | head "$LIMIT")
+
+if [ -z "$TRACES" ]; then
+  echo "暂无轨迹数据。请先执行 Command 积累轨迹（.ai/harness-trace/）。"
+  exit 0
+fi
+
+echo "**找到 $(echo "$TRACES" | wc -l | tr -d ' ') 条轨迹**"
+echo ""
 ```
 
-## Analysis Pipeline
+**Step 2: 解析失败轨迹**
 
-### Step 1: Load Traces
+```python
+# 使用 Python 解析所有轨迹，提取失败 phase 信息
+python3 << 'PYEOF'
+import json, sys
+from collections import defaultdict
 
-从 `.ai/harness-trace/` 读取最近 `limit` 条轨迹，筛选其中 `verdict=FAIL` 的条目。
+traces = []
+for line in sys.stdin if sys.stdin.isatty() else []:
+    pass  # 从文件读取
 
-### Step 2: Pattern Clustering
+# 读取轨迹
+import subprocess, glob
+trace_files = sorted(glob.glob(".ai/harness-trace/*.jsonl"), 
+                     key=lambda p: p.mtime(), reverse=True)[:50]
 
-将失败轨迹按**失败 phase** 和**归因标签**进行聚类：
+failed_phases = defaultdict(list)
+all_verdicts = []
+
+for tf in trace_files:
+    with open(tf) as f:
+        try:
+            trace = json.loads(f.readline())
+        except:
+            continue
+    
+    command = trace.get("command", "?")
+    module = trace.get("module", "?")
+    retry_count = trace.get("retry_count", 0)
+    
+    # 统计 verdicts
+    for v in trace.get("verdicts", []):
+        all_verdicts.append({
+            "phase": v.get("phase", "?"),
+            "verdict": v.get("verdict", "?"),
+            "reason": v.get("reason", ""),
+            "command": command,
+            "module": module
+        })
+        if v.get("verdict") == "FAIL":
+            failed_phases[v.get("phase", "?")].append(v)
+
+# 输出失败统计
+print(f"\n## 失败统计（共 {len(all_verdicts)} 条 verdict）")
+print(f"失败 phase 数：{len(failed_phases)}")
+for phase, items in sorted(failed_phases.items(), key=lambda x: -len(x[1])):
+    pct = len(items) / len(all_verdicts) * 100 if all_verdicts else 0
+    print(f"  {phase}: {len(items)} 次 ({pct:.1f}%)")
+
+PYEOF
+```
+
+**Step 3: 生成 RCA（Root Cause Analysis）**
+
+对每个失败 cluster，执行 LLM 分析：
 
 ```
-标签分类：
-- prompt_ambiguous        → prompt 措辞模糊或有歧义
-- tool_desc_incomplete    → 工具描述缺少必要参数或示例
-- skill_missing           → 缺少某个领域的 skill
-- context_insufficient    → 上下文信息不足（如 wiki 缺失）
-- flow_order_suboptimal   → 流程顺序安排不当
-- assertion_too_strict    → 测试断言过于严格
-- infra_unstable          → 基础设施问题（非 harness 原因）
+分析以下失败轨迹，给出根因归因：
+
+失败 phase：[phase name]
+失败次数：N
+失败原因摘要：[从轨迹提取]
+
+请输出：
+1. root_cause：一句话描述根本原因（必须归因到具体 harness 组件，如 generator-agent.@coding-convention）
+2. attributed_component：具体的组件名
+3. evidence：2-3 条支持证据
+4. confidence：high/medium/low
 ```
 
-### Step 3: Root Cause Analysis
+**Step 4: 生成 Edit Candidate**
 
-对每个失败 cluster，运行 LLM 分析：
+对每个 RCA，生成 3 条改进候选：
 
-**Prompt 输入**（从轨迹提取）：
-- 失败 phase 的 VERDICT + 重试次数
-- 失败轨迹中的具体错误信息（review_feedback.md / unit_test_results.md 摘要）
-- 涉及的 Agent 和 Extension 版本
-- 该类任务的历史成功案例（如有）
-
-**Prompt 要求**：
 ```
-你是一个 AHE（Agentic Harness Engineering）分析引擎。
-分析以下失败轨迹，找出根本原因（Root Cause）。
-Root Cause 必须是**可直接归因到某个 harness 组件**的问题，
-而不是"模型能力不足"这类模糊解释。
+针对以下 Root Cause，生成 3 条改进候选：
+
+Root Cause：[rca.root_cause]
+目标组件：[rca.attributed_component]
+
+生成 3 个 variant：
+- Variant A（最小改动）：只改措辞/描述，不改结构
+- Variant B（中改动）：增加/删除一个检查项
+- Variant C（大改动）：重新设计组件逻辑
 
 输出格式：
-{
-  "root_cause": "一句话描述根本原因",
-  "attributed_component": "具体组件名，如 generator-agent.@coding-convention",
-  "evidence": ["证据1", "证据2"],
-  "confidence": "high|medium|low"
-}
+CAND-{N}-A: {description} | risk: low
+CAND-{N}-B: {description} | risk: medium  
+CAND-{N}-C: {description} | risk: high
 ```
 
-### Step 4: Edit Candidate Generation
-
-对每个确认的 Root Cause，生成 3 条改进候选：
-
-**生成策略**：
-- **Variant A**：最小改动（只改措辞/描述，不改结构）
-- **Variant B**：中改动（增加/删除一个检查项或步骤）
-- **Variant C**：大改动（重新设计组件逻辑）
-
-**输出格式**：
-```json
-{
-  "candidate_id": "CAND-001",
-  "target_component": "generator-agent.@coding-convention",
-  "variant": "A|B|C",
-  "description": "在 coding-convention 中增加边界条件处理 Checklist",
-  "patch": {
-    "type": "extension_patch|skill_patch|prompt_patch",
-    "file": ".ai/agents/generator-agent/extensions/wiki-coding-convention.md",
-    "diff": "- 原始内容\n+ 新增内容"
-  },
-  "expected_impact": "修复 {failure_pattern}，预期 pass@1 提升 X%",
-  "risk": "low|medium|high"
-}
-```
-
-## Usage
-
-### 手动触发
-
-```
-/ahe-analyze limit=50 cluster_by=phase
-```
-
-### 自动触发（集成到 Command）
-
-在 Command 的最终报告阶段，可以插入：
+**Step 5: 输出分析报告**
 
 ```markdown
-### AHE 观测数据
-- 轨迹已记录：`.ai/harness-trace/{timestamp}_{command}_{module}_{branch}.jsonl`
-- 如需分析 harness 改进方向，触发 `/ahe-analyze`
-```
-
-## Output
-
-Analyzer 的输出写入 `.ai/harness-evolution/{timestamp}_analysis.md`：
-
-```markdown
-# AHE Analysis Report
-生成时间：{timestamp}
+## AHE 分析报告
+分析时间：{timestamp}
 分析轨迹数：{N} 条（失败：{M} 条）
 
-## 失败模式聚类
+### 失败模式聚类
 
-| 模式 | 失败数 | 占比 | 代表 phase |
+| 模式 | 失败数 | 占比 | 代表 Phase |
 |------|--------|------|-----------|
 | tool_desc_incomplete | 12 | 40% | Phase 1 |
 | context_insufficient | 8 | 27% | Phase 3 |
 
-## Root Cause 详情
+### Root Cause 详情
 
-### RC-001: tool_desc_incomplete
-- **根因**：generator-agent 对 router 的 tool description 缺少参数示例
-- **证据**：...（2条）
-- **置信度**：high
-- **涉及 phase**：Phase 1（代码生成）
+#### RC-{N}: {root_cause}
+- **归因组件**: {attributed_component}
+- **证据**: {evidence}
+- **置信度**: {confidence}
 
-## Edit Candidates
+### Edit Candidates
 
-### CAND-001-A（最小改动）
-- **目标组件**：generator-agent.@coding-convention
-- **改动描述**：在 extension 中增加"必填参数必须包含示例值"规则
-- **预期影响**：减少因参数描述不清导致的返工
-- **风险**：low
+| ID | 目标组件 | Variant | 描述 | 风险 |
+|----|---------|---------|------|------|
+| CAND-001-A | generator-agent.@coding-convention | A | {最小改动描述} | low |
+| CAND-001-B | generator-agent.@coding-convention | B | {中改动描述} | medium |
+| CAND-002-A | code-reviewer-agent.@review-dimension | A | {...} | low |
 
-[CAND-002...]
+### 建议
 
-## 建议
-
-推荐优先实施 CAND-001（CAND-002 次之）。
-高风险改动（CAND-003）建议在 staging 环境验证后再合并。
+推荐优先实施 low-risk candidate。
+触发 `/ahe-evo apply <candidate_id>` 应用改进。
 ```
 
 ---
 
-*This skill is part of the AHE (Agentic Harness Engineering) framework for observability-driven harness evolution.*
+## 2. 聚类报告
+
+**触发词**：聚类报告、失败模式
+
+```bash
+python3 << 'EOF'
+import json, glob
+from collections import defaultdict
+
+trace_files = sorted(glob.glob(".ai/harness-trace/*.jsonl"), 
+                     key=lambda p: __import__('os').path.getmtime(p), reverse=True)[:100]
+
+failure_by_phase = defaultdict(int)
+failure_by_component = defaultdict(int)
+failure_by_type = defaultdict(int)
+
+for tf in trace_files:
+    with open(tf) as f:
+        trace = json.loads(f.readline())
+    for v in trace.get("verdicts", []):
+        if v.get("verdict") == "FAIL":
+            failure_by_phase[v.get("phase", "?")] += 1
+            failure_by_component[v.get("component", "?")] += 1
+            failure_by_type[v.get("failure_type", "unknown")] += 1
+
+print("### 失败聚类（按 Phase）")
+for k, v in sorted(failure_by_phase.items(), key=lambda x: -x[1]):
+    print(f"  {k}: {v}")
+print()
+print("### 失败聚类（按组件）")
+for k, v in sorted(failure_by_component.items(), key=lambda x: -x[1]):
+    print(f"  {k}: {v}")
+print()
+print("### 失败聚类（按类型）")
+for k, v in sorted(failure_by_type.items(), key=lambda x: -x[1]):
+    print(f"  {k}: {v}")
+EOF
+```
+
+---
+
+## 3. 候选预览
+
+**触发词**：候选预览、cand 预览
+
+```bash
+# 读取上次分析报告中的 candidates
+ANALYSIS_FILE=$(ls -t .ai/harness-evolution/*_analysis.md 2>/dev/null | head -1)
+
+if [ -z "$ANALYSIS_FILE" ]; then
+  echo "暂无分析报告。请先执行 `/ahe-analyze`。"
+  exit 0
+fi
+
+echo "## Edit Candidates 预览"
+echo ""
+grep "^| CAND-" "$ANALYSIS_FILE" | head -10
+```
+
+---
+
+*AHE Analyzer 是 fast-harness AHE 框架的分析组件，按需触发，不影响正常 Command 执行流程。*

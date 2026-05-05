@@ -1,3 +1,9 @@
+---
+name: test-command
+description: 提交前快速单元测试闭环
+skill: ahe-observer
+---
+
 # test-command
 
 ## Task
@@ -77,8 +83,43 @@
    → Phase 1: 生成测试（unit-test-gen-agent）
    → Phase 2: 执行测试（test-runner-agent）
    → Retry Loop（MAX=3，失败时 debugger-agent 最小化修复代码）」
+7. **AHE 轨迹初始化**：
+   ```bash
+   mkdir -p .ai/harness-trace
+   python3 -c "
+   import json, time, uuid
+   meta = {
+       'trace_id': str(uuid.uuid4()),
+       'command': 'test',
+       'module': 'local',
+       'branch': '$BRANCH',
+       'scope': '$scope',
+       'router': '${router:-all}',
+       'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+       'preflight_done': False,
+       'phase_events': [],
+       'verdicts': []
+   }
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
+   > **AHE**: Observer Skill 读取此文件，在 Command 执行完毕后生成轨迹。
+8. **AHE Pre-flight 完成标记**：
+   ```bash
+   python3 -c "
+   import json, time
+   with open('.ai/harness-trace/.preflight_meta.json') as f:
+       meta = json.load(f)
+   meta['preflight_done'] = True
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
 
 ## Execution Steps
+
+> **AHE Phase 事件**：每个 Phase 开始前，Command 框架自动向 `.ai/harness-trace/.preflight_meta.json` 追加 `phase_events` 记录。
 
 ### Phase 1: 生成单元测试
 
@@ -129,6 +170,8 @@
 3. debugger-agent 修复完成 → 重新执行 Phase 2（test-runner-agent）
 4. 超过 3 轮仍 FAIL → AskQuestion「已循环 3 轮，以下用例仍失败：[列出]。(A) 人工修复后重新 /test (B) 忽略失败直接提交 (C) 终止」
 
+> **AHE**: 每次 Retry Loop 触发时，记录 `{"phase": "Phase 2", "event": "retry", "retry_count": N}` 到轨迹 `phase_events` 中。
+
 ---
 
 ### Phase 3: 最终报告
@@ -156,6 +199,11 @@
 
 {[if PASS] 所有用例通过，可安全提交。}
 {[if FAIL after retry] 经 {N} 轮修复仍有失败，详见 .ai/test/{branch}/unit_test_results.md}
+
+### AHE 轨迹信息
+- **轨迹文件**：`.ai/harness-trace/{trace_id}_test_{branch}.jsonl`
+- **分析触发**：执行 `/ahe-analyze limit=30` 进行根因分析
+- **演化触发**：分析后执行 `/ahe-evo apply <candidate_id>` 应用改进候选
 ```
 
 🔴 **HARD STOP — 人类确认卡点**

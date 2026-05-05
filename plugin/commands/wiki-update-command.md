@@ -1,3 +1,9 @@
+---
+name: wiki-update-command
+description: 手动触发 wiki 增量更新
+skill: ahe-observer
+---
+
 # wiki-update-command
 
 ## Task
@@ -49,6 +55,27 @@
 > 仅当传入 `issues` 参数时执行此流程，完成后**不执行**后续代码更新流程。
 
 ### Step 0: 追加历史问题到 `06-legacy-issues.md`
+
+**AHE 轨迹初始化**：
+```bash
+mkdir -p .ai/harness-trace
+python3 -c "
+import json, time, uuid
+meta = {
+    'trace_id': str(uuid.uuid4()),
+    'command': 'wiki-update',
+    'submode': 'issues',
+    'module': 'n/a',
+    'branch': '$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "local")',
+    'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    'preflight_done': True,
+    'phase_events': [{'phase': 'Step 0', 'event': 'issues_append', 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}],
+    'verdicts': []
+}
+with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+    json.dump(meta, f, indent=2)
+"
+```
 
 1. 检测 `.wiki/06-legacy-issues.md` 是否存在：
    - **不存在** → 提示「历史问题文件未找到，请先运行 /init 初始化」并终止
@@ -113,6 +140,39 @@
    [列出 wiki_file#section_id]
    → 调用 code-wiki-gen skill 增量更新模式
    → 更新 MANIFEST.json 的 source_hash 和 last_verified_commit」
+6. **AHE 轨迹初始化**：
+   ```bash
+   mkdir -p .ai/harness-trace
+   python3 -c "
+   import json, time, uuid
+   meta = {
+       'trace_id': str(uuid.uuid4()),
+       'command': 'wiki-update',
+       'submode': 'code',
+       'module': 'n/a',
+       'branch': '$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "local")',
+       'changed_files': '$CHANGED_FILES',
+       'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+       'preflight_done': False,
+       'phase_events': [],
+       'verdicts': []
+   }
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
+   > **AHE**: Observer Skill 读取此文件，在 Command 执行完毕后生成轨迹。
+7. **AHE Pre-flight 完成标记**：
+   ```bash
+   python3 -c "
+   import json, time
+   with open('.ai/harness-trace/.preflight_meta.json') as f:
+       meta = json.load(f)
+   meta['preflight_done'] = True
+   with open('.ai/harness-trace/.preflight_meta.json', 'w') as f:
+       json.dump(meta, f, indent=2)
+   "
+   ```
 
 ## Execution Steps
 
@@ -160,6 +220,11 @@
 
 - 运行 `/implement` 时 Pre-flight 将不再报告这些 sections 过期
 - 若有 stale sections，可再次运行 `/wiki-update` 或 `/init force` 全量刷新
+
+### AHE 轨迹信息
+- **轨迹文件**：`.ai/harness-trace/{trace_id}_wiki-update_{branch}.jsonl`
+- **分析触发**：执行 `/ahe-analyze limit=30` 进行根因分析
+- **演化触发**：分析后执行 `/ahe-evo apply <candidate_id>` 应用改进候选
 ```
 
 ## Key Principles
