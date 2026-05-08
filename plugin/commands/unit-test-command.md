@@ -1,10 +1,10 @@
 ---
-name: test-command
+name: unit-test-command
 description: 提交前快速单元测试闭环
 skill: ahe-observer
 ---
 
-# test-command
+# unit-test-command
 
 ## Task
 提交前快速单元测试闭环：基于 git 改动自动生成单元测试并执行，产出 VERDICT: PASS 或 FAIL。适用于手动改动代码或纯对话式 AI 修改后、未经流水线的场景。
@@ -15,11 +15,11 @@ skill: ahe-observer
 
 与流水线命令的关系：
 - `/implement` / `/modify` / `/fix` — 有完整 task_card，单元测试是其中一个阶段
-- `/test` — 无 task_card，只关心"当前改动的代码有没有通过验证"，是上述命令的轻量替代
+- `/unit-test` — 无 task_card，只关心"当前改动的代码有没有通过验证"，是上述命令的轻量替代
 
 ### File Contracts
 
-**Path**: `.ai/test/{branch}/`
+**Path**: `.ai/unit-test/{branch}/`
 
 | 文件 | 写入方 | 读取方 | 用途 |
 |------|--------|--------|------|
@@ -33,7 +33,7 @@ skill: ahe-observer
 ## Command Format
 
 ```
-/test [scope=staged|all] [router=<name>]
+/unit-test [scope=staged|all] [router=<name>]
 ```
 
 ### 参数
@@ -49,7 +49,7 @@ skill: ahe-observer
    ```bash
    git rev-parse --is-inside-work-tree 2>/dev/null || echo "NOT_GIT"
    ```
-   若非 git 仓库 → 提示「/test 需要在 git 仓库中运行」并终止。
+   若非 git 仓库 → 提示「/unit-test 需要在 git 仓库中运行」并终止。
 
 2. 获取改动文件：
    ```bash
@@ -74,7 +74,7 @@ skill: ahe-observer
 
 6. 写入契约文件并展示执行计划：
    ```bash
-   mkdir -p .ai/test/{branch}
+   mkdir -p .ai/unit-test/{branch}
    # 将改动文件列表写入 changed_files.txt
    ```
    告知用户：
@@ -90,7 +90,7 @@ skill: ahe-observer
    import json, time, uuid
    meta = {
        'trace_id': str(uuid.uuid4()),
-       'command': 'test',
+       'command': 'unit-test',
        'module': 'local',
        'branch': '$BRANCH',
        'scope': '$scope',
@@ -129,7 +129,7 @@ skill: ahe-observer
 > 未收到 unit-test-gen-agent 的书面 VERDICT 响应前，禁止进入 Phase 2。
 
 **Prompt**:
-> 请根据 `.ai/test/{branch}/changed_files.txt` 识别本次接口改动，连接本地 MySQL 查询真实数据，
+> 请根据 `.ai/unit-test/{branch}/changed_files.txt` 识别本次接口改动，连接本地 MySQL 查询真实数据，
 > 生成 pytest 单元测试。
 > 无 task_card.json，直接使用 `changed_files.txt` 作为改动来源（对应 unit-test-gen-agent 的"仅有改动列表"模式）。
 > 按 router 推导目录名，持久化到 `tests/{router}/{router}_unit_test.py` 与 `tests/{router}/{router}_unit_data.yaml`。
@@ -156,7 +156,7 @@ skill: ahe-observer
 **Prompt**:
 > 执行单元测试，测试类型：单元测试。
 > 测试路径：{unit-test-gen-agent 输出的 router 对应路径，如 `tests/shots/ tests/canvas/`}
-> 结果写入 `.ai/test/{branch}/unit_test_results.md`，输出 VERDICT。
+> 结果写入 `.ai/unit-test/{branch}/unit_test_results.md`，输出 VERDICT。
 
 **Verdict**: PASS → 进入最终报告 | FAIL → Retry Loop
 
@@ -165,10 +165,10 @@ skill: ahe-observer
 2. 启动 `debugger-agent` (Sub-agent)，Prompt：
    > 根据以下单元测试失败信息最小化修复**业务代码**（不修改测试文件）。
    > 失败详情：[从 unit_test_results.md 提取]
-   > 改动来源：`.ai/test/{branch}/changed_files.txt`
+   > 改动来源：`.ai/unit-test/{branch}/changed_files.txt`
    > 只修复报告的失败点，不重构、不改风格、不改其他文件。
 3. debugger-agent 修复完成 → 重新执行 Phase 2（test-runner-agent）
-4. 超过 3 轮仍 FAIL → AskQuestion「已循环 3 轮，以下用例仍失败：[列出]。(A) 人工修复后重新 /test (B) 忽略失败直接提交 (C) 终止」
+4. 超过 3 轮仍 FAIL → AskQuestion「已循环 3 轮，以下用例仍失败：[列出]。(A) 人工修复后重新 /unit-test (B) 忽略失败直接提交 (C) 终止」
 
 > **AHE**: 每次 Retry Loop 触发时，记录 `{"phase": "Phase 2", "event": "retry", "retry_count": N}` 到轨迹 `phase_events` 中。
 
@@ -177,7 +177,7 @@ skill: ahe-observer
 ### Phase 3: 最终报告
 
 ```markdown
-## ✅ /test 执行报告
+## ✅ /unit-test 执行报告
 
 **分支**: {branch}
 **改动范围**: {scope=staged|all}
@@ -198,10 +198,10 @@ skill: ahe-observer
 ### VERDICT: PASS / FAIL
 
 {[if PASS] 所有用例通过，可安全提交。}
-{[if FAIL after retry] 经 {N} 轮修复仍有失败，详见 .ai/test/{branch}/unit_test_results.md}
+{[if FAIL after retry] 经 {N} 轮修复仍有失败，详见 .ai/unit-test/{branch}/unit_test_results.md}
 
 ### AHE 轨迹信息
-- **轨迹文件**：`.ai/harness-trace/{trace_id}_test_{branch}.jsonl`
+- **轨迹文件**：`.ai/harness-trace/{trace_id}_unit-test_{branch}.jsonl`
 - **分析触发**：执行 `/ahe-analyze limit=30` 进行根因分析
 - **演化触发**：分析后执行 `/ahe-evo apply <candidate_id>` 应用改进候选
 ```
@@ -220,7 +220,7 @@ skill: ahe-observer
 - **无 task_card 模式**：完全依赖 `changed_files.txt`，与 unit-test-gen-agent 的"仅有改动列表"输入路径对齐，不引入新的 agent 接口约定
 - **只修复代码，不修改测试**：Retry Loop 中 debugger-agent 明确禁止改动 `tests/` 目录
 - **测试持久化复用**：生成的测试文件写入 `tests/{router}/`，后续 `/implement` / `/fix` 流水线中的 unit-test-gen-agent 会自动执行覆盖扫描（步骤 7.5），识别为已覆盖并跳过重复生成
-- **契约隔离**：结果文件写入 `.ai/test/{branch}/`，与 `.ai/implement/`、`.ai/fix/` 等目录完全隔离，互不干扰
+- **契约隔离**：结果文件写入 `.ai/unit-test/{branch}/`，与 `.ai/implement/`、`.ai/fix/` 等目录完全隔离，互不干扰
 - **歧义必须停下**：改动文件无法关联到 router 时主动询问，不猜测
 
 ### 禁止行为（无论任务复杂度如何，一律适用）

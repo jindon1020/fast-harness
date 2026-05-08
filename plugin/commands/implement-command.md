@@ -7,14 +7,14 @@ skill: ahe-observer
 # implement-command
 
 ## Task
-端到端需求实现流水线：需求设计 → 代码生成 → GAN 对抗审查 → 单元测试 → 集成测试，产出通过全部测试的可提交代码。
+端到端需求实现流水线：需求设计 → 代码生成 → GAN 对抗审查 → 单元测试，产出通过全部测试的可提交代码。
 
 ## Context
 
 基于 [Anthropic Harness Design](https://www.anthropic.com/engineering/harness-design-long-running-apps) 三体架构：Planner → Generator → Evaluator。
 - GAN 分离：Generator 与 Evaluator 独立，消除自我评价偏差
 - Context Reset：Agent 间通过文件契约传递状态，不依赖对话历史
-- 渐进式鉴别：静态审查 → 单元测试 → 集成测试
+- 渐进式鉴别：静态审查 → 单元测试
 
 ### File Contracts
 
@@ -26,22 +26,19 @@ skill: ahe-observer
 | `changed_files.txt` | Generator | Reviewer/Tester | 改动文件列表 |
 | `review_feedback.md` | Reviewer | Debugger/Generator | 审查反馈 |
 | `unit_test_results.md` | Test Runner | Debugger | 单元测试结果 |
-| `integration_test_results.md` | Test Runner | Debugger | 集成测试结果 |
 | `tests/{router}/` | unit-test-gen-agent | Test Runner | 单元测试（`router` = `app/routers/<name>.py` 去路径与 `.py`） |
-| `tests/{branch}/` | integration-test-gen-agent | Test Runner | 集成测试（xmind，仍按 branch 目录） |
 
 ### Test Categories
 
 | 类型 | 生成方式 | Agent | 产出 |
 |------|----------|-------|------|
 | 单元测试（自发性） | 查询本地 DB 真实数据 | `unit-test-gen-agent` | `tests/{router}/{router}_unit_test.py` 与 `{router}_unit_data.yaml`（多 router 时多套路径；已覆盖则可跳过写入） |
-| 集成测试（外部） | 解析 xmind 脑图 | `integration-test-gen-agent` | `tests/{branch}/{module}_api_test.py` |
 
 ## Command Format
 
 ```
-/implement <需求描述> [module=xxx] [xmind=...] [mode=fast] [unit_test=off] [inte_test=off]
-/implement task_card=<path> [xmind=...] [mode=fast] [unit_test=off] [inte_test=off]
+/implement <需求描述> [module=xxx] [mode=fast] [unit_test=off]
+/implement task_card=<path> [mode=fast] [unit_test=off]
 ```
 
 ### 输入参数
@@ -56,7 +53,6 @@ skill: ahe-observer
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `module` | 自动推断 | 模块名。未传入时从需求描述或分支名推断 |
-| `xmind` | - | xmind 测试用例路径，用于集成测试（Phase 4） |
 
 ### 流水线控制参数
 
@@ -64,7 +60,6 @@ skill: ahe-observer
 |------|--------|------|------|
 | `mode` | `full` | `full` / `fast` | `fast` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
 | `unit_test` | `on` | `on` / `off` / `<router>` | `off` 跳过 Phase 3；传 **router 目录名**（与 `tests/<router>/` 一致，如 `project`）时 Phase 3 仅 `pytest tests/<router>/` |
-| `inte_test` | `on` | `on` / `off` / `<module>` | `off` 跳过 Phase 4；传模块名仅运行该模块的集成测试 |
 
 > `branch` 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
 
@@ -76,11 +71,10 @@ skill: ahe-observer
 4. 解析运行模式，向用户确认流水线配置：
    - `mode=fast` → 跳过 Phase 2 GAN 审查
    - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={router_name}` → Phase 3 仅运行 `tests/{router_name}/` 下单元测试
-   - `inte_test=off` → 跳过 Phase 4 集成测试；`inte_test={module_name}` → Phase 4 仅运行指定模块
 5. 告知用户流水线路径：
-   - 完整模式（默认）：「需求设计 → 代码生成 → GAN 审查 → 单元测试 → 集成测试。关键节点暂停确认」
-   - 快速模式（mode=fast）：「需求设计 → 代码生成 → 单元测试 → 集成测试」
-   - 根据 unit_test/inte_test 开关动态裁剪路径展示
+   - 完整模式（默认）：「需求设计 → 代码生成 → GAN 审查 → 单元测试。关键节点暂停确认」
+   - 快速模式（mode=fast）：「需求设计 → 代码生成 → 单元测试」
+   - 根据 unit_test 开关动态裁剪路径展示
 6. **AHE 轨迹初始化**：记录本次 Command 执行的元数据到临时文件（供 Observer Skill 读取）：
    ```bash
    mkdir -p .ai/harness-trace
@@ -93,7 +87,6 @@ skill: ahe-observer
        'branch': '$BRANCH',
        'mode': '$mode',
        'unit_test': '$unit_test',
-       'inte_test': '$inte_test',
        'preflight_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
        'preflight_done': False
    }
@@ -143,7 +136,7 @@ skill: ahe-observer
 
 **Skip if**: `task_card` 参数指向已存在文件
 
-传入用户需求描述、branch、可选参数（module、xmind）。Agent 内部含多步骤人类确认流程（需求理解 → 技术方案 → DB 设计 → API 设计 → 业务逻辑 → 侵入性检查）。
+传入用户需求描述、branch、可选参数（module）。Agent 内部含多步骤人类确认流程（需求理解 → 技术方案 → DB 设计 → API 设计 → 业务逻辑 → 侵入性检查）。
 
 **Done when**: `task_card.json` 已写入（status: inbox） + `.ai/design/{module}/{branch}_{feature}.md` 已生成
 🔴 **HARD STOP — 人类确认卡点**
@@ -217,43 +210,9 @@ skill: ahe-observer
 > 结果写入 .ai/implement/{module}/{branch}/unit_test_results.md，输出 VERDICT。
 
 **Verdict**: PASS → Phase 4 | FAIL → Retry Loop
-**Retry Loop** (MAX=3): `debugger-agent` 根据 unit_test_results.md 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 3 轮：[列出失败]。(A) 人工修复 (B) 跳过继续集成测试 (C) 终止」
+**Retry Loop** (MAX=3): `debugger-agent` 根据 unit_test_results.md 最小化修复代码（不改测试）→ 重新执行 Step 3b。超限 → AskQuestion「已循环 3 轮：[列出失败]。(A) 人工修复 (B) 跳过进入报告 (C) 终止」
 
-### Phase 4: 集成测试（Discriminator Round 3）
-
-**Skip if**: `inte_test=off`（报告中标注「⏭️ 集成测试已跳过（inte_test=off）」）
-**Skip if**: task_card.json 中 `test_cases` 为空或无 xmind → AskQuestion「未指定 xmind。(A) 提供路径继续 (B) 跳过进入报告」
-**Scope**: `inte_test={module_name}` 时仅运行 `tests/{branch}/{module_name}_api_test.py`，报告标注「🎯 集成测试范围：{module_name}」
-
-#### Step 4a: 生成测试用例
-
-**Agent**: `integration-test-gen-agent` (Sub-agent)
-> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
-> Planner 禁止自行解析 xmind 或直接生成集成测试文件。
-> 未收到 integration-test-gen-agent 的书面完成响应前，禁止进入 Step 4b。
-
-**Prompt**:
-> 解析 xmind 生成 pytest 集成测试。xmind: {task_card.test_cases}，task_card: .ai/implement/{module}/{branch}/task_card.json。
-> 优先从 task_card 获取 API 上下文。
-> 生成 tests/{branch}/{module}_api_test.py 和 tests/{branch}/{module}_test_data.yaml。
-
-#### Step 4b: 执行测试
-
-**Agent**: `test-runner-agent` (Sub-agent)
-> ⛔ **MANDATORY DELEGATION**: 本步骤必须通过 Sub-agent 委托执行。
-> Planner 禁止自行执行测试命令或替代输出集成测试结果。
-> 未收到 test-runner-agent 的书面 VERDICT 响应前，禁止进入 Phase 5。
-
-**Prompt**:
-> 执行 tests/{branch}/{test_target_module}_api_test.py，测试类型：集成测试（外部测试 - xmind）。
-> task_card 位于 .ai/implement/{module}/{branch}/task_card.json。
-> 结果写入 .ai/implement/{module}/{branch}/integration_test_results.md，输出 VERDICT。
-
-> 其中 `test_target_module` = inte_test 参数值（若为模块名）或当前 module。
-
-**Retry Loop**: 同 Phase 3（MAX=3，超限人类介入）
-
-### Phase 5: 最终报告
+### Phase 4: 最终报告
 
 输出报告，更新 task_card.json status → `done`：
 
@@ -263,8 +222,7 @@ skill: ahe-observer
 ### 模式
 {mode=fast：⚡ 快速模式（已跳过 GAN 审查）}
 {unit_test=off：⏭️ 单元测试已跳过}
-{inte_test=off：⏭️ 集成测试已跳过}
-{unit_test 为 router 名 / inte_test 为模块名：🎯 测试范围已限定}
+{unit_test 为 router 名：🎯 测试范围已限定}
 
 ### 概览
 | 阶段 | Agent | VERDICT | 重试 |
@@ -273,14 +231,12 @@ skill: ahe-observer
 | Phase 1: 代码生成 | generator-agent | ✅ | - |
 | Phase 2: 代码审查 | code-reviewer + security-reviewer | PASS/FAIL/⚡SKIP | 0-3 |
 | Phase 3: 单元测试 | unit-test-gen-agent + test-runner | PASS/FAIL/⏭️SKIP | 0-3 |
-| Phase 4: 集成测试 | integration-test-gen-agent + test-runner | PASS/FAIL/⏭️SKIP | 0-3 |
 
 ### 改动文件
 $(cat .ai/implement/{module}/{branch}/changed_files.txt)
 
 ### 测试覆盖
 - 单元测试：tests/{router}/{router}_unit_test.py（逐 router 列出）— {N} 用例，通过率 {X}%
-- 集成测试：tests/{branch}/{module}_api_test.py — {N} 用例，通过率 {X}%
 
 ### 审查摘要
 - 代码审查：{Critical 数} Critical / {Improvement 数} Improvements
@@ -303,16 +259,16 @@ $(cat .ai/implement/{module}/{branch}/changed_files.txt)
 ```
 feat: {task_card.feature}
 - 涉及文件：{affected_files}
-- 测试覆盖：单元 {N} 例 + 集成 {N} 例
+- 测试覆盖：单元 {N} 例
 ```
 
 ## Key Principles
 
 - **Context Reset**: Sub-agent 从文件契约获取上下文，不继承对话历史
 - **GAN 分离**: Generator 不自评，Reviewer/Tester 独立评判；Debugger 只修复已报告问题，不做额外重构
-- **渐进式鉴别**: Round 1 静态审查 → Round 2 单元测试 → Round 3 集成测试
-- **测试持久化**: 单元测试保存到 `tests/{router}/`（按路由文件分目录），集成测试仍保存到 `tests/{branch}/`
-- **人类卡点**: Phase 0 后、GAN/测试超限时、Phase 4 跳过判断时、最终报告后
+- **渐进式鉴别**: Round 1 静态审查 → Round 2 单元测试
+- **测试持久化**: 单元测试保存到 `tests/{router}/`（按路由文件分目录）
+- **人类卡点**: Phase 0 后、GAN/测试超限时、最终报告后
 - **最多 3 轮重试**: 超限升级人类，防止无限循环消耗 Token
 - **歧义必须停下**: Agent 遇到缺失/歧义必须暂停确认，禁止猜测
 
@@ -329,7 +285,7 @@ feat: {task_card.feature}
 
 1. **同模块历史**: 查找与当前 `module` 相关的历史 implement 记录，复用已有 `task_card.json` 中的接口设计、DB Schema 和技术方案（`.ai/design/`），避免从零设计
 2. **审查经验**: 参考历史 `review_feedback.md` 的 Critical/Improvements，在 Phase 1 代码生成阶段主动规避已知问题
-3. **测试资产**: 复用 `tests/{router}/` 下已有单元测试（unit-test-gen-agent 可先判定覆盖并跳过写入）；集成侧复用 `tests/{branch}/`，Phase 4 只生成增量集成测试
+3. **测试资产**: 复用 `tests/{router}/` 下已有单元测试（unit-test-gen-agent 可先判定覆盖并跳过写入）
 4. **设计文档**: 若涉及跨模块依赖，通过归档索引定位相关模块的 `task_card.json` 了解接口契约
 
 > 若 `AGENTS.md` 不存在或无归档记录，跳过此步骤正常执行。
