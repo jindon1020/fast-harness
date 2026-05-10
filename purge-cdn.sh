@@ -121,6 +121,10 @@ purge_file "plugin/skills/harness-meta-skill/SKILL.md"
 purge_file "plugin/skills/api-spec-generator/SKILL.md"
 purge_file "plugin/skills/feishu-doc-reader/SKILL.md"
 purge_file "plugin/skills/code-wiki-gen/SKILL.md"
+purge_file "plugin/skills/ahe-observer/SKILL.md"
+purge_file "plugin/skills/ahe-observer/benchmarks/ahe-eval-set.jsonl"
+purge_file "plugin/skills/ahe-analyzer/SKILL.md"
+purge_file "plugin/skills/ahe-evo/SKILL.md"
 echo ""
 
 if [[ "$PURGE_FAIL" -eq 0 ]]; then
