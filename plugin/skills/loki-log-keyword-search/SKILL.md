@@ -22,12 +22,12 @@ print('Loki API:', f'http://127.0.0.1:{loki.get(\"local_port\", 3100)}/loki/api/
 
 ---
 
-## 自动初始化（首次使用）
+## 自动初始化（带重试与自愈）
 
-**AI 执行以下脚本，建立 K8s API 隧道并启动 Loki 端口转发**：
+**AI 执行以下脚本，建立 K8s API 隧道并启动 Loki 端口转发。脚本含完整重试逻辑，确保每次查询前连接均可用。**
 
 ```python
-import json, subprocess, socket, time, os, sys
+import json, subprocess, socket, time, os, sys, signal
 import urllib.request
 import urllib.error
 
@@ -52,66 +52,150 @@ kubeconfig = os.path.join(PROJECT_ROOT, k8s['kubeconfig_path'])
 key_path   = os.path.join(PROJECT_ROOT, bastion['key_path'])
 env        = {**os.environ, 'KUBECONFIG': kubeconfig}
 
-def port_open(host, port):
+MAX_RETRIES = 5          # 最多尝试次数
+RETRY_DELAY = 3          # 初始重试间隔（秒），指数退避
+LOKI_READY_TIMEOUT = 10  # 单次 /ready 等待秒数
+
+def port_open(host, port, timeout=1):
     with socket.socket() as s:
-        s.settimeout(1)
+        s.settimeout(timeout)
         return s.connect_ex((host, port)) == 0
 
-def loki_ready(port, timeout=5):
-    """以 HTTP /ready 为准；仅 TCP 通连会误判（例如 SSH -L 占用了同端口但不是集群里的 Loki）。"""
+def loki_ready(port, timeout=LOKI_READY_TIMEOUT):
+    """以 HTTP /ready 为准；TCP 可连不代表 Loki 后端真正就绪。"""
     url = f'http://127.0.0.1:{port}/ready'
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             return r.getcode() == 200
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except Exception:
         return False
 
-# 1. K8s API 隧道（Loki port-forward 依赖 kubeconfig 通过隧道连接）
-if not port_open(bind, k8s_lport):
-    cmd = [
-        'ssh', '-f', '-N',
-        '-o', 'ExitOnForwardFailure=yes',
-        '-o', 'StrictHostKeyChecking=accept-new',
-        '-i', key_path,
-        '-p', str(bastion['port']),
-        '-L', f"{bind}:{k8s_lport}:{bastion['k8s_api_host']}:{bastion['k8s_api_port']}",
-        f"{bastion['user']}@{bastion['host']}"
-    ]
-    subprocess.run(cmd, check=True)
-    time.sleep(2)
-    print(f'K8s 隧道已建立: {bind}:{k8s_lport}')
-else:
-    print(f'K8s 隧道已就绪: {bind}:{k8s_lport}')
+def kill_port(port):
+    """强制杀掉占用指定端口（LISTEN）的所有进程。"""
+    try:
+        result = subprocess.run(
+            ['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'],
+            capture_output=True, text=True
+        )
+        pids = result.stdout.strip().split()
+        for pid in pids:
+            if pid:
+                os.kill(int(pid), signal.SIGTERM)
+                print(f'  已终止占用端口 {port} 的进程 PID={pid}')
+        if pids:
+            time.sleep(1)
+    except Exception as e:
+        print(f'  清理端口 {port} 时出错: {e}')
 
-# 2. Loki 端口转发：/ready 失败则强制尝试 kubectl port-forward（不再仅凭端口通断跳过）
-if loki_ready(loki_lport):
-    print(f'Loki 已就绪: http://127.0.0.1:{loki_lport} (/ready OK)')
-else:
-    if port_open('127.0.0.1', loki_lport):
-        print(
-            f'警告: 127.0.0.1:{loki_lport} 可连接但 /ready 失败，'
-            '常见于 SSH 本地转发与 kubectl 复用同一端口。将尝试 kubectl port-forward；'
-            '若 bind 失败请先停止占用该端口的进程，或把 kubernetes.loki.local_port 改为未占用端口。',
-            file=sys.stderr,
+def ensure_ssh_tunnel(retries=MAX_RETRIES):
+    """确保 K8s API SSH 隧道存在且可用，失败则重建，带重试。"""
+    for attempt in range(1, retries + 1):
+        if port_open(bind, k8s_lport):
+            print(f'K8s 隧道已就绪: {bind}:{k8s_lport}')
+            return True
+        print(f'[{attempt}/{retries}] K8s 隧道不可用，尝试建立 SSH 隧道...')
+        kill_port(k8s_lport)
+        cmd = [
+            'ssh', '-f', '-N',
+            '-o', 'ExitOnForwardFailure=yes',
+            '-o', 'StrictHostKeyChecking=accept-new',
+            '-o', 'ServerAliveInterval=30',
+            '-o', 'ServerAliveCountMax=3',
+            '-o', 'ConnectTimeout=15',
+            '-i', key_path,
+            '-p', str(bastion['port']),
+            '-L', f"{bind}:{k8s_lport}:{bastion['k8s_api_host']}:{bastion['k8s_api_port']}",
+            f"{bastion['user']}@{bastion['host']}"
+        ]
+        try:
+            subprocess.run(cmd, check=True, timeout=30)
+        except Exception as e:
+            print(f'  SSH 建立失败: {e}')
+        delay = RETRY_DELAY * (2 ** (attempt - 1))
+        time.sleep(min(delay, 20))
+        if port_open(bind, k8s_lport):
+            print(f'K8s 隧道已建立: {bind}:{k8s_lport}')
+            return True
+    print('错误: K8s API 隧道建立失败，已达最大重试次数', file=sys.stderr)
+    return False
+
+def ensure_loki_pf(retries=MAX_RETRIES):
+    """确保 Loki port-forward 存在且 /ready 返回 200，失败则重建，带重试。"""
+    for attempt in range(1, retries + 1):
+        if loki_ready(loki_lport):
+            print(f'Loki 已就绪: http://127.0.0.1:{loki_lport}')
+            return True
+        print(f'[{attempt}/{retries}] Loki /ready 失败，重建 port-forward...')
+        # 先清理残留进程
+        kill_port(loki_lport)
+        time.sleep(1)
+        ns_loki = k8s['namespaces']['loki']
+        proc = subprocess.Popen(
+            [
+                'kubectl', 'port-forward',
+                '-n', ns_loki,
+                f"svc/{loki_cfg['service']}",
+                f"{loki_lport}:{loki_cfg['service_port']}",
+                '--address', '127.0.0.1',
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-    ns_loki = k8s['namespaces']['loki']
-    subprocess.Popen([
-        'kubectl', 'port-forward',
-        '-n', ns_loki,
-        f"svc/{loki_cfg['service']}",
-        f"{loki_lport}:{loki_cfg['service_port']}",
-        '--address', '127.0.0.1'
-    ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(3)
-    if not loki_ready(loki_lport, timeout=8):
-        print(
-            'Loki 在启动 port-forward 后仍不可用。'
-            '请确认：1) 本地端口未被其他隧道占用；2) kubeconfig 与 loki 命名空间/svc 正确；'
-            '3) 必要时先 `lsof -iTCP:%s -sTCP:LISTEN` 释放端口后重试。' % loki_lport,
-            file=sys.stderr,
-        )
+        # 等待就绪，每秒检查一次，最多等 LOKI_READY_TIMEOUT 秒
+        for _ in range(LOKI_READY_TIMEOUT):
+            time.sleep(1)
+            if proc.poll() is not None:
+                print(f'  kubectl port-forward 进程意外退出 (code={proc.returncode})')
+                break
+            if loki_ready(loki_lport, timeout=3):
+                print(f'Loki 端口转发就绪: http://127.0.0.1:{loki_lport}')
+                return True
+        delay = RETRY_DELAY * (2 ** (attempt - 1))
+        print(f'  等待 {min(delay, 15)}s 后重试...')
+        time.sleep(min(delay, 15))
+
+    print(
+        '错误: Loki port-forward 建立失败，已达最大重试次数。\n'
+        '排查建议：\n'
+        f'  1) lsof -iTCP:{loki_lport} -sTCP:LISTEN  # 查看端口占用\n'
+        '  2) kubectl get svc -n <loki-ns>           # 确认 svc 名称\n'
+        '  3) kubectl logs -n <loki-ns> <loki-pod>   # 查看 Loki 本身状态\n'
+        '  4) 修改 kubernetes.loki.local_port 为其他未占用端口',
+        file=sys.stderr,
+    )
+    return False
+
+def verify_loki_stable(port, checks=3, interval=1):
+    """连续多次 /ready 确认连接稳定，避免偶发通过后立刻抖动。"""
+    for i in range(checks):
+        if not loki_ready(port, timeout=5):
+            print(f'稳定性验证失败（第 {i+1}/{checks} 次）')
+            return False
+        if i < checks - 1:
+            time.sleep(interval)
+    print(f'Loki 连接稳定（{checks} 次 /ready 全部通过）')
+    return True
+
+# ── 主流程 ──────────────────────────────────────────────────────────────
+print('=== 初始化 Loki 连接 ===')
+
+# 1. 确保 K8s API 隧道（Loki port-forward 需要通过 kubeconfig 连集群）
+if not ensure_ssh_tunnel():
+    sys.exit(1)
+
+# 2. 确保 Loki port-forward 就绪
+if not ensure_loki_pf():
+    sys.exit(1)
+
+# 3. 稳定性验证（连续 3 次 /ready 成功才认为可用）
+if not verify_loki_stable(loki_lport):
+    print('Loki 连接不稳定，尝试重建...', file=sys.stderr)
+    kill_port(loki_lport)
+    if not ensure_loki_pf():
         sys.exit(1)
-    print(f'Loki 端口转发就绪: http://127.0.0.1:{loki_lport}')
+
+print('=== Loki 连接就绪，可以开始查询 ===')
 ```
 
 ---
@@ -122,10 +206,9 @@ else:
 PORT="$(python3 -c "
 import json, subprocess, os
 r = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
-print(json.load(open(os.path.join(r, '.ether/config/infrastructure.json'))))['kubernetes']['loki']['local_port'])
+print(json.load(open(os.path.join(r, '.ether/config/infrastructure.json')))['kubernetes']['loki']['local_port'])
 ")"
 echo "Loki /ready: http://127.0.0.1:${PORT}/ready"
-# 与初始化脚本一致：以 HTTP /ready 成功为准（max-time 不宜过短）
 curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/ready" && echo " Loki OK"
 ```
 
@@ -172,7 +255,6 @@ loki_url = f"http://127.0.0.1:{k8s['loki']['local_port']}/loki/api/v1/query_rang
 ns_prod  = k8s['namespaces']['prod']
 
 query  = f'{{namespace="{ns_prod}"}} |= "ERROR"'
-# 默认先用较窄时间窗；需要多天时再改 start 并同步增大 read_timeout_sec
 params = urllib.parse.urlencode({
     'query': query,
     'start': 'now-24h',
@@ -202,8 +284,10 @@ with urllib.request.urlopen(f"{loki_url}?{params}", timeout=read_timeout_sec) as
 ## 注意事项
 
 1. **只读查询**：只能执行读取操作
-2. **就绪判定**：必须以 `GET http://127.0.0.1:<loki.local_port>/ready` 返回 **200** 为准；**不要**仅凭「3100 端口能连上」就认为 Loki 可用（SSH `-L` 与 `kubectl port-forward` 抢同一本地端口时，TCP 通但后端不是集群里的 Loki，会出现 reset、读超时等）。初始化脚本在 `/ready` 失败时会强制尝试 `kubectl port-forward`；若本地端口已被占用，需先释放或修改 `kubernetes.loki.local_port`
-3. **按需初始化**：K8s API 隧道仍可按端口检测跳过；Loki 侧按 `/ready` 跳过或拉起 port-forward
-4. **token 有效期**：kubeconfig token 过期后需要重新生成
-5. **时间范围与超时**：保留策略上可查约 7 天不代表应一次 `query_range` 拉满 7 天；窗越大 Loki 越慢。建议先 **24h/48h**，再分段扩窗；扩窗时同步增大 HTTP 读超时（例如 120～300 秒），避免 60s 级默认超时误报失败
-6. **端口规划**：避免多条隧道复用同一本地端口（常见为 3100），与示例配置冲突时改掉 `loki.local_port` 即可
+2. **就绪判定**：必须以 `GET http://127.0.0.1:<loki.local_port>/ready` 返回 **200** 为准；不要仅凭「端口能连上」就认为 Loki 可用
+3. **重试机制**：初始化脚本最多重试 5 次，指数退避（3s、6s、12s…），每次重建前先清理残留进程
+4. **稳定性验证**：连续 3 次 /ready 全部通过才认为连接可用，防止偶发抖动
+5. **SSH 保活**：SSH 隧道使用 `ServerAliveInterval=30` + `ServerAliveCountMax=3`，减少长期空闲断连
+6. **token 有效期**：kubeconfig token 过期后需要重新生成
+7. **时间范围与超时**：建议先 **24h/48h**，再分段扩窗；扩窗时同步增大 HTTP 读超时（例如 120～300 秒）
+8. **端口冲突**：若本地端口被占用，脚本会自动 SIGTERM 清理后重建；也可修改 `kubernetes.loki.local_port` 避免冲突
