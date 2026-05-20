@@ -1,0 +1,1455 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harness Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,200..1000;1,9..40,200..1000&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --transition: 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+
+[data-theme="dark"] {
+  --bg: #080808;
+  --bg-surface: #0f0f0f;
+  --bg-elevated: #161616;
+  --bg-hover: #1c1c1c;
+  --border: rgba(255,255,255,0.05);
+  --border-v: rgba(255,255,255,0.08);
+  --border-focus: rgba(255,255,255,0.14);
+  --text: #ededed;
+  --text-dim: #999999;
+  --text-muted: #555555;
+  --accent: #c4a07a;
+  --accent-dim: rgba(196, 160, 122, 0.12);
+  --accent-glow: rgba(196, 160, 122, 0.25);
+  --error: #e05050;
+  --error-dim: rgba(224, 80, 80, 0.1);
+  --success: #3cb878;
+  --warn: #d4a43b;
+  --code-bg: rgba(255,255,255,0.03);
+  --tool-bg: rgba(255,255,255,0.02);
+  --think-bg: rgba(196, 160, 122, 0.04);
+  --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.2);
+  --grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.018'/%3E%3C/svg%3E");
+}
+
+[data-theme="light"] {
+  --bg: #fafaf8;
+  --bg-surface: #f5f5f3;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f0ed;
+  --border: rgba(0,0,0,0.05);
+  --border-v: rgba(0,0,0,0.08);
+  --border-focus: rgba(0,0,0,0.16);
+  --text: #1a1a1a;
+  --text-dim: #707070;
+  --text-muted: #aaaaaa;
+  --accent: #9b6b3d;
+  --accent-dim: rgba(155, 107, 61, 0.1);
+  --accent-glow: rgba(155, 107, 61, 0.18);
+  --error: #c84040;
+  --error-dim: rgba(200, 64, 64, 0.08);
+  --success: #2d8a5e;
+  --warn: #b0902c;
+  --code-bg: rgba(0,0,0,0.02);
+  --tool-bg: rgba(0,0,0,0.01);
+  --think-bg: rgba(155, 107, 61, 0.05);
+  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 20px rgba(0,0,0,0.06);
+  --grain: none;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  background-image: var(--grain);
+  pointer-events: none; z-index: 9999;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app--panel-open { grid-template-columns: 260px 1fr 320px; }
+
+/* ═══════════════════════ SIDEBAR ═══════════════════════ */
+
+.sidebar {
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar__head {
+  padding: 20px 20px 12px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.sidebar__logo {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 550; letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.sidebar__logo-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: dot-pulse 3s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.sidebar__actions { display: flex; gap: 6px; }
+
+.btn-icon {
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-v); background: transparent;
+  color: var(--text-dim); cursor: pointer; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition);
+}
+.btn-icon:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-focus); }
+
+.sidebar__sessions {
+  flex: 1; overflow-y: auto; padding: 0 12px 12px;
+}
+
+.session-item {
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: all var(--transition);
+  border: 1px solid transparent; margin-bottom: 2px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; color: var(--text-dim);
+}
+.session-item:hover { background: var(--bg-hover); color: var(--text); }
+.session-item--active {
+  background: var(--bg-elevated); border-color: var(--border-v);
+  color: var(--text); font-weight: 480;
+}
+.session-item__id { font-family: var(--font-mono); font-size: 11px; }
+.session-item__del {
+  opacity: 0; font-size: 14px; line-height: 1; cursor: pointer;
+  transition: opacity var(--transition); color: var(--text-muted);
+  padding: 2px 4px; border-radius: 3px; background: none; border: none;
+}
+.session-item:hover .session-item__del { opacity: 1; }
+.session-item__del:hover { color: var(--error); background: var(--error-dim); }
+
+.sidebar__foot {
+  padding: 12px 20px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+
+.theme-toggle {
+  width: 34px; height: 20px; border-radius: 10px;
+  background: var(--border-v); border: none; cursor: pointer;
+  position: relative; transition: background var(--transition);
+}
+.theme-toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text-dim); transition: all var(--transition);
+}
+[data-theme="light"] .theme-toggle { background: var(--accent-dim); }
+[data-theme="light"] .theme-toggle::after { left: 16px; background: var(--accent); }
+
+.version { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
+.sidebar__section-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-muted); padding: 14px 20px 6px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar__section-label button {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1;
+}
+.sidebar__section-label button:hover { color: var(--text); }
+
+.workspace-item {
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: all var(--transition);
+  border: 1px solid transparent; margin-bottom: 2px;
+  font-size: 13px; color: var(--text-dim);
+  display: flex; align-items: center; gap: 8px;
+}
+.workspace-item:hover { background: var(--bg-hover); color: var(--text); }
+.workspace-item__dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: var(--text-muted);
+}
+.workspace-item--active .workspace-item__dot { background: var(--accent); }
+.workspace-item__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.repo-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px 6px 24px; font-size: 11px; color: var(--text-dim);
+  transition: color var(--transition);
+}
+.repo-item__icon { font-size: 10px; }
+.repo-item__name { flex: 1; font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-item__status { font-size: 9px; color: var(--success); }
+
+.panel__add-repo {
+  display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.panel__add-repo input, .panel__add-repo select {
+  background: var(--bg-elevated); border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm); padding: 6px 8px; font-size: 11px;
+  color: var(--text); font-family: var(--font-sans);
+}
+.panel__add-repo input { flex: 1; }
+.panel__add-repo select { width: 100px; }
+.panel__add-repo button {
+  background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+  padding: 6px 10px; font-size: 11px; cursor: pointer; font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+.workspace-create {
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  display: flex; gap: 6px;
+}
+.workspace-create input {
+  flex: 1; background: var(--bg-elevated); border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px;
+  color: var(--text); font-family: var(--font-sans);
+}
+.workspace-create button {
+  background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+  padding: 6px 12px; font-size: 12px; cursor: pointer; font-family: var(--font-sans);
+  font-weight: 500; white-space: nowrap;
+}
+.git-status-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 500; }
+.git-status-tag--clean { background: var(--success); color: #fff; }
+.git-status-tag--dirty { background: var(--warn); color: #000; }
+
+.ask-question-block {
+  background: var(--bg-elevated); border: 1px solid var(--border-v);
+  border-radius: var(--radius-md); padding: 16px; margin-bottom: 8px;
+}
+.ask-question-block__title {
+  font-size: 12px; font-weight: 550; margin-bottom: 12px;
+  color: var(--text);
+}
+.ask-question-item {
+  margin-bottom: 12px;
+}
+.ask-question-item__q {
+  font-size: 12px; color: var(--text-dim); margin-bottom: 6px;
+  font-weight: 500;
+}
+.ask-question-opts {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.ask-question-opt {
+  padding: 6px 14px; border-radius: 20px; font-size: 12px;
+  cursor: pointer; border: 1px solid var(--border-v);
+  background: var(--bg); color: var(--text-dim);
+  transition: all var(--transition);
+  font-family: var(--font-sans);
+}
+.ask-question-opt:hover { border-color: var(--accent); color: var(--text); }
+.ask-question-opt--selected {
+  background: var(--accent-dim); border-color: var(--accent);
+  color: var(--accent); font-weight: 500;
+}
+.ask-question-answer {
+  font-size: 10px; color: var(--text-muted); margin-top: 4px;
+  padding: 2px 8px; font-family: var(--font-mono);
+  background: var(--accent-dim); border-radius: 3px; display: inline-block;
+}
+.ask-question-answered {
+  opacity: 0.7;
+}
+
+.branch-select {
+  background: var(--bg-elevated); border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm); padding: 3px 6px; font-size: 10px;
+  color: var(--text-dim); font-family: var(--font-mono); cursor: pointer;
+  max-width: 100px;
+}
+.branch-select:focus { outline: none; border-color: var(--accent); }
+
+.dialog-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; backdrop-filter: blur(4px);
+}
+.dialog {
+  background: var(--bg-elevated); border: 1px solid var(--border-v);
+  border-radius: var(--radius-lg); padding: 24px; min-width: 400px;
+  max-width: 500px; box-shadow: var(--shadow);
+}
+.dialog h3 { font-size: 16px; font-weight: 500; margin-bottom: 16px; }
+.dialog label { font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 4px; }
+.dialog input, .dialog select {
+  width: 100%; background: var(--bg); border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px;
+  color: var(--text); font-family: var(--font-sans); margin-bottom: 12px;
+}
+.dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.dialog .btn-row button {
+  padding: 8px 16px; border-radius: var(--radius-sm); font-size: 13px;
+  cursor: pointer; font-family: var(--font-sans); font-weight: 500;
+}
+.btn-cancel { background: transparent; border: 1px solid var(--border-v); color: var(--text-dim); }
+.btn-confirm { background: var(--accent); border: none; color: #fff; }
+
+.reg-repo-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 12px;
+  transition: background var(--transition); margin-bottom: 2px;
+}
+.reg-repo-item:hover { background: var(--bg-hover); }
+.reg-repo-item--selected { background: var(--accent-dim); }
+.reg-repo-item input[type=checkbox] { width: auto; }
+
+/* ═══════════════════════ MAIN / CHAT ═══════════════════════ */
+
+.main {
+  display: flex; flex-direction: column; overflow: hidden;
+  position: relative;
+}
+
+.chat {
+  flex: 1; overflow-y: auto; padding: 32px 0;
+  scroll-behavior: smooth;
+}
+
+.chat__inner {
+  max-width: 720px; margin: 0 auto; padding: 0 32px;
+}
+
+.chat__empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; text-align: center;
+  padding: 0 32px;
+}
+
+.chat__empty-title {
+  font-size: 28px; font-weight: 350; letter-spacing: -0.02em;
+  color: var(--text); margin-bottom: 8px;
+}
+.chat__empty-sub {
+  font-size: 14px; color: var(--text-dim);
+  max-width: 400px; line-height: 1.6;
+}
+.chat__empty-hint {
+  margin-top: 28px; font-size: 12px; color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.msg { margin-bottom: 24px; animation: msg-in 0.35s ease-out; }
+@keyframes msg-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.msg--system { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+.msg--error { color: var(--error); background: var(--error-dim); padding: 12px 16px; border-radius: var(--radius-md); font-size: 13px; }
+
+.msg__text {
+  font-size: 14px; line-height: 1.72; color: var(--text);
+}
+.msg__text p { margin-bottom: 0.5em; }
+.msg__text code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+.msg__text pre { background: var(--code-bg); padding: 14px 18px; border-radius: var(--radius-md); overflow-x: auto; margin: 8px 0; border: 1px solid var(--border); }
+.msg__text pre code { background: none; padding: 0; }
+
+.think-block {
+  border-left: 2px solid var(--accent); background: var(--think-bg);
+  padding: 10px 14px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin-bottom: 6px; cursor: pointer; user-select: none;
+  transition: background var(--transition);
+}
+.think-block:hover { background: var(--bg-hover); }
+.think-block__head {
+  font-size: 11px; font-weight: 550; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  display: flex; align-items: center; gap: 6px;
+}
+.think-block__indicator { font-size: 10px; transition: transform var(--transition); }
+.think-block--open .think-block__indicator { transform: rotate(90deg); }
+.think-block__body {
+  font-size: 12px; color: var(--text-dim); line-height: 1.6;
+  display: none; margin-top: 6px; font-style: italic;
+}
+.think-block--open .think-block__body { display: block; }
+
+.tool-block {
+  background: var(--tool-bg); border: 1px solid var(--border);
+  border-radius: var(--radius-md); margin-bottom: 8px;
+  overflow: hidden; font-family: var(--font-mono); font-size: 12px;
+}
+.tool-block__head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; cursor: pointer; user-select: none;
+  color: var(--text-dim); transition: background var(--transition);
+}
+.tool-block__head:hover { background: var(--bg-hover); }
+.tool-block__name { font-weight: 550; color: var(--accent); }
+.tool-block__args { color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.tool-block__expand { font-size: 10px; transition: transform var(--transition); color: var(--text-muted); }
+.tool-block--open .tool-block__expand { transform: rotate(90deg); }
+.tool-block__body { display: none; padding: 12px 14px; border-top: 1px solid var(--border); overflow-x: auto; color: var(--text-dim); white-space: pre-wrap; word-break: break-all; }
+.tool-block--open .tool-block__body { display: block; }
+
+.msg__cost {
+  font-size: 10px; color: var(--text-muted); font-family: var(--font-mono);
+  margin-top: 4px; text-align: right;
+}
+
+/* ═══════════════════════ INPUT ═══════════════════════ */
+
+.input-area {
+  border-top: 1px solid var(--border);
+  padding: 16px 32px 20px;
+  background: var(--bg-surface);
+}
+
+.input-area__inner {
+  max-width: 720px; margin: 0 auto;
+  position: relative;
+}
+
+.input-wrap {
+  display: flex; align-items: flex-end; gap: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border-v);
+  border-radius: var(--radius-lg); padding: 10px 14px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.input-wrap:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.input-wrap textarea {
+  flex: 1; border: none; background: transparent; resize: none;
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.5;
+  color: var(--text); outline: none; min-height: 24px; max-height: 200px;
+  padding: 2px 0;
+}
+.input-wrap textarea::placeholder { color: var(--text-muted); }
+
+.btn-send {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: none; background: var(--accent); color: #fff;
+  cursor: pointer; font-size: 18px; display: flex;
+  align-items: center; justify-content: center;
+  transition: all var(--transition); flex-shrink: 0;
+}
+.btn-send:hover { opacity: 0.88; transform: scale(1.05); }
+.btn-send:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
+.btn-send--stop { background: var(--error); }
+
+.input-hint {
+  font-size: 11px; color: var(--text-muted); margin-top: 8px;
+  text-align: center; font-family: var(--font-mono);
+}
+
+/* ═══════════════════════ PANEL (right) ═══════════════════════ */
+
+.panel {
+  background: var(--bg-surface); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+.panel__head {
+  padding: 16px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 550; letter-spacing: 0.01em;
+}
+
+.panel__tabs { display: flex; gap: 2px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+
+.panel__tab {
+  padding: 5px 12px; border-radius: var(--radius-sm);
+  font-size: 12px; cursor: pointer; border: none; background: transparent;
+  color: var(--text-dim); font-family: var(--font-sans);
+  transition: all var(--transition);
+}
+.panel__tab:hover { color: var(--text); background: var(--bg-hover); }
+.panel__tab--active { background: var(--bg-elevated); color: var(--text); font-weight: 500; }
+
+.panel__body { flex: 1; overflow-y: auto; padding: 10px 14px; }
+
+.cap-section { margin-bottom: 20px; }
+.cap-section__title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); margin-bottom: 8px; padding: 0 4px;
+}
+
+.cap-item {
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  cursor: default; transition: background var(--transition);
+  font-size: 12px; margin-bottom: 1px;
+}
+.cap-item:hover { background: var(--bg-hover); }
+.cap-item__name { font-weight: 500; }
+.cap-item__desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
+
+.file-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 12px; transition: background var(--transition);
+}
+.file-item:hover { background: var(--bg-hover); }
+.file-item__icon { font-size: 14px; width: 20px; text-align: center; }
+.file-item__name { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+
+.file-viewer {
+  margin-top: 12px; padding: 14px; background: var(--code-bg);
+  border-radius: var(--radius-md); border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap;
+  max-height: 400px; overflow: auto; color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* ═══════════════════════ TOOLBAR ═══════════════════════ */
+
+.toolbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 32px; border-bottom: 1px solid var(--border);
+}
+
+.toolbar__title {
+  font-size: 13px; font-weight: 500; color: var(--text-dim);
+  margin-right: auto;
+}
+
+.btn-tool {
+  padding: 6px 12px; border-radius: var(--radius-sm);
+  font-size: 12px; cursor: pointer; border: 1px solid var(--border-v);
+  background: transparent; color: var(--text-dim);
+  font-family: var(--font-sans); transition: all var(--transition);
+  display: flex; align-items: center; gap: 5px;
+}
+.btn-tool:hover { background: var(--bg-hover); color: var(--text); }
+.btn-tool--active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+/* ═══════════════════════ SCROLLBAR ═══════════════════════ */
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-v); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ═══════════════════════ STREAMING CURSOR ═══════════════════════ */
+
+.streaming-cursor {
+  display: inline-block; width: 6px; height: 14px;
+  background: var(--accent); border-radius: 1px;
+  animation: blink 0.8s ease-in-out infinite;
+  vertical-align: text-bottom; margin-left: 1px;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+.loading-dots { display: inline-flex; gap: 3px; padding: 4px 0; }
+.loading-dots span {
+  width: 4px; height: 4px; border-radius: 50%; background: var(--text-muted);
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+.loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sidebar__head">
+      <div class="sidebar__logo">
+        <span class="sidebar__logo-dot"></span> Harness
+      </div>
+      <div class="sidebar__actions">
+        <button class="btn-icon" id="btnNewWorkspace" title="New workspace">📁</button>
+        <button class="btn-icon" id="btnNewSession" title="New session">+</button>
+      </div>
+    </div>
+    <div class="sidebar__sessions" id="sidebarScroll">
+      <div class="sidebar__section-label">Workspaces <button id="btnAddWs" title="Add workspace">+</button></div>
+      <div id="workspaceList"></div>
+      <div class="sidebar__section-label">Sessions <button id="btnNewSess" title="New session">+</button></div>
+      <div id="sessionList"></div>
+    </div>
+    <div class="sidebar__foot">
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme"></button>
+      <span class="version">v0.1</span>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <main class="main">
+    <div class="toolbar">
+      <span class="toolbar__title" id="toolbarTitle">Select or create a session</span>
+      <button class="btn-tool" id="btnCapabilities" title="Capabilities">⚙ Capabilities</button>
+      <button class="btn-tool" id="btnFiles" title="Session files">📁 Files</button>
+    </div>
+    <div class="chat" id="chat">
+      <div class="chat__empty" id="chatEmpty">
+        <div class="chat__empty-title">Harness Console</div>
+        <div class="chat__empty-sub">Claude Code + fast-harness, on the server. Create or select a session to begin.</div>
+        <div class="chat__empty-hint">/implement · /fix · /refactor · /modify</div>
+      </div>
+      <div class="chat__inner" id="chatInner" style="display:none"></div>
+    </div>
+    <div class="input-area">
+      <div class="input-area__inner">
+        <div class="input-wrap">
+          <textarea id="promptInput" rows="1" placeholder="Send a prompt, or use /implement, /fix..." disabled></textarea>
+          <button class="btn-send" id="btnSend" disabled title="Send">↑</button>
+        </div>
+        <div class="input-hint" id="inputHint">No session selected</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── PANEL ── -->
+  <aside class="panel" id="panel" style="display:none">
+    <div class="panel__head">
+      <span id="panelTitle">Capabilities</span>
+      <button class="btn-icon" id="btnClosePanel">×</button>
+    </div>
+    <div class="panel__tabs" id="panelTabs" style="display:none">
+      <button class="panel__tab panel__tab--active" data-tab="capabilities">Capabilities</button>
+      <button class="panel__tab" data-tab="files">Files</button>
+      <button class="panel__tab" data-tab="repos">Repos</button>
+    </div>
+    <div class="panel__body" id="panelBody"></div>
+  </aside>
+</div>
+
+<script>
+/* ═══════════════════════ API ═══════════════════════ */
+
+const API = "http://localhost:8002/api";
+
+async function api(method, path, body) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/* ═══════════════════════ STATE ═══════════════════════ */
+
+let state = {
+  activeSession: null,
+  activeWorkspace: null,
+  sessions: [],
+  workspaces: [],
+  capabilities: null,
+  abortController: null,
+  streaming: false,
+  panelOpen: false,
+  panelTab: "capabilities",
+};
+
+/* ═══════════════════════ DOM REFS ═══════════════════════ */
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+const app = $("#app");
+const workspaceList = $("#workspaceList");
+const sessionList = $("#sessionList");
+const chat = $("#chat");
+const chatInner = $("#chatInner");
+const chatEmpty = $("#chatEmpty");
+const promptInput = $("#promptInput");
+const btnSend = $("#btnSend");
+const inputHint = $("#inputHint");
+const toolbarTitle = $("#toolbarTitle");
+const panel = $("#panel");
+const panelBody = $("#panelBody");
+const panelTabs = $("#panelTabs");
+const panelTitle = $("#panelTitle");
+const btnCapabilities = $("#btnCapabilities");
+const btnFiles = $("#btnFiles");
+
+/* ═══════════════════════ SESSIONS ═══════════════════════ */
+
+async function loadSessions() {
+  try {
+    const data = await api("GET", "/sessions");
+    state.sessions = data.sessions || [];
+    renderSessions();
+  } catch (e) { console.error("Failed to load sessions:", e); }
+}
+
+function renderSessions() {
+  sessionList.innerHTML = state.sessions.map(s => `
+    <div class="session-item ${state.activeSession === s.session_id ? "session-item--active" : ""}"
+         data-id="${s.session_id}" onclick="selectSession('${s.session_id}')">
+      <span class="session-item__id">${s.session_id}</span>
+      <button class="session-item__del" onclick="deleteSession(event, '${s.session_id}')" title="Delete">&times;</button>
+    </div>
+  `).join("");
+}
+
+async function createSession() {
+  try {
+    const body = state.activeWorkspace ? { workspace_id: state.activeWorkspace } : {};
+    const data = await api("POST", "/sessions", body);
+    await loadSessions();
+    selectSession(data.session_id);
+  } catch (e) { alert("Failed to create session: " + e.message); }
+}
+
+function selectSession(id) {
+  state.activeSession = id;
+  renderSessions();
+  promptInput.disabled = false;
+  btnSend.disabled = false;
+  inputHint.textContent = `Workspace: workspaces/${id}`;
+  toolbarTitle.textContent = `Session · ${id}`;
+  chatEmpty.style.display = "none";
+  chatInner.style.display = "block";
+  chatInner.innerHTML = "";
+  if (state.panelOpen && state.panelTab === "files") loadFiles();
+}
+
+async function deleteSession(e, id) {
+  e.stopPropagation();
+  if (!confirm("Delete session " + id + "?")) return;
+  await api("DELETE", "/sessions/" + id);
+  if (state.activeSession === id) {
+    state.activeSession = null;
+    promptInput.disabled = true;
+    btnSend.disabled = true;
+    inputHint.textContent = "No session selected";
+    toolbarTitle.textContent = "Select or create a session";
+    chatEmpty.style.display = "flex";
+    chatInner.style.display = "none";
+    chatInner.innerHTML = "";
+  }
+  await loadSessions();
+}
+
+/* ═══════════════════════ WORKSPACES ═══════════════════════ */
+
+async function loadWorkspaces() {
+  try {
+    const data = await api("GET", "/workspaces");
+    state.workspaces = data.workspaces || [];
+    renderWorkspaces();
+  } catch (e) { console.error(e); }
+}
+
+function renderWorkspaces() {
+  let html = "";
+  for (const w of state.workspaces) {
+    const active = state.activeWorkspace === w.workspace_id ? " workspace-item--active" : "";
+    html += `<div class="workspace-item${active}" data-id="${w.workspace_id}" onclick="selectWorkspace('${w.workspace_id}')">
+      <span class="workspace-item__dot"></span>
+      <span class="workspace-item__name">${escapeHtml(w.name)}</span>
+      <span style="font-size:10px;color:var(--text-muted)">${w.repos.length} repos</span>
+    </div>`;
+  }
+  workspaceList.innerHTML = html;
+}
+
+function selectWorkspace(id) {
+  state.activeWorkspace = (state.activeWorkspace === id) ? null : id;
+  renderWorkspaces();
+  inputHint.textContent = state.activeWorkspace
+    ? "New session will be in workspace " + state.activeWorkspace
+    : "No session selected";
+}
+
+async function createWorkspace() {
+  showWorkspaceDialog();
+}
+
+function showWorkspaceDialog(preselectedRepos) {
+  let overlay = document.getElementById("wsDialogOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "wsDialogOverlay";
+    overlay.className = "dialog-overlay";
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = `<div class="dialog">
+    <h3>Create Workspace</h3>
+    <label>Workspace Name</label>
+    <input id="wsNameInput" placeholder="e.g. my-project">
+    <label>Repos</label>
+    <div id="wsRepoList" style="max-height:200px;overflow-y:auto;margin-bottom:12px">
+      <span style="font-size:11px;color:var(--text-muted)">Loading registered repos...</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeWorkspaceDialog()">Cancel</button>
+      <button class="btn-confirm" onclick="confirmCreateWorkspace()">Create</button>
+    </div>
+  </div>`;
+  overlay.style.display = "flex";
+
+  // Load registered repos as checkboxes
+  loadRegisteredReposForDialog(preselectedRepos);
+}
+
+function closeWorkspaceDialog() {
+  const overlay = document.getElementById("wsDialogOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+async function loadRegisteredReposForDialog(preselected) {
+  const container = document.getElementById("wsRepoList");
+  if (!container) return;
+  try {
+    const data = await api("GET", "/repos/registered");
+    const repos = data.repos || [];
+    if (repos.length === 0) {
+      container.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">No registered repos. Add repos to a workspace first, or enter a URL below.</span>';
+      return;
+    }
+    container.innerHTML = repos.map(r => {
+      const checked = preselected && preselected.includes(r.url) ? 'checked' : '';
+      return `<label class="reg-repo-item">
+        <input type="checkbox" value="${escapeHtml(r.url)}" data-name="${escapeHtml(r.name)}" ${checked}>
+        <span style="flex:1;font-family:var(--font-mono);font-size:11px">${escapeHtml(r.name)}</span>
+        <span style="font-size:9px;color:var(--text-muted)">${escapeHtml(r.provider)} · ${escapeHtml(r.branch)}</span>
+      </label>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<span style="font-size:11px;color:var(--error)">Failed to load</span>';
+  }
+}
+
+async function confirmCreateWorkspace() {
+  const name = document.getElementById("wsNameInput").value.trim();
+  if (!name) return alert("Enter a workspace name");
+
+  const checks = document.querySelectorAll("#wsRepoList input[type=checkbox]:checked");
+  const repos = [];
+  checks.forEach(cb => {
+    repos.push({ url: cb.value, name: cb.dataset.name });
+  });
+
+  try {
+    await api("POST", "/workspaces", { name, repos });
+    closeWorkspaceDialog();
+    await loadWorkspaces();
+  } catch (e) {
+    alert("Failed: " + e.message);
+  }
+}
+
+function _cssEscape(s) { return CSS.escape(s); }
+
+/* ═══════════════════════ REPO MANAGEMENT ═══════════════════════ */
+
+function renderRepoPanel() {
+  const ws = state.workspaces.find(w => w.workspace_id === state.activeWorkspace);
+  if (!ws) {
+    panelBody.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:12px">Select a workspace in the sidebar to manage repos.</div>';
+    return;
+  }
+
+  let html = `<div class="workspace-create">
+    <input id="repoUrl" placeholder="Git URL (HTTPS or SSH)" style="flex:1">
+    <input id="repoName" placeholder="Name" style="width:100px">
+    <select id="repoBranch"><option value="">auto</option><option value="main">main</option><option value="master">master</option><option value="develop">develop</option></select>
+    <button onclick="addRepoToWorkspace()">Clone</button>
+  </div>`;
+
+  html += `<div style="padding: 8px 14px; font-size:11px; color:var(--text-dim)">Workspace: <b>${escapeHtml(ws.name)}</b> (${ws.repos.length} repos)</div>`;
+
+  if (ws.repos.length === 0) {
+    html += '<div style="color:var(--text-muted);font-size:12px;padding:12px">No repos. Add one above or pick from registered repos.</div>';
+  }
+
+  for (const r of ws.repos) {
+    html += `<div class="repo-item">
+      <span class="repo-item__icon">📦</span>
+      <span class="repo-item__name">${escapeHtml(r.name)}</span>
+      <select class="branch-select" onchange="switchBranch('${escapeHtml(r.name)}', this.value)" data-repo="${escapeHtml(r.name)}">
+        <option>${escapeHtml(r.branch || "main")}</option>
+        <option disabled>---</option>
+      </select>
+      <button style="background:none;border:none;color:var(--error);cursor:pointer;font-size:14px" onclick="removeRepo('${escapeHtml(r.name)}')" title="Remove">&times;</button>
+    </div>`;
+  }
+
+  // Show registered repos section
+  html += `<div class="cap-section" style="margin-top:16px"><div class="cap-section__title">Registered Repos (click to re-use)</div></div>`;
+  html += `<div id="regReposList" style="padding:0 4px"><span style="font-size:11px;color:var(--text-muted)">Loading...</span></div>`;
+
+  panelBody.innerHTML = html;
+
+  // Load branches for each repo
+  for (const r of ws.repos) {
+    loadBranchesForRepo(ws.workspace_id, r.name);
+  }
+  // Load registered repos
+  loadRegisteredRepos();
+}
+
+async function loadBranchesForRepo(wsId, repoName) {
+  try {
+    const data = await api("GET", `/workspaces/${wsId}/repos/${repoName}/branches`);
+    const sel = document.querySelector(`.branch-select[data-repo="${_cssEscape(repoName)}"]`);
+    if (!sel) return;
+    const currentBranch = sel.value;
+    sel.innerHTML = (data.branches || []).map(b =>
+      `<option ${b === currentBranch ? 'selected' : ''}>${escapeHtml(b)}</option>`
+    ).join('');
+  } catch (e) {
+    console.error("Failed to load branches:", e);
+  }
+}
+
+async function switchBranch(repoName, branch) {
+  if (!state.activeWorkspace) return;
+  try {
+    await api("POST", `/workspaces/${state.activeWorkspace}/repos/${repoName}/checkout?branch=${encodeURIComponent(branch)}`);
+    await loadWorkspaces();
+  } catch (e) {
+    alert(`Branch switch failed: ${e.message}`);
+  }
+}
+
+async function loadRegisteredRepos() {
+  const container = document.getElementById("regReposList");
+  if (!container) return;
+  try {
+    const data = await api("GET", "/repos/registered");
+    const repos = data.repos || [];
+    if (repos.length === 0) {
+      container.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">No registered repos yet.</span>';
+      return;
+    }
+    container.innerHTML = repos.map(r => `
+      <div class="reg-repo-item" onclick="addRegisteredRepo('${escapeHtml(r.url)}', '${escapeHtml(r.name)}')">
+        <span style="font-size:10px">📦</span>
+        <span style="flex:1;font-family:var(--font-mono);font-size:10px">${escapeHtml(r.name)}</span>
+        <span style="font-size:9px;color:var(--text-muted)">${escapeHtml(r.provider)}/${escapeHtml(r.branch)}</span>
+      </div>
+    `).join('');
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function addRegisteredRepo(url, name) {
+  const urlInput = document.getElementById("repoUrl");
+  const nameInput = document.getElementById("repoName");
+  if (urlInput) urlInput.value = url;
+  if (nameInput) nameInput.value = name;
+}
+
+async function addRepoToWorkspace() {
+  if (!state.activeWorkspace) return;
+  const url = $("#repoUrl").value.trim();
+  const name = $("#repoName").value.trim() || null;
+  const branch = $("#repoBranch").value;
+  if (!url) return alert("Enter a git URL");
+  try {
+    await api("POST", `/workspaces/${state.activeWorkspace}/repos`, { url, name, branch });
+    await loadWorkspaces();
+    renderRepoPanel();
+  } catch (e) { alert("Clone failed: " + e.message); }
+}
+
+async function removeRepo(name) {
+  if (!state.activeWorkspace || !confirm(`Remove repo "${name}"?`)) return;
+  try {
+    await api("DELETE", `/workspaces/${state.activeWorkspace}/repos/${name}`);
+    await loadWorkspaces();
+    renderRepoPanel();
+  } catch (e) { alert("Failed: " + e.message); }
+}
+
+/* ═══════════════════════ CHAT / SSE ═══════════════════════ */
+
+function addMessage(type, data) {
+  const el = document.createElement("div");
+  el.className = `msg msg--${type}`;
+
+  if (type === "assistant") {
+    const blocks = data.content || [];
+    for (const block of blocks) {
+      if (block.type === "text") {
+        const div = document.createElement("div");
+        div.className = "msg__text";
+        div.innerHTML = renderMarkdown(block.text);
+        el.appendChild(div);
+      } else if (block.type === "tool_use") {
+        el.appendChild(createToolBlock(block));
+      } else if (block.type === "unknown") {
+        // Check for thinking content
+        const match = block.data.match(/ThinkingBlock\(thinking='([\s\S]*?)'/);
+        if (match) {
+          el.appendChild(createThinkBlock(match[1]));
+        }
+      }
+    }
+  } else if (type === "result") {
+    const div = document.createElement("div");
+    div.className = "msg";
+    div.innerHTML = `
+      <div class="msg__text">${renderMarkdown(data.result || "")}</div>
+      ${data.total_cost_usd ? `<div class="msg__cost">$${data.total_cost_usd.toFixed(4)}</div>` : ""}
+    `;
+    chatInner.appendChild(div);
+    scrollToBottom();
+    return;
+  } else if (type === "error") {
+    el.innerHTML = `<strong>Error:</strong> ${escapeHtml(data.message || "Unknown error")}`;
+  }
+
+  chatInner.appendChild(el);
+  scrollToBottom();
+}
+
+function createThinkBlock(text) {
+  const div = document.createElement("div");
+  div.className = "think-block think-block--open";
+  div.innerHTML = `
+    <div class="think-block__head" onclick="this.parentElement.classList.toggle('think-block--open')">
+      <span class="think-block__indicator">▶</span> Thinking
+    </div>
+    <div class="think-block__body">${escapeHtml(text)}</div>
+  `;
+  return div;
+}
+
+function createToolBlock(block) {
+  const div = document.createElement("div");
+  div.className = "tool-block";
+  const argsPreview = typeof block.input === "object"
+    ? Object.entries(block.input).map(([k,v]) => `${k}=${JSON.stringify(v)}`).join(", ")
+    : String(block.input);
+  div.innerHTML = `
+    <div class="tool-block__head" onclick="this.parentElement.classList.toggle('tool-block--open')">
+      <span class="tool-block__name">${escapeHtml(block.name)}</span>
+      <span class="tool-block__args">${escapeHtml(argsPreview)}</span>
+      <span class="tool-block__expand">▶</span>
+    </div>
+    <div class="tool-block__body">${escapeHtml(JSON.stringify(block.input, null, 2))}</div>
+  `;
+  return div;
+}
+
+function createAskBlock(block) {
+  const div = document.createElement("div");
+  div.className = "ask-question-block";
+  div.dataset.toolUseId = block.id;
+  let html = '<div class="ask-question-block__title">💬 Claude needs your input:</div>';
+  for (const q of (block.questions || [])) {
+    const qText = q.question || q.header || "";
+    html += `<div class="ask-question-item"><div class="ask-question-item__q">${escapeHtml(qText)}</div><div class="ask-question-opts">`;
+    for (const opt of (q.options || [])) {
+      html += `<button class="ask-question-opt" data-question="${escapeHtml(qText)}" data-answer="${escapeHtml(opt.label)}" onclick="selectAskOption(this, '${escapeHtml(qText)}', '${escapeHtml(opt.label)}')">${escapeHtml(opt.label)}</button>`;
+    }
+    html += '</div><div class="ask-question-answer" style="display:none"></div></div>';
+  }
+  div.innerHTML = html;
+  return div;
+}
+
+function selectAskOption(btn, question, answer) {
+  // Highlight selected
+  const opts = btn.parentElement.querySelectorAll(".ask-question-opt");
+  opts.forEach(o => o.classList.remove("ask-question-opt--selected"));
+  btn.classList.add("ask-question-opt--selected");
+  // Show answer
+  const answerEl = btn.parentElement.nextElementSibling;
+  if (answerEl) {
+    answerEl.style.display = "inline-block";
+    answerEl.textContent = "✓ " + answer;
+  }
+  // Mark block as answered
+  btn.closest(".ask-question-block").classList.add("ask-question-answered");
+  // TODO: send answer to server via POST /api/sessions/{id}/answer
+}
+
+function addSystemMessage(text) { addMessage("system", { text }); }
+function addErrorMessage(text) { addMessage("error", { message: text }); }
+
+function scrollToBottom() {
+  requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+}
+
+/* Simple markdown renderer */
+function renderMarkdown(md) {
+  if (!md) return "";
+  let html = escapeHtml(md);
+  // Code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // Newlines
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+let currentMsgEl = null;
+
+async function sendPrompt() {
+  const prompt = promptInput.value.trim();
+  if (!prompt || !state.activeSession || state.streaming) return;
+
+  // Stop existing stream
+  if (state.abortController) { state.abortController.abort(); }
+
+  promptInput.value = "";
+  promptInput.style.height = "auto";
+  state.streaming = true;
+  btnSend.textContent = "■";
+  btnSend.classList.add("btn-send--stop");
+  state.abortController = new AbortController();
+
+  // Show user message
+  const userEl = document.createElement("div");
+  userEl.className = "msg";
+  userEl.innerHTML = `<div class="msg__text" style="color:var(--text-dim);font-style:italic">${escapeHtml(prompt)}</div>`;
+  chatInner.appendChild(userEl);
+  scrollToBottom();
+
+  // Create streaming message container
+  currentMsgEl = document.createElement("div");
+  currentMsgEl.className = "msg";
+  chatInner.appendChild(currentMsgEl);
+  let textEl = null;
+
+  const url = API + "/sessions/" + state.activeSession + "/query";
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, workspace_id: state.activeWorkspace || undefined }),
+      signal: state.abortController.signal,
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const msg = JSON.parse(line.slice(6));
+            handleStreamMessage(msg, currentMsgEl, textEl);
+            if (msg.type === "assistant") {
+              for (const block of (msg.content || [])) {
+                if (block.type === "text") {
+                  if (!textEl) {
+                    textEl = document.createElement("div");
+                    textEl.className = "msg__text";
+                    currentMsgEl.appendChild(textEl);
+                    textEl._html = "";
+                  }
+                }
+              }
+            }
+          } catch (e) { /* skip parse errors */ }
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      addErrorMessage(e.message);
+    }
+  }
+
+  stopStreaming();
+}
+
+function handleStreamMessage(msg, container, textEl) {
+  // system/init — show a compact startup line
+  if (msg.type === "system" && msg.subtype === "init") {
+    const div = document.createElement("div");
+    div.className = "msg msg--system";
+    div.textContent = `session · ${msg.session_id?.slice(0,8) || "?"} | model · ${msg.model || "?"} | cwd · ${msg.cwd || "?"}`;
+    container.appendChild(div);
+    return;
+  }
+  if (msg.type === "system") return; // skip other system messages
+
+  // tool_results — update corresponding tool block with result
+  if (msg.type === "tool_results" && msg.content) {
+    for (const block of msg.content) {
+      const toolBlocks = container.querySelectorAll(".tool-block");
+      for (const tb of toolBlocks) {
+        const head = tb.querySelector(".tool-block__head");
+        if (head && head.textContent.includes(block.tool_use_id?.slice(0,8))) {
+          const body = tb.querySelector(".tool-block__body");
+          if (body) body.textContent = block.content || "(no output)";
+          if (block.is_error) tb.style.borderColor = "var(--error)";
+        }
+      }
+    }
+    return;
+  }
+
+  if (msg.type === "assistant") {
+    for (const block of (msg.content || [])) {
+      if (block.type === "text") {
+        if (!textEl) {
+          textEl = document.createElement("div");
+          textEl.className = "msg__text";
+          container.appendChild(textEl);
+          textEl._html = "";
+        }
+        textEl._html += block.text;
+        textEl.innerHTML = renderMarkdown(textEl._html);
+      } else if (block.type === "tool_use") {
+        textEl = null;
+        container.appendChild(createToolBlock(block));
+      } else if (block.type === "thinking") {
+        container.appendChild(createThinkBlock(block.thinking));
+      } else if (block.type === "ask_user_question") {
+        textEl = null;
+        container.appendChild(createAskBlock(block));
+      }
+    }
+  } else if (msg.type === "result") {
+    if (msg.result) {
+      const div = document.createElement("div");
+      div.className = "msg__text";
+      div.innerHTML = renderMarkdown(msg.result);
+      container.appendChild(div);
+      if (msg.total_cost_usd) {
+        const cost = document.createElement("div");
+        cost.className = "msg__cost";
+        cost.textContent = `$${msg.total_cost_usd.toFixed(4)}`;
+        container.appendChild(cost);
+      }
+    }
+  } else if (msg.type === "error") {
+    const div = document.createElement("div");
+    div.className = "msg__text";
+    div.style.color = "var(--error)";
+    div.textContent = "Error: " + (msg.message || "Unknown");
+    container.appendChild(div);
+  }
+  scrollToBottom();
+}
+
+function stopStreaming() {
+  state.streaming = false;
+  btnSend.textContent = "↑";
+  btnSend.classList.remove("btn-send--stop");
+  if (state.abortController) { state.abortController = null; }
+  currentMsgEl = null;
+}
+
+/* ═══════════════════════ PANEL ═══════════════════════ */
+
+function togglePanel(btn) {
+  if (state.panelOpen && btn.classList.contains("btn-tool--active")) {
+    closePanel();
+    return;
+  }
+  state.panelOpen = true;
+  app.classList.add("app--panel-open");
+  panel.style.display = "flex";
+  btnCapabilities.classList.remove("btn-tool--active");
+  btnFiles.classList.remove("btn-tool--active");
+  btn.classList.add("btn-tool--active");
+  state.panelTab = btn === btnCapabilities ? "capabilities" : btn === btnFiles ? "files" : "repos";
+  panelTitle.textContent = state.panelTab === "capabilities" ? "Capabilities" : state.panelTab === "files" ? "Session Files" : "Repos";
+  panelTabs.style.display = "flex";
+  $$(".panel__tab").forEach(t => t.classList.remove("panel__tab--active"));
+  const tab = $(`.panel__tab[data-tab="${state.panelTab}"]`);
+  if (tab) tab.classList.add("panel__tab--active");
+  if (state.panelTab === "capabilities") loadCapabilities();
+  else if (state.panelTab === "files") loadFiles();
+  else renderRepoPanel();
+}
+
+function closePanel() {
+  state.panelOpen = false;
+  app.classList.remove("app--panel-open");
+  panel.style.display = "none";
+  btnCapabilities.classList.remove("btn-tool--active");
+  btnFiles.classList.remove("btn-tool--active");
+}
+
+async function loadCapabilities() {
+  panelBody.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+  try {
+    const data = await api("GET", "/capabilities");
+    state.capabilities = data;
+    renderCapabilities(data);
+  } catch (e) {
+    panelBody.innerHTML = `<div class="msg--error">Failed to load: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderCapabilities(caps) {
+  let html = "";
+  if (caps.commands && caps.commands.length) {
+    html += '<div class="cap-section"><div class="cap-section__title">Commands</div>';
+    for (const c of caps.commands) {
+      html += `<div class="cap-item"><div class="cap-item__name">/${c.name}</div><div class="cap-item__desc">${escapeHtml(c.description || "")}</div></div>`;
+    }
+    html += "</div>";
+  }
+  if (caps.agents && Object.keys(caps.agents).length) {
+    html += '<div class="cap-section"><div class="cap-section__title">Agents</div>';
+    for (const [name, a] of Object.entries(caps.agents)) {
+      html += `<div class="cap-item"><div class="cap-item__name">${escapeHtml(name)}</div><div class="cap-item__desc">${escapeHtml(a.description || "")}</div></div>`;
+    }
+    html += "</div>";
+  }
+  if (caps.skills && caps.skills.length) {
+    html += '<div class="cap-section"><div class="cap-section__title">Skills</div>';
+    for (const s of caps.skills) {
+      html += `<div class="cap-item"><div class="cap-item__name">${escapeHtml(s.name)}</div><div class="cap-item__desc">${escapeHtml(s.description || "")}</div></div>`;
+    }
+    html += "</div>";
+  }
+  if (!html) html = '<div style="color:var(--text-muted);font-size:12px;padding:12px">No capabilities discovered.</div>';
+  panelBody.innerHTML = html;
+}
+
+async function loadFiles() {
+  if (!state.activeSession) return;
+  panelBody.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+  try {
+    const data = await api("GET", "/sessions/" + state.activeSession + "/files");
+    renderFiles(data);
+  } catch (e) {
+    panelBody.innerHTML = `<div class="msg--error">Failed to load files: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderFiles(data) {
+  let html = "";
+  if (data.files && data.files.length) {
+    for (const f of data.files) {
+      const icon = f.endsWith(".py") ? "🐍" : f.endsWith(".md") ? "📝" : f.endsWith(".json") ? "📋" : f.endsWith(".ts") ? "🔷" : f.endsWith(".js") ? "🟨" : "📄";
+      html += `<div class="file-item" onclick="viewFile('${escapeHtml(f)}')">
+        <span class="file-item__icon">${icon}</span>
+        <span class="file-item__name">${escapeHtml(f)}</span>
+      </div>`;
+    }
+  } else {
+    html = '<div style="color:var(--text-muted);font-size:12px;padding:12px">No files in workspace yet.</div>';
+  }
+  panelBody.innerHTML = html + '<div id="fileViewer" class="file-viewer" style="display:none"></div>';
+}
+
+async function viewFile(path) {
+  if (!state.activeSession) return;
+  const viewer = $("#fileViewer");
+  viewer.style.display = "block";
+  viewer.textContent = "Loading...";
+  try {
+    const data = await api("GET", "/sessions/" + state.activeSession + "/files/" + path);
+    viewer.textContent = data.content;
+  } catch (e) {
+    viewer.textContent = "Error: " + e.message;
+  }
+}
+
+/* ═══════════════════════ THEME ═══════════════════════ */
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute("data-theme");
+  html.setAttribute("data-theme", current === "dark" ? "light" : "dark");
+}
+
+/* ═══════════════════════ INPUT AUTO-RESIZE ═══════════════════════ */
+
+promptInput.addEventListener("input", () => {
+  promptInput.style.height = "auto";
+  promptInput.style.height = Math.min(promptInput.scrollHeight, 200) + "px";
+});
+
+/* ═══════════════════════ KEYBOARD SHORTCUTS ═══════════════════════ */
+
+promptInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPrompt(); }
+});
+
+/* ═══════════════════════ EVENT BINDINGS ═══════════════════════ */
+
+$("#btnNewSession").addEventListener("click", createSession);
+$("#btnNewSess").addEventListener("click", createSession);
+$("#btnNewWorkspace").addEventListener("click", createWorkspace);
+$("#btnAddWs").addEventListener("click", createWorkspace);
+btnSend.addEventListener("click", () => {
+  if (state.streaming) {
+    if (state.abortController) state.abortController.abort();
+    stopStreaming();
+  } else {
+    sendPrompt();
+  }
+});
+btnCapabilities.addEventListener("click", () => togglePanel(btnCapabilities));
+btnFiles.addEventListener("click", () => togglePanel(btnFiles));
+$("#btnClosePanel").addEventListener("click", closePanel);
+$("#themeToggle").addEventListener("click", toggleTheme);
+panelTabs.addEventListener("click", (e) => {
+  if (!e.target.classList.contains("panel__tab")) return;
+  state.panelTab = e.target.dataset.tab;
+  panelTitle.textContent = state.panelTab === "capabilities" ? "Capabilities" : state.panelTab === "files" ? "Session Files" : "Repos";
+  $$(".panel__tab").forEach(t => t.classList.remove("panel__tab--active"));
+  e.target.classList.add("panel__tab--active");
+  btnCapabilities.classList.toggle("btn-tool--active", state.panelTab === "capabilities");
+  btnFiles.classList.toggle("btn-tool--active", state.panelTab === "files");
+  if (state.panelTab === "capabilities") loadCapabilities();
+  else if (state.panelTab === "files") loadFiles();
+  else renderRepoPanel();
+});
+
+/* ═══════════════════════ INIT ═══════════════════════ */
+
+loadWorkspaces();
+loadSessions();
+</script>
+</body>
+</html>

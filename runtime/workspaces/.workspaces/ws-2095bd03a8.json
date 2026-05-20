@@ -1,0 +1,16 @@
+{
+  "workspace_id": "ws-2095bd03a8",
+  "name": "123",
+  "cwd": "/Users/geralt/fast-harness/runtime/workspaces/ws-2095bd03a8",
+  "repos": [
+    {
+      "name": "creation-tool",
+      "url": "https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/creation-tool.git",
+      "provider": "codeup",
+      "branch": "master",
+      "local_path": "/Users/geralt/fast-harness/runtime/workspaces/ws-2095bd03a8/creation-tool"
+    }
+  ],
+  "created_at": "2026-05-20T08:49:48.785330+00:00",
+  "updated_at": "2026-05-20T08:50:19.763146+00:00"
+}
