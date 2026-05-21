@@ -58,6 +58,14 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn('setDialogSubmitting("btnConfirmSession", true, "Creating")', html)
         self.assertIn("loading-dots--inline", html)
 
+    def test_ui_loads_session_history_when_selecting_session(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('api("GET", "/sessions/" + id + "/messages")', html)
+        self.assertIn("function loadSessionMessages", html)
+        self.assertIn("function renderHistoryMessage", html)
+        self.assertIn("function renderUserPrompt", html)
+
 
 if __name__ == "__main__":
     unittest.main()

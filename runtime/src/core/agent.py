@@ -223,9 +223,8 @@ class StreamProcessFilter:
 
 def _configured_tool_names() -> set[str]:
     return {
-        name.strip().lower()
-        for name in settings.stream_visible_tools.split(",")
-        if name.strip()
+        name.lower()
+        for name in settings.stream_visible_tools
     }
 
 

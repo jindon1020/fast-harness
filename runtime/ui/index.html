@@ -768,7 +768,7 @@ async function confirmCreateSession() {
     const data = await api("POST", "/sessions", body);
     closeSessionDialog();
     await loadSessions();
-    selectSession(data.session_id);
+    await selectSession(data.session_id);
   } catch (e) {
     setDialogSubmitting("btnConfirmSession", false);
     alert("Failed to create session: " + e.message);
@@ -811,7 +811,7 @@ function closeSessionDialog() {
   if (overlay) overlay.style.display = "none";
 }
 
-function selectSession(id) {
+async function selectSession(id) {
   state.activeSession = id;
   const session = state.sessions.find(s => s.session_id === id);
   if (session?.metadata?.workspace_id) {
@@ -827,7 +827,32 @@ function selectSession(id) {
   chatEmpty.style.display = "none";
   chatInner.style.display = "block";
   chatInner.innerHTML = "";
+  await loadSessionMessages(id);
   if (state.panelOpen && state.panelTab === "files") loadFiles();
+}
+
+async function loadSessionMessages(id) {
+  chatInner.innerHTML = "";
+  try {
+    const data = await api("GET", "/sessions/" + id + "/messages");
+    for (const entry of (data.messages || [])) {
+      renderHistoryMessage(entry.message || entry);
+    }
+  } catch (e) {
+    addErrorMessage("Failed to load session history: " + e.message);
+  }
+}
+
+function renderHistoryMessage(msg) {
+  if (!msg || msg.type === "cancelled") return;
+  if (msg.type === "user") {
+    renderUserPrompt(msg.prompt || "");
+    return;
+  }
+  const el = document.createElement("div");
+  el.className = "msg";
+  chatInner.appendChild(el);
+  handleStreamMessage(msg, el, null);
 }
 
 async function deleteSession(e, id) {
@@ -1140,6 +1165,14 @@ function addMessage(type, data) {
   scrollToBottom();
 }
 
+function renderUserPrompt(prompt) {
+  const userEl = document.createElement("div");
+  userEl.className = "msg";
+  userEl.innerHTML = `<div class="msg__text" style="color:var(--text-dim);font-style:italic">${escapeHtml(prompt)}</div>`;
+  chatInner.appendChild(userEl);
+  scrollToBottom();
+}
+
 function createThinkBlock(text) {
   const div = document.createElement("div");
   div.className = "think-block think-block--open";
@@ -1251,10 +1284,7 @@ async function sendPrompt() {
   state.abortController = new AbortController();
 
   // Show user message
-  const userEl = document.createElement("div");
-  userEl.className = "msg";
-  userEl.innerHTML = `<div class="msg__text" style="color:var(--text-dim);font-style:italic">${escapeHtml(prompt)}</div>`;
-  chatInner.appendChild(userEl);
+  renderUserPrompt(prompt);
   scrollToBottom();
 
   // Create streaming message container

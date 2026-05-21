@@ -4,6 +4,8 @@ from pydantic import ValidationError
 
 from src.api import router
 from src.api.schemas import SessionCreateRequest, WorkspaceCreateRequest
+from src.core import session
+from src.core import workspace
 from src.core.agent import _resolve_cwd
 
 
@@ -170,6 +172,7 @@ async def test_query_checks_out_session_branch_before_streaming(monkeypatch, tmp
         yield {"type": "result", "result": "ok"}
 
     fake_workspace_store = FakeWorkspaceStore()
+    appended_messages = []
     monkeypatch.setattr(router, "workspace_store", fake_workspace_store)
     monkeypatch.setattr(
         router.session_store,
@@ -182,6 +185,11 @@ async def test_query_checks_out_session_branch_before_streaming(monkeypatch, tmp
             "metadata": {"workspace_id": "ws-1", "repo_name": "app", "branch": "main"},
         },
     )
+    monkeypatch.setattr(
+        router.session_store,
+        "append_message",
+        lambda session_id, message: appended_messages.append(message),
+    )
     monkeypatch.setattr(router, "run_query_stream", fake_run_query_stream)
 
     response = await router.query_session("sess-1", router.QueryRequest(prompt="hi"))
@@ -189,6 +197,10 @@ async def test_query_checks_out_session_branch_before_streaming(monkeypatch, tmp
         break
 
     assert fake_workspace_store.checked_out == ("ws-1", "app", "main")
+    assert appended_messages == [
+        {"type": "user", "prompt": "hi"},
+        {"type": "result", "result": "ok"},
+    ]
 
 
 def test_agent_rejects_unbound_session(monkeypatch, tmp_path):
@@ -236,3 +248,61 @@ def test_agent_cwd_resolves_to_bound_repo_local_path(monkeypatch, tmp_path):
     )
 
     assert _resolve_cwd("sess-1") == repo_path
+
+
+def test_worktree_remove_checks_return_code_and_prunes_on_failure(monkeypatch, tmp_path, caplog):
+    repo_path = tmp_path / "ws-1" / "app"
+    source_repo = tmp_path / ".sources" / "app"
+    repo_path.mkdir(parents=True)
+    source_repo.mkdir(parents=True)
+    commands = []
+
+    class FakeResult:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        commands.append((cmd, cwd))
+        if cmd[:3] == ["git", "worktree", "remove"]:
+            return FakeResult(1, stderr="fatal: stale worktree metadata")
+        return FakeResult(0)
+
+    monkeypatch.setattr(workspace.settings, "workspace_root", str(tmp_path))
+    monkeypatch.setattr(workspace.subprocess, "run", fake_run)
+
+    store = workspace.WorkspaceStore()
+    with caplog.at_level("WARNING"):
+        store._remove_worktree(repo_path)
+
+    assert commands == [
+        (["git", "worktree", "remove", "--force", str(repo_path)], str(source_repo)),
+        (["git", "worktree", "prune"], str(source_repo)),
+    ]
+    assert "Failed to remove git worktree" in caplog.text
+
+
+def test_session_history_is_persisted_under_workspace_and_deleted(monkeypatch, tmp_path):
+    monkeypatch.setattr(session.settings, "workspace_root", str(tmp_path / "runtime-workspaces"))
+    store = session.SessionStore()
+    workspace_dir = tmp_path / "ws-1"
+    session_id = store.create(
+        workspace_dir=str(workspace_dir),
+        metadata={"workspace_id": "ws-1", "repo_name": "app", "branch": "main"},
+    )
+
+    store.append_message(session_id, {"type": "user", "prompt": "第一轮"})
+    store.append_message(session_id, {"type": "assistant", "content": [{"type": "text", "text": "好的"}]})
+
+    history_path = workspace_dir / ".session-history" / f"{session_id}.jsonl"
+    assert history_path.exists()
+    assert [entry["message"]["type"] for entry in store.list_messages(session_id)] == [
+        "user",
+        "assistant",
+    ]
+
+    store.delete(session_id)
+
+    assert not history_path.exists()
+    assert not store._path(session_id).exists()

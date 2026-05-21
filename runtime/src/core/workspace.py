@@ -6,6 +6,7 @@ Each workspace is a directory under <workspace_root>/<workspace_id>/.
 import json
 import logging
 import shutil
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,15 +107,35 @@ class WorkspaceStore:
     def _remove_worktree(self, repo_path: Path) -> None:
         if not repo_path.exists():
             return
-        import subprocess
 
-        subprocess.run(
+        source_repo = Path(settings.workspace_root) / ".sources" / repo_path.name
+        cwd = source_repo if source_repo.exists() else repo_path.parent
+        result = subprocess.run(
             ["git", "worktree", "remove", "--force", str(repo_path)],
-            cwd=str(repo_path.parent),
+            cwd=str(cwd),
             capture_output=True,
             text=True,
             timeout=60,
         )
+        if result.returncode != 0:
+            logger.warning(
+                "Failed to remove git worktree %s: %s",
+                repo_path,
+                result.stderr.strip() or result.stdout.strip() or "unknown error",
+            )
+            prune = subprocess.run(
+                ["git", "worktree", "prune"],
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if prune.returncode != 0:
+                logger.warning(
+                    "Failed to prune git worktrees for %s: %s",
+                    cwd,
+                    prune.stderr.strip() or prune.stdout.strip() or "unknown error",
+                )
 
     def add_repo(self, ws_id: str, url: str, name: Optional[str] = None, branch: Optional[str] = None) -> RepoInfo:
         record = self.get(ws_id)

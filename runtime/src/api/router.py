@@ -119,6 +119,17 @@ async def get_session(session_id: str):
     return SessionInfo(**rec)
 
 
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    rec = session_store.get(session_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session_id,
+        "messages": session_store.list_messages(session_id),
+    }
+
+
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     rec = session_store.get(session_id)
@@ -140,6 +151,7 @@ async def query_session(session_id: str, body: QueryRequest):
     _checkout_session_branch(rec)
 
     async def event_stream():
+        session_store.append_message(session_id, {"type": "user", "prompt": body.prompt})
         async for msg in run_query_stream(
             session_id=session_id,
             prompt=body.prompt,
@@ -148,6 +160,7 @@ async def query_session(session_id: str, body: QueryRequest):
             max_budget_usd=body.max_budget_usd,
             permission_mode=body.permission_mode,
         ):
+            session_store.append_message(session_id, msg)
             yield {"data": json.dumps(msg, ensure_ascii=False)}
 
     return EventSourceResponse(event_stream())

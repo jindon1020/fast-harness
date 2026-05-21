@@ -224,7 +224,7 @@ async def test_run_query_stream_treats_exit_143_as_cancelled(monkeypatch, tmp_pa
 
 
 def test_stream_filter_hides_tool_calls_and_results_by_default(monkeypatch):
-    monkeypatch.setattr(agent.settings, "stream_visible_tools", "")
+    monkeypatch.setattr(agent, "_configured_tool_names", lambda: set())
     process_filter = agent.StreamProcessFilter()
 
     tool_message = AssistantMessage(
@@ -240,7 +240,7 @@ def test_stream_filter_hides_tool_calls_and_results_by_default(monkeypatch):
 
 
 def test_stream_filter_can_show_configured_tools(monkeypatch):
-    monkeypatch.setattr(agent.settings, "stream_visible_tools", "Bash")
+    monkeypatch.setattr(agent, "_configured_tool_names", lambda: {"bash"})
     process_filter = agent.StreamProcessFilter()
 
     tool_message = AssistantMessage(

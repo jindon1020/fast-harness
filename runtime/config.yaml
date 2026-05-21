@@ -2,5 +2,5 @@
 stream:
   # Empty list hides SDK tool process cards such as Bash, Grep, and Read.
   # Use ["*"] to show all tool process cards, or list specific tools.
-  visible_tools: []
+  visible_tools: ["agent","edit"]
   show_thinking: true
