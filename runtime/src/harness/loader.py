@@ -17,6 +17,7 @@ from typing import Optional
 from claude_agent_sdk import AgentDefinition
 
 from src.config import settings
+from src.harness.commands import command_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +93,25 @@ def _discover_commands(plugin_path: Path, config: PluginConfig) -> None:
     if not cmds_dir.is_dir():
         return
 
+    commands_by_name: dict[str, dict] = {}
     for cmd_file in sorted(cmds_dir.glob("*.md")):
         frontmatter, _body = _parse_frontmatter(cmd_file)
-        name = cmd_file.stem
-        config.commands.append({
-            "name": name,
+        invoke_name = cmd_file.stem
+        display_name = command_display_name(invoke_name)
+        command = {
+            "name": display_name,
+            "invoke": invoke_name,
             "description": (frontmatter.get("description", "") if frontmatter else ""),
             "path": str(cmd_file.relative_to(plugin_path)),
-        })
+        }
+
+        existing = commands_by_name.get(display_name)
+        existing_is_legacy = bool(existing and existing["invoke"].endswith("-command"))
+        new_is_legacy = invoke_name.endswith("-command")
+        if existing is None or (existing_is_legacy and not new_is_legacy):
+            commands_by_name[display_name] = command
+
+    config.commands.extend(commands_by_name[name] for name in sorted(commands_by_name))
 
     logger.info("Discovered %d harness commands", len(config.commands))
 

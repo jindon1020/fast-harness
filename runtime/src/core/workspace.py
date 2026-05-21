@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Optional
 
 from src.config import settings
-from src.core.git import clone, pull, status as git_status, RepoInfo, branches as git_branches
+from src.core.git import (
+    create_worktree,
+    pull,
+    status as git_status,
+    RepoInfo,
+    branches as git_branches,
+    checkout as git_checkout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +38,13 @@ class WorkspaceStore:
         """Convert workspace name to a safe directory name."""
         return name.lower().replace(" ", "-").replace("/", "-")
 
-    def create(self, name: str, repos: Optional[list[dict]] = None) -> dict:
+    def create(
+        self,
+        name: str,
+        repo_url: Optional[str] = None,
+        repo_name: Optional[str] = None,
+        branch: Optional[str] = None,
+    ) -> dict:
         ws_id = f"ws-{uuid.uuid4().hex[:10]}"
         ws_dir = Path(settings.workspace_root) / ws_id
         ws_dir.mkdir(parents=True, exist_ok=True)
@@ -47,13 +60,16 @@ class WorkspaceStore:
 
         self._path(ws_id).write_text(json.dumps(record, indent=2))
 
-        # Clone initial repos if provided
-        if repos:
-            for r in repos:
-                try:
-                    self.add_repo(ws_id, r["url"], r.get("name"), r.get("branch"))
-                except Exception as exc:
-                    logger.error("Failed to clone repo %s: %s", r.get("url"), exc)
+        try:
+            self.add_repo(
+                ws_id,
+                repo_url or settings.default_project_git_url,
+                repo_name or settings.default_project_repo_name,
+                branch,
+            )
+        except Exception:
+            self.delete(ws_id)
+            raise
 
         result = self.get(ws_id)
         assert result is not None
@@ -74,6 +90,12 @@ class WorkspaceStore:
         return records
 
     def delete(self, ws_id: str) -> None:
+        record = self.get(ws_id)
+        if record:
+            for repo in record.get("repos", []):
+                repo_path = repo.get("local_path")
+                if repo_path:
+                    self._remove_worktree(Path(repo_path))
         p = self._path(ws_id)
         if p.exists():
             p.unlink()
@@ -81,13 +103,31 @@ class WorkspaceStore:
         if ws_dir.exists():
             shutil.rmtree(ws_dir, ignore_errors=True)
 
+    def _remove_worktree(self, repo_path: Path) -> None:
+        if not repo_path.exists():
+            return
+        import subprocess
+
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(repo_path)],
+            cwd=str(repo_path.parent),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
     def add_repo(self, ws_id: str, url: str, name: Optional[str] = None, branch: Optional[str] = None) -> RepoInfo:
         record = self.get(ws_id)
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         ws_dir = Path(record["cwd"])
 
-        repo = clone(url, ws_dir, branch, directory_name=name)
+        repo = create_worktree(
+            url=url,
+            source_dir=Path(settings.workspace_root) / ".sources",
+            worktree_path=ws_dir / (name or settings.default_project_repo_name),
+            branch=branch,
+        )
 
         # Persist to workspace record
         record["repos"].append(repo.to_dict())
@@ -95,20 +135,6 @@ class WorkspaceStore:
         self._path(ws_id).write_text(json.dumps(record, indent=2))
 
         return repo
-
-    def remove_repo(self, ws_id: str, repo_name: str) -> None:
-        record = self.get(ws_id)
-        if not record:
-            raise ValueError(f"Workspace not found: {ws_id}")
-
-        record["repos"] = [r for r in record["repos"] if r["name"] != repo_name]
-        record["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._path(ws_id).write_text(json.dumps(record, indent=2))
-
-        # Delete the repo directory
-        repo_dir = Path(record["cwd"]) / repo_name
-        if repo_dir.exists():
-            shutil.rmtree(repo_dir, ignore_errors=True)
 
     def pull_all(self, ws_id: str) -> list[dict]:
         record = self.get(ws_id)
@@ -155,11 +181,7 @@ class WorkspaceStore:
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         repo_path = Path(record["cwd"]) / repo_name
-        import subprocess
-        r = subprocess.run(["git", "checkout", branch], cwd=str(repo_path), capture_output=True, text=True, timeout=60)
-        if r.returncode != 0:
-            raise RuntimeError(f"Checkout failed: {r.stderr.strip()}")
-        subprocess.run(["git", "pull", "--ff-only"], cwd=str(repo_path), capture_output=True, text=True, timeout=60)
+        git_checkout(repo_path, branch)
         # Update branch in repo record
         for r in record["repos"]:
             if r["name"] == repo_name:
@@ -167,18 +189,5 @@ class WorkspaceStore:
         record["updated_at"] = datetime.now(timezone.utc).isoformat()
         self._path(ws_id).write_text(json.dumps(record, indent=2))
         return {"repo": repo_name, "branch": branch, "status": "ok"}
-
-    def get_registered_repos(self) -> list[dict]:
-        """Return list of known repos from all workspaces, deduplicated."""
-        seen = set()
-        repos = []
-        for w in self.list_all():
-            for r in w.get("repos", []):
-                key = r["url"]
-                if key not in seen:
-                    seen.add(key)
-                    repos.append(r)
-        return repos
-
 
 workspace_store = WorkspaceStore()

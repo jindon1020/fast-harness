@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Optional
 
 from src.config import settings
-from src.core.sandbox import get_session_workspace
 
 
 class SessionStore:
@@ -25,19 +24,16 @@ class SessionStore:
     def _path(self, session_id: str) -> Path:
         return self._dir / f"{session_id}.json"
 
-    def create(self, workspace_dir: Optional[str] = None) -> str:
+    def create(self, *, workspace_dir: str, metadata: dict) -> str:
         session_id = uuid.uuid4().hex[:12]
-        if workspace_dir:
-            ws = Path(workspace_dir)
-            ws.mkdir(parents=True, exist_ok=True)
-        else:
-            ws = get_session_workspace(session_id)
+        ws = Path(workspace_dir)
+        ws.mkdir(parents=True, exist_ok=True)
         record = {
             "session_id": session_id,
             "workspace": str(ws),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_access": datetime.now(timezone.utc).isoformat(),
-            "metadata": {},
+            "metadata": metadata,
         }
         self._path(session_id).write_text(json.dumps(record, indent=2))
         return session_id

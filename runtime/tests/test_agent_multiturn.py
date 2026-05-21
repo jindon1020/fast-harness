@@ -1,0 +1,277 @@
+from pathlib import Path
+
+import pytest
+from claude_agent_sdk import (
+    AssistantMessage,
+    ProcessError,
+    ResultMessage,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+)
+
+from src.core import agent
+
+
+@pytest.mark.asyncio
+async def test_run_query_stream_resumes_previous_sdk_session(monkeypatch, tmp_path):
+    captured_resumes = []
+
+    class FakeSessionStore:
+        def __init__(self):
+            self.metadata = {
+                "sdk_session_id": "sdk-prev",
+                "sdk_session_cwd": str(tmp_path),
+            }
+            self.updated = None
+
+        def get(self, session_id):
+            return {"session_id": session_id, "metadata": dict(self.metadata)}
+
+        def touch(self, session_id):
+            pass
+
+        def update_metadata(self, session_id, meta):
+            self.updated = meta
+            self.metadata.update(meta)
+
+    async def fake_query(*, prompt, options):
+        captured_resumes.append(options.resume)
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="sdk-next",
+            result="ok",
+        )
+
+    monkeypatch.setattr(agent, "session_store", FakeSessionStore())
+    monkeypatch.setattr(agent, "_resolve_cwd", lambda session_id: Path(tmp_path))
+    monkeypatch.setattr(agent, "query", fake_query)
+
+    messages = [
+        message async for message in agent.run_query_stream("runtime-session", "继续上文")
+    ]
+
+    assert captured_resumes == ["sdk-prev"]
+    assert messages[-1]["session_id"] == "sdk-next"
+    assert agent.session_store.updated == {
+        "sdk_session_id": "sdk-next",
+        "sdk_session_cwd": str(tmp_path),
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_query_stream_starts_new_sdk_session_without_previous_id(monkeypatch, tmp_path):
+    captured_resumes = []
+
+    class FakeSessionStore:
+        def get(self, session_id):
+            return {"session_id": session_id, "metadata": {}}
+
+        def touch(self, session_id):
+            pass
+
+        def update_metadata(self, session_id, meta):
+            pass
+
+    async def fake_query(*, prompt, options):
+        captured_resumes.append(options.resume)
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="sdk-first",
+            result="ok",
+        )
+
+    monkeypatch.setattr(agent, "session_store", FakeSessionStore())
+    monkeypatch.setattr(agent, "_resolve_cwd", lambda session_id: Path(tmp_path))
+    monkeypatch.setattr(agent, "query", fake_query)
+
+    _messages = [
+        message async for message in agent.run_query_stream("runtime-session", "第一轮")
+    ]
+
+    assert captured_resumes == [None]
+
+
+@pytest.mark.asyncio
+async def test_run_query_stream_ignores_sdk_session_from_different_cwd(monkeypatch, tmp_path):
+    captured_resumes = []
+
+    class FakeSessionStore:
+        def get(self, session_id):
+            return {
+                "session_id": session_id,
+                "metadata": {
+                    "sdk_session_id": "sdk-old",
+                    "sdk_session_cwd": str(tmp_path / "old-wrapper"),
+                },
+            }
+
+        def touch(self, session_id):
+            pass
+
+        def update_metadata(self, session_id, meta):
+            pass
+
+    async def fake_query(*, prompt, options):
+        captured_resumes.append(options.resume)
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="sdk-new",
+            result="ok",
+        )
+
+    monkeypatch.setattr(agent, "session_store", FakeSessionStore())
+    monkeypatch.setattr(agent, "_resolve_cwd", lambda session_id: Path(tmp_path))
+    monkeypatch.setattr(agent, "query", fake_query)
+
+    _messages = [
+        message async for message in agent.run_query_stream("runtime-session", "新的 cwd")
+    ]
+
+    assert captured_resumes == [None]
+
+
+@pytest.mark.asyncio
+async def test_run_query_stream_retries_without_stale_resume(monkeypatch, tmp_path):
+    captured_resumes = []
+
+    class FakeSessionStore:
+        def __init__(self):
+            self.metadata = {
+                "sdk_session_id": "sdk-missing",
+                "sdk_session_cwd": str(tmp_path),
+            }
+            self.updates = []
+
+        def get(self, session_id):
+            return {"session_id": session_id, "metadata": dict(self.metadata)}
+
+        def touch(self, session_id):
+            pass
+
+        def update_metadata(self, session_id, meta):
+            self.updates.append(meta)
+            self.metadata.update(meta)
+
+    async def fake_query(*, prompt, options):
+        captured_resumes.append(options.resume)
+        if options.resume == "sdk-missing":
+            raise RuntimeError("No conversation found with session ID: sdk-missing")
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="sdk-recovered",
+            result="ok",
+        )
+
+    fake_store = FakeSessionStore()
+    monkeypatch.setattr(agent, "session_store", fake_store)
+    monkeypatch.setattr(agent, "_resolve_cwd", lambda session_id: Path(tmp_path))
+    monkeypatch.setattr(agent, "query", fake_query)
+
+    messages = [
+        message async for message in agent.run_query_stream("runtime-session", "恢复")
+    ]
+
+    assert captured_resumes == ["sdk-missing", None]
+    assert messages[-1]["session_id"] == "sdk-recovered"
+    assert fake_store.updates[-1] == {
+        "sdk_session_id": "sdk-recovered",
+        "sdk_session_cwd": str(tmp_path),
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_query_stream_treats_exit_143_as_cancelled(monkeypatch, tmp_path):
+    class FakeSessionStore:
+        def get(self, session_id):
+            return {"session_id": session_id, "metadata": {}}
+
+        def touch(self, session_id):
+            pass
+
+        def update_metadata(self, session_id, meta):
+            raise AssertionError("cancelled runs must not update sdk session metadata")
+
+    async def fake_query(*, prompt, options):
+        raise ProcessError("Command failed with exit code 143", exit_code=143)
+        yield
+
+    monkeypatch.setattr(agent, "session_store", FakeSessionStore())
+    monkeypatch.setattr(agent, "_resolve_cwd", lambda session_id: Path(tmp_path))
+    monkeypatch.setattr(agent, "query", fake_query)
+
+    messages = [
+        message async for message in agent.run_query_stream("runtime-session", "取消")
+    ]
+
+    assert messages == [{"type": "cancelled", "message": "Request cancelled"}]
+
+
+def test_stream_filter_hides_tool_calls_and_results_by_default(monkeypatch):
+    monkeypatch.setattr(agent.settings, "stream_visible_tools", "")
+    process_filter = agent.StreamProcessFilter()
+
+    tool_message = AssistantMessage(
+        content=[ToolUseBlock(id="toolu_1", name="Bash", input={"command": "pwd"})],
+        model="test-model",
+    )
+    result_message = UserMessage(
+        content=[ToolResultBlock(tool_use_id="toolu_1", content="out", is_error=False)]
+    )
+
+    assert agent._serialize_message(tool_message, process_filter) is None
+    assert agent._serialize_message(result_message, process_filter) is None
+
+
+def test_stream_filter_can_show_configured_tools(monkeypatch):
+    monkeypatch.setattr(agent.settings, "stream_visible_tools", "Bash")
+    process_filter = agent.StreamProcessFilter()
+
+    tool_message = AssistantMessage(
+        content=[ToolUseBlock(id="toolu_1", name="Bash", input={"command": "pwd"})],
+        model="test-model",
+    )
+    result_message = UserMessage(
+        content=[ToolResultBlock(tool_use_id="toolu_1", content="out", is_error=False)]
+    )
+
+    assert agent._serialize_message(tool_message, process_filter) == {
+        "type": "assistant",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Bash",
+                "input": {"command": "pwd"},
+            }
+        ],
+        "model": "test-model",
+    }
+    assert agent._serialize_message(result_message, process_filter) == {
+        "type": "tool_results",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_1",
+                "content": "out",
+                "is_error": False,
+            }
+        ],
+        "parent_tool_use_id": None,
+    }

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     # Path to fast-harness plugin directory (relative to runtime/ or absolute)
     harness_plugin_path: str = "../plugin"
 
+    # Default project repo used when creating user workspaces.
+    default_project_git_url: str = "https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/creation-tool.git"
+    default_project_repo_name: str = "creation-tool"
+
     # Git credentials
     git_github_token: str = ""
     git_codeup_user: str = ""
@@ -30,6 +34,10 @@ class Settings(BaseSettings):
     default_max_turns: int = 30
     default_max_budget_usd: float = 10.0
     session_cleanup_days: int = 7
+
+    # Stream process visibility. Empty hides SDK tool cards; "*" shows all tools.
+    stream_visible_tools: str = ""
+    stream_show_thinking: bool = True
 
     log_level: str = "INFO"
 

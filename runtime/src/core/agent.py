@@ -1,5 +1,5 @@
 """
-Agent session manager — wraps the Claude Agent SDK query() and ClaudeSDKClient.
+Agent session manager — wraps the Claude Agent SDK query().
 """
 
 import logging
@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import AsyncIterator, Optional
 
 from claude_agent_sdk import (
+    ProcessError,
     query,
     ClaudeAgentOptions,
-    ClaudeSDKClient,
     AssistantMessage,
     ResultMessage,
     SystemMessage,
@@ -22,8 +22,9 @@ from claude_agent_sdk import (
 )
 
 from src.config import settings
-from src.core.sandbox import get_session_workspace
 from src.core.session import session_store
+from src.core.workspace import workspace_store
+from src.harness.commands import normalize_command_prompt
 from src.harness.loader import load_harness_config
 
 logger = logging.getLogger(__name__)
@@ -37,25 +38,39 @@ def _apply_api_config() -> None:
         os.environ["ANTHROPIC_BASE_URL"] = settings.anthropic_base_url
 
 
-def _resolve_cwd(session_id: str, workspace_id: Optional[str] = None) -> Path:
+def _resolve_cwd(session_id: str) -> Path:
     """Return the working directory for a session.
 
-    Priority: query-time workspace_id > session-bound workspace > session dir.
+    Sessions always run inside their bound git repo, not the runtime workspace wrapper.
     """
-    if workspace_id:
-        from src.core.workspace import workspace_store
-        ws_rec = workspace_store.get(workspace_id)
-        if ws_rec:
-            return Path(ws_rec["cwd"])
+    return resolve_session_repo_path(session_id)
+
+
+def resolve_session_repo_path(session_id: str) -> Path:
+    """Resolve the git repo directory bound to a session."""
     rec = session_store.get(session_id)
-    if rec and rec.get("workspace"):
-        return Path(rec["workspace"])
-    return get_session_workspace(session_id)
+    if not rec or not rec.get("workspace"):
+        raise RuntimeError(f"Session has no bound workspace: {session_id}")
+    workspace_id = rec.get("metadata", {}).get("workspace_id")
+    repo_name = rec.get("metadata", {}).get("repo_name")
+    workspace = workspace_store.get(workspace_id) if workspace_id else None
+    if not workspace_id or not workspace:
+        raise RuntimeError(f"Session is not bound to a valid workspace: {session_id}")
+    if not repo_name:
+        raise RuntimeError(f"Session is not bound to a git repo: {session_id}")
+
+    for repo in workspace.get("repos", []):
+        if repo.get("name") == repo_name:
+            repo_path = Path(repo.get("local_path") or Path(workspace["cwd"]) / repo_name)
+            if not repo_path.exists():
+                raise RuntimeError(f"Session repo path does not exist: {repo_path}")
+            return repo_path
+
+    raise RuntimeError(f"Session repo not found in workspace: {repo_name}")
 
 
 def _build_options(
     session_id: str,
-    workspace_id: Optional[str] = None,
     allowed_tools: Optional[list[str]] = None,
     max_turns: Optional[int] = None,
     max_budget_usd: Optional[float] = None,
@@ -67,7 +82,7 @@ def _build_options(
     Loads fast-harness plugin (commands, subagents, skills, hooks)
     so the agent can use: /implement, /fix, code-reviewer-agent, etc.
     """
-    ws = _resolve_cwd(session_id, workspace_id)
+    ws = _resolve_cwd(session_id)
 
     harness = load_harness_config()
 
@@ -81,6 +96,7 @@ def _build_options(
         cwd=str(ws),
         allowed_tools=allowed_tools,
         permission_mode=permission_mode,
+        resume=_get_sdk_session_id(session_id, ws),
         max_turns=max_turns or settings.default_max_turns,
         max_budget_usd=max_budget_usd or settings.default_max_budget_usd,
         setting_sources=["user", "project"],
@@ -93,24 +109,27 @@ def _build_options(
     )
 
 
+def _get_sdk_session_id(session_id: str, cwd: Path) -> Optional[str]:
+    rec = session_store.get(session_id)
+    if not rec:
+        return None
+    metadata = rec.get("metadata", {})
+    if metadata.get("sdk_session_cwd") != str(cwd):
+        return None
+    return metadata.get("sdk_session_id")
+
+
 async def run_query_stream(
     session_id: str,
     prompt: str,
-    workspace_id: Optional[str] = None,
     allowed_tools: Optional[list[str]] = None,
     max_turns: Optional[int] = None,
     max_budget_usd: Optional[float] = None,
     permission_mode: str = "acceptEdits",
 ) -> AsyncIterator[dict]:
-    """
-    Run a query and yield structured messages suitable for SSE streaming.
-
-    If workspace_id is provided, the agent's cwd is set to that workspace
-    (containing cloned git repos), and the session context is preserved.
-    """
+    """Run a query and yield structured messages suitable for SSE streaming."""
     options = _build_options(
         session_id=session_id,
-        workspace_id=workspace_id,
         allowed_tools=allowed_tools,
         max_turns=max_turns,
         max_budget_usd=max_budget_usd,
@@ -118,63 +137,100 @@ async def run_query_stream(
     )
 
     session_store.touch(session_id)
+    prompt = normalize_command_prompt(prompt)
     sdk_session_id: Optional[str] = None
+    process_filter = StreamProcessFilter()
     _apply_api_config()
 
     try:
-        async for message in query(prompt=prompt, options=options):
+        async for message in _run_sdk_query(prompt, options):
             sdk_session_id = _extract_session_id(message, sdk_session_id)
-            yield _serialize_message(message)
+            serialized = _serialize_message(message, process_filter)
+            if serialized:
+                yield serialized
 
     except Exception as exc:
-        logger.error("Query failed for session %s: %s", session_id, exc)
-        yield {"type": "error", "message": str(exc)}
+        if options.resume and _is_missing_conversation_error(exc):
+            logger.warning(
+                "SDK session %s is missing for runtime session %s; starting a new SDK session",
+                options.resume,
+                session_id,
+            )
+            session_store.update_metadata(
+                session_id,
+                {"sdk_session_id": None, "sdk_session_cwd": None},
+            )
+            options.resume = None
+            try:
+                async for message in _run_sdk_query(prompt, options):
+                    sdk_session_id = _extract_session_id(message, sdk_session_id)
+                    serialized = _serialize_message(message, process_filter)
+                    if serialized:
+                        yield serialized
+            except Exception as retry_exc:
+                if _is_cancelled_process_error(retry_exc):
+                    logger.info("Query cancelled for session %s: %s", session_id, retry_exc)
+                    yield {"type": "cancelled", "message": "Request cancelled"}
+                else:
+                    logger.error("Query failed for session %s: %s", session_id, retry_exc)
+                    yield {"type": "error", "message": str(retry_exc)}
+        else:
+            if _is_cancelled_process_error(exc):
+                logger.info("Query cancelled for session %s: %s", session_id, exc)
+                yield {"type": "cancelled", "message": "Request cancelled"}
+            else:
+                logger.error("Query failed for session %s: %s", session_id, exc)
+                yield {"type": "error", "message": str(exc)}
 
     finally:
         if sdk_session_id:
-            session_store.update_metadata(session_id, {"sdk_session_id": sdk_session_id})
+            session_store.update_metadata(
+                session_id,
+                {
+                    "sdk_session_id": sdk_session_id,
+                    "sdk_session_cwd": str(options.cwd),
+                },
+            )
 
 
-async def run_query_with_client(
-    session_id: str,
-    prompt: str,
-    allowed_tools: Optional[list[str]] = None,
-    max_turns: Optional[int] = None,
-    max_budget_usd: Optional[float] = None,
-) -> AsyncIterator[dict]:
-    """
-    Alternative: use ClaudeSDKClient for multi-turn conversation within a session.
-    The client persists the session across multiple prompt() calls.
-    """
-    ws = _resolve_cwd(session_id)
-    harness = load_harness_config()
+async def _run_sdk_query(prompt: str, options: ClaudeAgentOptions):
+    async for message in query(prompt=prompt, options=options):
+        yield message
 
-    options = ClaudeAgentOptions(
-        cwd=str(ws),
-        allowed_tools=allowed_tools or [
-            "Read", "Write", "Edit", "Bash", "Glob", "Grep",
-            "WebSearch", "WebFetch", "Agent",
-        ],
-        permission_mode="acceptEdits",
-        max_turns=max_turns or settings.default_max_turns,
-        max_budget_usd=max_budget_usd or settings.default_max_budget_usd,
-        setting_sources=["user", "project"],
-        plugins=harness.plugins,
-        agents=harness.agents,
-        skills="all",
-    )
 
-    session_store.touch(session_id)
-    _apply_api_config()
+def _is_missing_conversation_error(exc: Exception) -> bool:
+    return "No conversation found with session ID" in str(exc)
 
-    try:
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(prompt)
-            async for message in client.receive_response():
-                yield _serialize_message(message)
-    except Exception as exc:
-        logger.error("Query failed for session %s: %s", session_id, exc)
-        yield {"type": "error", "message": str(exc)}
+
+def _is_cancelled_process_error(exc: Exception) -> bool:
+    return isinstance(exc, ProcessError) and exc.exit_code == 143
+
+
+class StreamProcessFilter:
+    def __init__(self) -> None:
+        self.hidden_tool_use_ids: set[str] = set()
+
+    def should_show_tool(self, name: str) -> bool:
+        visible_tools = _configured_tool_names()
+        return "*" in visible_tools or name.lower() in visible_tools
+
+    def hide_tool_use(self, tool_use_id: str) -> None:
+        self.hidden_tool_use_ids.add(tool_use_id)
+
+    def is_hidden_tool_result(self, tool_use_id: str) -> bool:
+        return tool_use_id in self.hidden_tool_use_ids
+
+
+def _configured_tool_names() -> set[str]:
+    return {
+        name.strip().lower()
+        for name in settings.stream_visible_tools.split(",")
+        if name.strip()
+    }
+
+
+def _should_show_thinking() -> bool:
+    return settings.stream_show_thinking
 
 
 def _extract_session_id(message, fallback: Optional[str]) -> Optional[str]:
@@ -183,8 +239,12 @@ def _extract_session_id(message, fallback: Optional[str]) -> Optional[str]:
     return fallback
 
 
-def _serialize_message(message) -> dict:
+def _serialize_message(
+    message,
+    process_filter: Optional[StreamProcessFilter] = None,
+) -> Optional[dict]:
     """Convert SDK message types to JSON-serializable dicts."""
+    process_filter = process_filter or StreamProcessFilter()
 
     # ── AssistantMessage: Claude's response with content blocks ──
     if isinstance(message, AssistantMessage):
@@ -200,6 +260,9 @@ def _serialize_message(message) -> dict:
                         "questions": block.input.get("questions", []),
                     })
                 else:
+                    if not process_filter.should_show_tool(block.name):
+                        process_filter.hide_tool_use(block.id)
+                        continue
                     blocks.append({
                         "type": "tool_use",
                         "id": block.id,
@@ -207,6 +270,8 @@ def _serialize_message(message) -> dict:
                         "input": block.input,
                     })
             elif isinstance(block, ThinkingBlock):
+                if not _should_show_thinking():
+                    continue
                 blocks.append({
                     "type": "thinking",
                     "thinking": block.thinking,
@@ -214,6 +279,8 @@ def _serialize_message(message) -> dict:
                 })
             else:
                 blocks.append({"type": "unknown", "data": str(block)})
+        if not blocks:
+            return None
         return {
             "type": "assistant",
             "content": blocks,
@@ -225,6 +292,8 @@ def _serialize_message(message) -> dict:
         blocks = []
         for block in message.content:
             if isinstance(block, ToolResultBlock):
+                if process_filter.is_hidden_tool_result(block.tool_use_id):
+                    continue
                 blocks.append({
                     "type": "tool_result",
                     "tool_use_id": block.tool_use_id,
@@ -233,6 +302,8 @@ def _serialize_message(message) -> dict:
                 })
             else:
                 blocks.append({"type": "unknown", "data": str(block)})
+        if not blocks:
+            return None
         return {
             "type": "tool_results",
             "content": blocks,

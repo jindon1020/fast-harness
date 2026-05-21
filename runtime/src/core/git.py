@@ -114,6 +114,21 @@ def _detect_default_branch(auth_url: str) -> str:
     return settings.git_default_branch
 
 
+def remote_branches(url: str) -> list[str]:
+    """List branch names directly from the remote repository."""
+    provider = detect_provider(url)
+    auth_url = _build_auth_url(url, provider)
+    rc, stdout, _stderr = _run(["git", "ls-remote", "--heads", auth_url], Path.cwd(), timeout=30)
+    if rc != 0 or not stdout:
+        return []
+    branches_list = []
+    for line in stdout.split("\n"):
+        if "refs/heads/" not in line:
+            continue
+        branches_list.append(line.rsplit("refs/heads/", 1)[1].strip())
+    return sorted(set(branches_list))
+
+
 def clone(url: str, target_dir: Path, branch: Optional[str] = None, directory_name: Optional[str] = None) -> RepoInfo:
     """Clone a repository into target_dir. Auto-detects default branch if not specified."""
     provider = detect_provider(url)
@@ -135,13 +150,43 @@ def clone(url: str, target_dir: Path, branch: Optional[str] = None, directory_na
         branch = _detect_default_branch(auth_url)
         logger.info("Detected default branch: %s", branch)
 
-    cmd = ["git", "clone", "--branch", branch, "--single-branch", auth_url, dir_name]
+    cmd = ["git", "clone", "--branch", branch, auth_url, dir_name]
     logger.info("Cloning %s (provider=%s, branch=%s) into %s", dir_name, provider.value, branch, target_dir)
     rc, stdout, stderr = _run(cmd, target_dir)
     if rc != 0:
         raise RuntimeError(f"Clone failed: {stderr}")
 
     return RepoInfo(name=dir_name, url=url, provider=provider, branch=branch, local_path=repo_path)
+
+
+def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Optional[str] = None) -> RepoInfo:
+    """Create an isolated git worktree for a branch from a shared source clone."""
+    provider = detect_provider(url)
+    auth_url = _build_auth_url(url, provider)
+    repo_name = worktree_path.name
+    source_repo = source_dir / repo_name
+    source_dir.mkdir(parents=True, exist_ok=True)
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not source_repo.exists():
+        rc, _stdout, stderr = _run(["git", "clone", auth_url, repo_name], source_dir)
+        if rc != 0:
+            raise RuntimeError(f"Source clone failed: {stderr}")
+
+    _run(["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"], source_repo, timeout=60)
+
+    if branch is None:
+        branch = _detect_default_branch(auth_url)
+
+    rc, _stdout, stderr = _run(
+        ["git", "worktree", "add", str(worktree_path), f"origin/{branch}"],
+        source_repo,
+        timeout=120,
+    )
+    if rc != 0:
+        raise RuntimeError(f"Worktree creation failed: {stderr}")
+
+    return RepoInfo(name=repo_name, url=url, provider=provider, branch=branch, local_path=worktree_path)
 
 
 def pull(repo_path: Path, branch: Optional[str] = None) -> RepoInfo:
@@ -163,6 +208,34 @@ def pull(repo_path: Path, branch: Optional[str] = None) -> RepoInfo:
         name=repo_path.name, url=remote_url,
         provider=detect_provider(remote_url),
         branch=current_branch, local_path=repo_path,
+    )
+
+
+def checkout(repo_path: Path, branch: str) -> RepoInfo:
+    """Checkout a local or remote branch and fast-forward it when possible."""
+    if not (repo_path / ".git").exists():
+        raise RuntimeError(f"Not a git repository: {repo_path}")
+
+    _run(["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"], repo_path, timeout=60)
+    rc, _stdout, stderr = _run(["git", "checkout", branch], repo_path)
+    if rc != 0:
+        rc, _stdout, stderr = _run(["git", "checkout", "-B", branch, f"origin/{branch}"], repo_path)
+    if rc != 0:
+        rc, _stdout, stderr = _run(["git", "checkout", "--detach", f"origin/{branch}"], repo_path)
+    if rc != 0:
+        raise RuntimeError(f"Checkout failed: {stderr}")
+
+    rc, _stdout, stderr = _run(["git", "pull", "--ff-only"], repo_path)
+    if rc != 0:
+        logger.warning("Pull may have conflicts: %s", stderr)
+
+    remote_url = _get_remote_url(repo_path)
+    return RepoInfo(
+        name=repo_path.name,
+        url=remote_url,
+        provider=detect_provider(remote_url),
+        branch=branch,
+        local_path=repo_path,
     )
 
 
@@ -203,6 +276,7 @@ def branches(repo_path: Path) -> list[str]:
     """List branches in a repo."""
     if not (repo_path / ".git").exists():
         return []
+    _run(["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"], repo_path, timeout=60)
     rc, stdout, _ = _run(["git", "branch", "-a"], repo_path)
     if rc != 0:
         return []

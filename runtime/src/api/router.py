@@ -19,14 +19,13 @@ from src.api.schemas import (
     WorkspaceCreateRequest,
     WorkspaceResponse,
     WorkspaceListResponse,
-    RepoAddRequest,
     RepoStatusResponse,
     CapabilityResponse,
     HealthResponse,
 )
 from src.config import settings
-from src.core.agent import run_query_stream
-from src.core.sandbox import destroy_workspace
+from src.core.git import remote_branches
+from src.core.agent import run_query_stream, resolve_session_repo_path
 from src.core.session import session_store
 from src.core.workspace import workspace_store
 from src.harness.registry import get_capabilities
@@ -59,28 +58,57 @@ async def capabilities():
 # ═══════════════════════ Sessions ═══════════════════════
 
 @router.post("/sessions", response_model=SessionCreateResponse, status_code=201)
-async def create_session(body: SessionCreateRequest = SessionCreateRequest()):
-    workspace_dir = None
-    if body.workspace_id:
-        ws_rec = workspace_store.get(body.workspace_id)
-        if not ws_rec:
-            raise HTTPException(status_code=404, detail="Workspace not found")
-        workspace_dir = ws_rec["cwd"]
+async def create_session(body: SessionCreateRequest):
+    ws_rec = workspace_store.get(body.workspace_id)
+    if not ws_rec:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if not ws_rec.get("repos"):
+        raise HTTPException(status_code=400, detail="Workspace has no bound repos")
 
-    sid = session_store.create(workspace_dir=workspace_dir)
-    if body.workspace_id:
-        session_store.update_metadata(sid, {"workspace_id": body.workspace_id})
+    repo = _select_repo(ws_rec, body.repo_name)
+    branch = body.branch or repo.get("branch")
+    if not branch:
+        raise HTTPException(status_code=400, detail="Branch is required")
+
+    try:
+        workspace_store.checkout_branch(body.workspace_id, repo["name"], branch)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    sid = session_store.create(
+        workspace_dir=ws_rec["cwd"],
+        metadata={
+            "workspace_id": body.workspace_id,
+            "repo_name": repo["name"],
+            "branch": branch,
+        },
+    )
 
     rec = session_store.get(sid)
     assert rec is not None, "Session just created but not found"
     return SessionCreateResponse(session_id=sid, workspace=rec["workspace"])
 
 
+def _select_repo(workspace: dict, repo_name: str | None) -> dict:
+    repos = workspace.get("repos", [])
+    if repo_name:
+        for repo in repos:
+            if repo.get("name") == repo_name:
+                return repo
+        raise HTTPException(status_code=404, detail=f"Repo not found: {repo_name}")
+    return repos[0]
+
+
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions():
-    records = session_store.list_all()
+    records = [record for record in session_store.list_all() if _is_bound_session(record)]
     sessions = [SessionInfo(**r) for r in records]
     return SessionListResponse(sessions=sessions)
+
+
+def _is_bound_session(record: dict) -> bool:
+    return bool(record.get("metadata", {}).get("workspace_id"))
 
 
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
@@ -97,9 +125,6 @@ async def delete_session(session_id: str):
     if not rec:
         raise HTTPException(status_code=404, detail="Session not found")
     session_store.delete(session_id)
-    # Don't destroy dir if session was in a workspace
-    if not rec.get("metadata", {}).get("workspace_id"):
-        destroy_workspace(session_id)
     return {"status": "deleted", "session_id": session_id}
 
 
@@ -110,12 +135,14 @@ async def query_session(session_id: str, body: QueryRequest):
     rec = session_store.get(session_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Session not found")
+    if not _is_bound_session(rec):
+        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
+    _checkout_session_branch(rec)
 
     async def event_stream():
         async for msg in run_query_stream(
             session_id=session_id,
             prompt=body.prompt,
-            workspace_id=body.workspace_id,
             allowed_tools=body.allowed_tools,
             max_turns=body.max_turns,
             max_budget_usd=body.max_budget_usd,
@@ -126,16 +153,30 @@ async def query_session(session_id: str, body: QueryRequest):
     return EventSourceResponse(event_stream())
 
 
+def _checkout_session_branch(session: dict) -> None:
+    metadata = session.get("metadata", {})
+    workspace_id = metadata.get("workspace_id")
+    repo_name = metadata.get("repo_name")
+    branch = metadata.get("branch")
+    if not workspace_id or not repo_name or not branch:
+        raise HTTPException(status_code=400, detail="Session is missing workspace branch metadata")
+    try:
+        workspace_store.checkout_branch(workspace_id, repo_name, branch)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════ Session files ═══════════════════════
 
 def _resolve_workspace(session_id: str) -> Path:
-    rec = session_store.get(session_id)
-    if not rec:
+    if not session_store.get(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    ws = Path(rec["workspace"])
-    if not ws.exists():
-        raise HTTPException(status_code=404, detail="Workspace directory not found")
-    return ws.resolve()
+    try:
+        return resolve_session_repo_path(session_id).resolve()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/sessions/{session_id}/files")
@@ -163,8 +204,13 @@ async def get_session_file(session_id: str, file_path: str):
 
 @router.post("/workspaces", response_model=WorkspaceResponse, status_code=201)
 async def create_workspace(body: WorkspaceCreateRequest):
-    repos_dicts = [r.model_dump() for r in body.repos] if body.repos else None
-    rec = workspace_store.create(body.name, repos_dicts)
+    legacy_repo = body.repos[0] if body.repos else None
+    rec = workspace_store.create(
+        body.name,
+        repo_url=body.repo_url or (legacy_repo.url if legacy_repo else None),
+        repo_name=body.repo_name or (legacy_repo.name if legacy_repo else None),
+        branch=body.branch or (legacy_repo.branch if legacy_repo else None),
+    )
     return WorkspaceResponse(**rec)
 
 
@@ -186,30 +232,16 @@ async def get_workspace(workspace_id: str):
 async def delete_workspace(workspace_id: str):
     if not workspace_store.get(workspace_id):
         raise HTTPException(status_code=404, detail="Workspace not found")
+    for session in session_store.list_all():
+        if session.get("metadata", {}).get("workspace_id") == workspace_id:
+            session_store.delete(session["session_id"])
     workspace_store.delete(workspace_id)
     return {"status": "deleted", "workspace_id": workspace_id}
 
 
-# ═══════════════════════ Repos ═══════════════════════
-
-@router.post("/workspaces/{workspace_id}/repos")
-async def add_repo(workspace_id: str, body: RepoAddRequest):
-    try:
-        repo = workspace_store.add_repo(workspace_id, body.url, body.name, body.branch)
-        return repo.to_dict()
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/workspaces/{workspace_id}/repos/{repo_name}")
-async def remove_repo(workspace_id: str, repo_name: str):
-    try:
-        workspace_store.remove_repo(workspace_id, repo_name)
-        return {"status": "deleted", "repo": repo_name}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+@router.get("/default-repo/branches")
+async def default_repo_branches():
+    return {"branches": remote_branches(settings.default_project_git_url)}
 
 
 @router.post("/workspaces/{workspace_id}/pull")
@@ -250,11 +282,3 @@ async def checkout_branch(workspace_id: str, repo_name: str, branch: str = "main
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ═══════════════════════ Registered Repos ═══════════════════════
-
-@router.get("/repos/registered")
-async def registered_repos():
-    repos = workspace_store.get_registered_repos()
-    return {"repos": repos}

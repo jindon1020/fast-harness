@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 class QueryRequest(BaseModel):
     prompt: str = Field(..., description="User prompt / task description")
-    workspace_id: str | None = Field(default=None, description="Workspace to operate in (overrides session default)")
     allowed_tools: list[str] | None = Field(default=None)
     max_turns: int | None = Field(default=None, ge=1, le=100)
     max_budget_usd: float | None = Field(default=None, ge=0.01)
@@ -15,24 +14,23 @@ class QueryRequest(BaseModel):
 
 
 class SessionCreateRequest(BaseModel):
-    workspace_id: str | None = Field(default=None, description="Bind session to an existing workspace")
+    workspace_id: str = Field(..., description="Workspace this session belongs to")
+    repo_name: str | None = Field(default=None, description="Repo to checkout before the session starts")
+    branch: str | None = Field(default=None, description="Branch to checkout for this session")
 
 
 class WorkspaceCreateRequest(BaseModel):
     name: str = Field(..., description="Human-readable workspace name")
-    repos: list[RepoInput] = Field(default_factory=list, description="Initial repos to clone")
+    repo_url: str | None = Field(default=None, description="Git URL; defaults to the configured creation-tool repo")
+    repo_name: str | None = Field(default=None)
+    branch: str | None = Field(default=None)
+    repos: list[RepoInput] | None = Field(default=None, description="Legacy repo payload; first entry is used if present")
 
 
 class RepoInput(BaseModel):
     url: str = Field(..., description="Git URL (HTTPS or SSH)")
     name: str | None = Field(default=None)
     branch: str | None = Field(default=None)
-
-
-class RepoAddRequest(BaseModel):
-    url: str
-    name: str | None = None
-    branch: str | None = None
 
 
 # ── Responses ──
