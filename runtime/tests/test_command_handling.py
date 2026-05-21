@@ -38,13 +38,21 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn("function applyCommandSuggestion", html)
         self.assertIn('promptInput.addEventListener("input", updateCommandSuggestions)', html)
 
+    def test_ui_uses_fast_harness_brand_logo(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn("brand-mark", html)
+        self.assertIn(">FH</span>", html)
+        self.assertIn(">fast-harness</span>", html)
+        self.assertNotIn("sidebar__logo-dot", html)
+
     def test_ui_nests_sessions_under_workspaces_and_uses_dialog_branch_select(self):
         html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
 
         self.assertIn("function showSessionDialog", html)
         self.assertIn("function deleteWorkspace", html)
         self.assertIn("sessionsForWorkspace", html)
-        self.assertIn("/default-repo/branches", html)
+        self.assertIn("/repositories/", html)
         self.assertNotIn("workspaceBranchPicker", html)
         self.assertNotIn('$("#btnNewSess")', html)
 
@@ -65,6 +73,52 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn("function loadSessionMessages", html)
         self.assertIn("function renderHistoryMessage", html)
         self.assertIn("function renderUserPrompt", html)
+
+    def test_ui_supports_registered_repo_selection(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('api("GET", "/repositories")', html)
+        self.assertIn("/repositories/\" + repoKey + \"/branches", html)
+        self.assertIn("function renderWorkspaceRepoChoices", html)
+        self.assertIn("function showAddRepoDialog", html)
+        self.assertIn("repo_keys", html)
+
+    def test_ui_removes_top_create_buttons(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertNotIn('id="btnNewWorkspace"', html)
+        self.assertNotIn('id="btnNewSession"', html)
+        self.assertNotIn('$("#btnNewWorkspace")', html)
+        self.assertNotIn('$("#btnNewSession")', html)
+        self.assertIn('id="btnAddWs"', html)
+
+    def test_ui_supports_sidebar_resize_and_distinct_workspace_actions(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('id="sidebarResizeHandle"', html)
+        self.assertIn("function initSidebarResize", html)
+        self.assertIn("--sidebar-width", html)
+        self.assertIn("localStorage.setItem(\"sidebarWidth\"", html)
+        self.assertIn("workspace-action--session", html)
+        self.assertIn("workspace-action--repo", html)
+        self.assertIn("workspace-action--delete", html)
+        self.assertIn("sidebar-action", html)
+
+    def test_ui_supports_workspace_and_session_rename(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn("function renameWorkspace", html)
+        self.assertIn("function renameSession", html)
+        self.assertIn("workspace-action--rename", html)
+        self.assertIn("session-item__rename", html)
+        self.assertIn("function showRenameDialog", html)
+        self.assertIn('overlay.id = "renameDialogOverlay"', html)
+        self.assertIn('id="renameNameInput"', html)
+        self.assertNotIn("prompt(\"Rename", html)
+        self.assertIn(">edit</button>", html)
+        self.assertNotIn(">✎</button>", html)
+        self.assertIn('api("PATCH", "/workspaces/" + id', html)
+        self.assertIn('api("PATCH", "/sessions/" + id', html)
 
 
 if __name__ == "__main__":

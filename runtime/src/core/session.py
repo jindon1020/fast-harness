@@ -31,6 +31,7 @@ class SessionStore:
         (ws / ".session-history").mkdir(parents=True, exist_ok=True)
         record = {
             "session_id": session_id,
+            "name": session_id,
             "workspace": str(ws),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_access": datetime.now(timezone.utc).isoformat(),
@@ -56,6 +57,15 @@ class SessionStore:
         if record:
             record["metadata"].update(meta)
             self._path(session_id).write_text(json.dumps(record, indent=2))
+
+    def rename(self, session_id: str, name: str) -> dict:
+        record = self.get(session_id)
+        if not record:
+            raise ValueError(f"Session not found: {session_id}")
+        record["name"] = name.strip()
+        record["last_access"] = datetime.now(timezone.utc).isoformat()
+        self._path(session_id).write_text(json.dumps(record, indent=2), encoding="utf-8")
+        return record
 
     def delete(self, session_id: str) -> None:
         record = self.get(session_id)

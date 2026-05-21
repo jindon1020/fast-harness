@@ -3,23 +3,187 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from src.api import router
-from src.api.schemas import SessionCreateRequest, WorkspaceCreateRequest
+from src.api.schemas import (
+    RenameRequest,
+    SessionCreateRequest,
+    WorkspaceCreateRequest,
+    WorkspaceRepoAddRequest,
+)
 from src.core import session
 from src.core import workspace
 from src.core.agent import _resolve_cwd
 
 
 def test_workspace_creation_defaults_to_creation_tool_repo():
-    request = WorkspaceCreateRequest(name="repo-ws", branch="feature/x")
+    request = WorkspaceCreateRequest(
+        name="repo-ws",
+        repo_keys=["app"],
+        repo_branches={"app": "feature/x"},
+    )
 
-    assert request.repo_url is None
-    assert request.repo_name is None
-    assert request.branch == "feature/x"
+    assert request.repo_keys == ["app"]
+    assert request.repo_branches == {"app": "feature/x"}
+
+
+@pytest.mark.asyncio
+async def test_workspace_creation_uses_selected_registered_repositories(monkeypatch):
+    class FakeWorkspaceStore:
+        def __init__(self):
+            self.created = None
+
+        def create(self, name, repositories):
+            self.created = (name, repositories)
+            return {
+                "workspace_id": "ws-1",
+                "name": name,
+                "cwd": "/tmp/ws-1",
+                "repos": [
+                    {"name": repo["name"], "branch": repo["branch"]}
+                    for repo in repositories
+                ],
+                "created_at": "now",
+                "updated_at": "now",
+            }
+
+    repos = {
+        "app": {
+            "key": "app",
+            "name": "app-service",
+            "url": "https://example.com/app.git",
+            "default_branch": "main",
+            "enabled": True,
+        },
+        "api": {
+            "key": "api",
+            "name": "api-service",
+            "url": "https://example.com/api.git",
+            "default_branch": "develop",
+            "enabled": True,
+        },
+    }
+
+    fake_store = FakeWorkspaceStore()
+    monkeypatch.setattr(router, "workspace_store", fake_store)
+    monkeypatch.setattr(type(router.settings), "get_repository", lambda self, key: repos[key])
+
+    response = await router.create_workspace(
+        WorkspaceCreateRequest(
+            name="repo-ws",
+            repo_keys=["app", "api"],
+            repo_branches={"app": "feature/x"},
+        )
+    )
+
+    assert [repo["name"] for repo in fake_store.created[1]] == [
+        "app-service",
+        "api-service",
+    ]
+    assert [repo["branch"] for repo in fake_store.created[1]] == [
+        "feature/x",
+        "develop",
+    ]
+    assert [repo["name"] for repo in response.repos] == ["app-service", "api-service"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_can_add_registered_repo_after_creation(monkeypatch):
+    class FakeWorkspaceStore:
+        def __init__(self):
+            self.added = None
+
+        def get(self, workspace_id):
+            return {
+                "workspace_id": workspace_id,
+                "name": "repo-ws",
+                "cwd": "/tmp/ws-1",
+                "repos": [],
+                "created_at": "now",
+                "updated_at": "now",
+            }
+
+        def add_repo(self, workspace_id, url, name=None, branch=None):
+            self.added = (workspace_id, url, name, branch)
+            return None
+
+    repo = {
+        "key": "app",
+        "name": "app-service",
+        "url": "https://example.com/app.git",
+        "default_branch": "main",
+        "enabled": True,
+    }
+    fake_store = FakeWorkspaceStore()
+    monkeypatch.setattr(router, "workspace_store", fake_store)
+    monkeypatch.setattr(type(router.settings), "get_repository", lambda self, key: repo)
+
+    await router.add_workspace_repo(
+        "ws-1",
+        WorkspaceRepoAddRequest(repo_key="app", branch="feature/x"),
+    )
+
+    assert fake_store.added == (
+        "ws-1",
+        "https://example.com/app.git",
+        "app-service",
+        "feature/x",
+    )
 
 
 def test_session_creation_requires_workspace():
     with pytest.raises(ValidationError):
         SessionCreateRequest()
+
+
+@pytest.mark.asyncio
+async def test_workspace_can_be_renamed(monkeypatch):
+    class FakeWorkspaceStore:
+        def __init__(self):
+            self.renamed = None
+
+        def rename(self, workspace_id, name):
+            self.renamed = (workspace_id, name)
+            return {
+                "workspace_id": workspace_id,
+                "name": name,
+                "cwd": "/tmp/ws-1",
+                "repos": [],
+                "created_at": "now",
+                "updated_at": "later",
+            }
+
+    fake_store = FakeWorkspaceStore()
+    monkeypatch.setattr(router, "workspace_store", fake_store)
+
+    response = await router.rename_workspace("ws-1", RenameRequest(name="新工作区"))
+
+    assert fake_store.renamed == ("ws-1", "新工作区")
+    assert response.name == "新工作区"
+
+
+@pytest.mark.asyncio
+async def test_session_can_be_renamed(monkeypatch):
+    class FakeSessionStore:
+        def __init__(self):
+            self.renamed = None
+
+        def rename(self, session_id, name):
+            self.renamed = (session_id, name)
+            return {
+                "session_id": session_id,
+                "name": name,
+                "workspace": "/tmp/ws-1",
+                "created_at": "now",
+                "last_access": "later",
+                "metadata": {"workspace_id": "ws-1"},
+            }
+
+    fake_store = FakeSessionStore()
+    monkeypatch.setattr(router, "session_store", fake_store)
+
+    response = await router.rename_session("sess-1", RenameRequest(name="需求设计"))
+
+    assert fake_store.renamed == ("sess-1", "需求设计")
+    assert response.name == "需求设计"
 
 
 @pytest.mark.asyncio

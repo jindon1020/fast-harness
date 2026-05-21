@@ -87,12 +87,14 @@ body::before {
 
 .app {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: var(--sidebar-width, 260px) 1fr;
   height: 100vh;
   overflow: hidden;
 }
 
-.app--panel-open { grid-template-columns: 260px 1fr 320px; }
+.app--panel-open { grid-template-columns: var(--sidebar-width, 260px) 1fr 320px; }
+.app--resizing { cursor: col-resize; user-select: none; }
+.app--resizing * { cursor: col-resize !important; }
 
 /* ═══════════════════════ SIDEBAR ═══════════════════════ */
 
@@ -101,6 +103,31 @@ body::before {
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 30;
+}
+.sidebar-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  transition: background var(--transition);
+}
+.sidebar-resize:hover::after,
+.app--resizing .sidebar-resize::after {
+  background: var(--accent);
 }
 
 .sidebar__head {
@@ -110,15 +137,41 @@ body::before {
 
 .sidebar__logo {
   display: flex; align-items: center; gap: 10px;
-  font-size: 15px; font-weight: 550; letter-spacing: -0.01em;
+  font-size: 15px; font-weight: 650; letter-spacing: -0.03em;
   color: var(--text);
 }
 
-.sidebar__logo-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
-  animation: dot-pulse 3s ease-in-out infinite;
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-v);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, var(--accent-dim), transparent 58%),
+    var(--bg-elevated);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -0.12em;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02), 0 0 16px var(--accent-glow);
+  position: relative;
+}
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.65;
+}
+.brand-name {
+  font-weight: 650;
 }
 
 @keyframes dot-pulse {
@@ -153,14 +206,9 @@ body::before {
   background: var(--bg-elevated); border-color: var(--border-v);
   color: var(--text); font-weight: 480;
 }
-.session-item__id { font-family: var(--font-mono); font-size: 11px; }
-.session-item__del {
-  opacity: 0; font-size: 14px; line-height: 1; cursor: pointer;
-  transition: opacity var(--transition); color: var(--text-muted);
-  padding: 2px 4px; border-radius: 3px; background: none; border: none;
-}
-.session-item:hover .session-item__del { opacity: 1; }
-.session-item__del:hover { color: var(--error); background: var(--error-dim); }
+.session-item__id { flex: 1; font-family: var(--font-mono); font-size: 11px; }
+.session-item__actions { display: flex; gap: 4px; opacity: 0; transition: opacity var(--transition); }
+.session-item:hover .session-item__actions { opacity: 1; }
 
 .sidebar__foot {
   padding: 12px 20px; border-top: 1px solid var(--border);
@@ -209,11 +257,31 @@ body::before {
 .workspace-item__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-item__actions { display: flex; gap: 4px; opacity: 0; transition: opacity var(--transition); }
 .workspace-item:hover .workspace-item__actions { opacity: 1; }
-.workspace-item__actions button {
-  background: none; border: none; color: var(--text-muted); cursor: pointer;
-  padding: 2px 4px; border-radius: 3px; font-size: 13px;
+.sidebar-action {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  min-width: 28px;
+  padding: 4px 5px;
+  text-transform: uppercase;
+  transition: all var(--transition);
 }
-.workspace-item__actions button:hover { color: var(--text); background: var(--bg-hover); }
+.sidebar-action:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-v);
+  color: var(--text);
+}
+.sidebar-action--danger:hover {
+  background: var(--error-dim);
+  border-color: transparent;
+  color: var(--error);
+}
 .workspace-sessions { margin: 2px 0 8px 16px; }
 .workspace-sessions .session-item { padding: 7px 10px; font-size: 12px; }
 
@@ -623,13 +691,11 @@ body::before {
   <aside class="sidebar">
     <div class="sidebar__head">
       <div class="sidebar__logo">
-        <span class="sidebar__logo-dot"></span> Harness
-      </div>
-      <div class="sidebar__actions">
-        <button class="btn-icon" id="btnNewWorkspace" title="New workspace">📁</button>
-        <button class="btn-icon" id="btnNewSession" title="New session">+</button>
+        <span class="brand-mark">FH</span>
+        <span class="brand-name">fast-harness</span>
       </div>
     </div>
+    <div class="sidebar-resize" id="sidebarResizeHandle" title="Resize sidebar"></div>
     <div class="sidebar__sessions" id="sidebarScroll">
       <div class="sidebar__section-label">Workspaces <button id="btnAddWs" title="Add workspace">+</button></div>
       <div id="workspaceList"></div>
@@ -703,6 +769,8 @@ let state = {
   sessions: [],
   workspaces: [],
   workspaceBranches: {},
+  repositoryBranches: {},
+  repositories: [],
   defaultBranches: [],
   capabilities: null,
   abortController: null,
@@ -756,9 +824,10 @@ async function createSession() {
 
 async function confirmCreateSession() {
   const workspaceId = document.getElementById("sessionWorkspaceInput").value;
+  const repoName = document.getElementById("sessionRepoSelect").value;
   const branch = document.getElementById("sessionBranchSelect").value;
   const ws = state.workspaces.find(w => w.workspace_id === workspaceId);
-  const repo = getPrimaryRepo(ws);
+  const repo = ws?.repos?.find(r => r.name === repoName);
   if (!repo) return alert("Selected workspace has no bound repo");
   if (!branch) return alert("Select a branch first");
 
@@ -779,8 +848,7 @@ async function showSessionDialog(workspaceId) {
   state.activeWorkspace = workspaceId;
   renderWorkspaces();
   const ws = getActiveWorkspace();
-  const repo = getPrimaryRepo(ws);
-  if (!ws || !repo) return alert("Selected workspace has no bound repo");
+  if (!ws || !ws.repos?.length) return alert("Selected workspace has no bound repo");
 
   let overlay = document.getElementById("sessionDialogOverlay");
   if (!overlay) {
@@ -795,6 +863,10 @@ async function showSessionDialog(workspaceId) {
     <input type="hidden" id="sessionWorkspaceInput" value="${escapeHtml(workspaceId)}">
     <label>Workspace</label>
     <input value="${escapeHtml(ws.name)}" disabled>
+    <label>Repository</label>
+    <select id="sessionRepoSelect" onchange="fillSessionBranchSelect()">
+      ${ws.repos.map(repo => `<option value="${escapeHtml(repo.name)}">${escapeHtml(repo.name)}</option>`).join("")}
+    </select>
     <label>Branch</label>
     <select id="sessionBranchSelect"><option>Loading...</option></select>
     <div class="btn-row">
@@ -803,7 +875,15 @@ async function showSessionDialog(workspaceId) {
     </div>
   </div>`;
   overlay.style.display = "flex";
-  await fillBranchSelect("sessionBranchSelect", ws, repo.branch);
+  await fillSessionBranchSelect();
+}
+
+async function fillSessionBranchSelect() {
+  const ws = getActiveWorkspace();
+  const repoName = document.getElementById("sessionRepoSelect")?.value;
+  const repo = ws?.repos?.find(r => r.name === repoName);
+  if (!ws || !repo) return;
+  await fillBranchSelect("sessionBranchSelect", ws, repo.branch, repo);
 }
 
 function closeSessionDialog() {
@@ -823,7 +903,7 @@ async function selectSession(id) {
   btnSend.disabled = false;
   const ws = getActiveWorkspace();
   inputHint.textContent = `${ws?.name || "Workspace"} · ${session?.metadata?.repo_name || "repo"} · ${session?.metadata?.branch || "branch"}`;
-  toolbarTitle.textContent = `Session · ${id} · ${session?.metadata?.branch || "branch"}`;
+  toolbarTitle.textContent = `Session · ${session?.name || id} · ${session?.metadata?.branch || "branch"}`;
   chatEmpty.style.display = "none";
   chatInner.style.display = "block";
   chatInner.innerHTML = "";
@@ -872,6 +952,19 @@ async function deleteSession(e, id) {
   await loadSessions();
 }
 
+async function renameSession(e, id) {
+  e.stopPropagation();
+  const session = state.sessions.find(s => s.session_id === id);
+  const nextName = await showRenameDialog("Rename Session", session?.name || id);
+  if (!nextName || !nextName.trim()) return;
+  await api("PATCH", "/sessions/" + id, { name: nextName.trim() });
+  await loadSessions();
+  if (state.activeSession === id) {
+    const updated = state.sessions.find(s => s.session_id === id);
+    toolbarTitle.textContent = `Session · ${updated?.name || id} · ${updated?.metadata?.branch || "branch"}`;
+  }
+}
+
 /* ═══════════════════════ WORKSPACES ═══════════════════════ */
 
 async function loadWorkspaces() {
@@ -886,24 +979,29 @@ function renderWorkspaces() {
   let html = "";
   for (const w of state.workspaces) {
     const active = state.activeWorkspace === w.workspace_id ? " workspace-item--active" : "";
-    const repo = getPrimaryRepo(w);
+    const repoNames = (w.repos || []).map(r => r.name).join(", ");
     const sessionsForWorkspace = state.sessions.filter(s => s.metadata?.workspace_id === w.workspace_id);
     html += `<div class="workspace-group">
       <div class="workspace-item${active}" data-id="${w.workspace_id}" onclick="selectWorkspace('${w.workspace_id}')">
         <span class="workspace-item__dot"></span>
         <span class="workspace-item__name">${escapeHtml(w.name)}</span>
-        <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(repo?.name || "no repo")}</span>
+        <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(repoNames || "no repo")}</span>
         <span class="workspace-item__actions">
-          <button onclick="showSessionDialog('${w.workspace_id}'); event.stopPropagation();" title="New session">+</button>
-          <button onclick="deleteWorkspace(event, '${w.workspace_id}')" title="Delete workspace">&times;</button>
+          <button class="sidebar-action workspace-action workspace-action--rename" onclick="renameWorkspace(event, '${w.workspace_id}'); event.stopPropagation();" title="Rename workspace">edit</button>
+          <button class="sidebar-action workspace-action workspace-action--session" onclick="showSessionDialog('${w.workspace_id}'); event.stopPropagation();" title="New session">chat</button>
+          <button class="sidebar-action workspace-action workspace-action--repo" onclick="showAddRepoDialog('${w.workspace_id}'); event.stopPropagation();" title="Add repository">repo</button>
+          <button class="sidebar-action sidebar-action--danger workspace-action workspace-action--delete" onclick="deleteWorkspace(event, '${w.workspace_id}')" title="Delete workspace">del</button>
         </span>
       </div>
       <div class="workspace-sessions">
         ${sessionsForWorkspace.map(s => `
           <div class="session-item ${state.activeSession === s.session_id ? "session-item--active" : ""}"
                data-id="${s.session_id}" onclick="selectSession('${s.session_id}')">
-            <span class="session-item__id">${s.session_id}<br><span style="color:var(--text-muted);font-size:9px">${escapeHtml(s.metadata?.branch || "")}</span></span>
-            <button class="session-item__del" onclick="deleteSession(event, '${s.session_id}')" title="Delete session">&times;</button>
+            <span class="session-item__id">${escapeHtml(s.name || s.session_id)}<br><span style="color:var(--text-muted);font-size:9px">${escapeHtml(s.metadata?.branch || "")}</span></span>
+            <span class="session-item__actions">
+              <button class="sidebar-action session-item__rename" onclick="renameSession(event, '${s.session_id}')" title="Rename session">edit</button>
+              <button class="sidebar-action sidebar-action--danger session-item__del" onclick="deleteSession(event, '${s.session_id}')" title="Delete session">del</button>
+            </span>
           </div>
         `).join("")}
       </div>
@@ -928,6 +1026,22 @@ function getPrimaryRepo(ws) {
   return ws?.repos?.[0] || null;
 }
 
+async function ensureRepositories() {
+  if (!state.repositories.length) {
+    const data = await api("GET", "/repositories");
+    state.repositories = data.repositories || [];
+  }
+  return state.repositories;
+}
+
+async function getRepositoryBranches(repoKey) {
+  if (!state.repositoryBranches[repoKey]) {
+    const data = await api("GET", "/repositories/" + repoKey + "/branches");
+    state.repositoryBranches[repoKey] = data.branches || [];
+  }
+  return state.repositoryBranches[repoKey];
+}
+
 async function getWorkspaceBranches(ws, repo) {
   const key = `${ws.workspace_id}:${repo.name}`;
   if (!state.workspaceBranches[key]) {
@@ -937,8 +1051,8 @@ async function getWorkspaceBranches(ws, repo) {
   return state.workspaceBranches[key];
 }
 
-async function fillBranchSelect(selectId, ws, preferredBranch) {
-  const repo = getPrimaryRepo(ws);
+async function fillBranchSelect(selectId, ws, preferredBranch, repoOverride = null) {
+  const repo = repoOverride || getPrimaryRepo(ws);
   const select = document.getElementById(selectId);
   if (!select || !repo) return;
   try {
@@ -956,7 +1070,9 @@ async function fillBranchSelect(selectId, ws, preferredBranch) {
 
 async function getDefaultBranches() {
   if (!state.defaultBranches.length) {
-    const data = await api("GET", "/default-repo/branches");
+    const repos = await ensureRepositories();
+    if (!repos.length) return [];
+    const data = await api("GET", "/repositories/" + repos[0].key + "/branches");
     state.defaultBranches = data.branches || [];
   }
   return state.defaultBranches;
@@ -979,11 +1095,60 @@ async function deleteWorkspace(e, id) {
   await loadSessions();
 }
 
+async function renameWorkspace(e, id) {
+  e.stopPropagation();
+  const ws = state.workspaces.find(w => w.workspace_id === id);
+  const nextName = await showRenameDialog("Rename Workspace", ws?.name || id);
+  if (!nextName || !nextName.trim()) return;
+  await api("PATCH", "/workspaces/" + id, { name: nextName.trim() });
+  await loadWorkspaces();
+  if (state.activeWorkspace === id) {
+    inputHint.textContent = `Workspace selected: ${nextName.trim()}`;
+  }
+}
+
+function showRenameDialog(title, currentName) {
+  return new Promise(resolve => {
+    let overlay = document.getElementById("renameDialogOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "renameDialogOverlay";
+      overlay.className = "dialog-overlay";
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="dialog">
+      <h3>${escapeHtml(title)}</h3>
+      <label>Name</label>
+      <input id="renameNameInput" value="${escapeHtml(currentName || "")}" placeholder="Enter a name">
+      <div class="btn-row">
+        <button class="btn-cancel" id="btnCancelRename">Cancel</button>
+        <button class="btn-confirm" id="btnConfirmRename">Save</button>
+      </div>
+    </div>`;
+    overlay.style.display = "flex";
+    const input = document.getElementById("renameNameInput");
+    const close = value => {
+      overlay.style.display = "none";
+      resolve(value);
+    };
+    document.getElementById("btnCancelRename").onclick = () => close(null);
+    document.getElementById("btnConfirmRename").onclick = () => close(input.value);
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") close(input.value);
+      if (event.key === "Escape") close(null);
+    });
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
+  });
+}
+
 async function createWorkspace() {
   showWorkspaceDialog();
 }
 
-function showWorkspaceDialog() {
+async function showWorkspaceDialog() {
   let overlay = document.getElementById("wsDialogOverlay");
   if (!overlay) {
     overlay = document.createElement("div");
@@ -996,24 +1161,15 @@ function showWorkspaceDialog() {
     <h3>Create Workspace</h3>
     <label>Workspace Name</label>
     <input id="wsNameInput" placeholder="e.g. my-project">
-    <label>Project</label>
-    <input value="creation-tool" disabled>
-    <label>Branch</label>
-    <select id="wsRepoBranchInput"><option>Loading...</option></select>
+    <label>Repositories</label>
+    <div id="workspaceRepoChoices" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">Loading...</div>
     <div class="btn-row">
       <button class="btn-cancel" onclick="closeWorkspaceDialog()">Cancel</button>
       <button class="btn-confirm" id="btnConfirmWorkspace" onclick="confirmCreateWorkspace()">Create</button>
     </div>
   </div>`;
   overlay.style.display = "flex";
-  getDefaultBranches().then(branches => {
-    const select = document.getElementById("wsRepoBranchInput");
-    if (!select) return;
-    select.innerHTML = branches.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join("");
-  }).catch(() => {
-    const select = document.getElementById("wsRepoBranchInput");
-    if (select) select.innerHTML = "<option>master</option>";
-  });
+  await renderWorkspaceRepoChoices();
 }
 
 function closeWorkspaceDialog() {
@@ -1023,12 +1179,20 @@ function closeWorkspaceDialog() {
 
 async function confirmCreateWorkspace() {
   const name = document.getElementById("wsNameInput").value.trim();
-  const branch = document.getElementById("wsRepoBranchInput").value;
   if (!name) return alert("Enter a workspace name");
+  const selectedRows = Array.from(document.querySelectorAll(".workspace-repo-choice"))
+    .filter(row => row.querySelector(".workspace-repo-choice__check")?.checked);
+  const repoKeys = selectedRows.map(row => row.dataset.repoKey);
+  if (!repoKeys.length) return alert("Select at least one repository");
+  const repoBranches = {};
+  selectedRows.forEach(row => {
+    const select = row.querySelector(".workspace-repo-choice__branch");
+    if (select?.value) repoBranches[row.dataset.repoKey] = select.value;
+  });
 
   setDialogSubmitting("btnConfirmWorkspace", true, "Creating");
   try {
-    const ws = await api("POST", "/workspaces", { name, branch });
+    const ws = await api("POST", "/workspaces", { name, repo_keys: repoKeys, repo_branches: repoBranches });
     closeWorkspaceDialog();
     await loadWorkspaces();
     selectWorkspace(ws.workspace_id);
@@ -1036,6 +1200,37 @@ async function confirmCreateWorkspace() {
     setDialogSubmitting("btnConfirmWorkspace", false);
     alert("Failed: " + e.message);
   }
+}
+
+async function renderWorkspaceRepoChoices() {
+  const container = document.getElementById("workspaceRepoChoices");
+  if (!container) return;
+  const repos = await ensureRepositories();
+  if (!repos.length) {
+    container.innerHTML = '<div style="color:var(--error);font-size:12px">No repositories configured.</div>';
+    return;
+  }
+  container.innerHTML = repos.map((repo, index) => `
+    <div class="workspace-repo-choice" data-repo-key="${escapeHtml(repo.key)}" style="border:1px solid var(--border);border-radius:8px;padding:8px">
+      <label style="display:flex;gap:8px;align-items:center;margin:0 0 6px 0">
+        <input class="workspace-repo-choice__check" type="checkbox" ${index === 0 ? "checked" : ""}>
+        <span>${escapeHtml(repo.name)}</span>
+      </label>
+      <select class="workspace-repo-choice__branch" data-repo-key="${escapeHtml(repo.key)}"><option>Loading...</option></select>
+    </div>
+  `).join("");
+  await Promise.all(repos.map(repo => fillRepositoryBranchSelect(repo.key)));
+}
+
+async function fillRepositoryBranchSelect(repoKey, selectOverride = null, preferredBranch = null) {
+  const select = selectOverride || document.querySelector(`.workspace-repo-choice__branch[data-repo-key="${_cssEscape(repoKey)}"]`);
+  if (!select) return;
+  const branches = await getRepositoryBranches(repoKey);
+  const repo = state.repositories.find(r => r.key === repoKey);
+  const selected = preferredBranch || repo?.default_branch || branches[0] || "main";
+  select.innerHTML = (branches.length ? branches : [selected]).map(b =>
+    `<option value="${escapeHtml(b)}" ${b === selected ? "selected" : ""}>${escapeHtml(b)}</option>`
+  ).join("");
 }
 
 function setDialogSubmitting(buttonId, submitting, actionLabel) {
@@ -1060,6 +1255,76 @@ function setDialogSubmitting(buttonId, submitting, actionLabel) {
   } else {
     button.textContent = button.dataset.idleLabel || "Create";
     delete button.dataset.idleLabel;
+  }
+}
+
+async function showAddRepoDialog(workspaceId) {
+  state.activeWorkspace = workspaceId;
+  const ws = state.workspaces.find(w => w.workspace_id === workspaceId);
+  if (!ws) return alert("Workspace not found");
+  let overlay = document.getElementById("addRepoDialogOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "addRepoDialogOverlay";
+    overlay.className = "dialog-overlay";
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `<div class="dialog">
+    <h3>Add Repository</h3>
+    <input type="hidden" id="addRepoWorkspaceInput" value="${escapeHtml(workspaceId)}">
+    <label>Repository</label>
+    <select id="addRepoKeySelect" onchange="fillAddRepoBranchSelect()"><option>Loading...</option></select>
+    <label>Branch</label>
+    <select id="addRepoBranchSelect"><option>Loading...</option></select>
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeAddRepoDialog()">Cancel</button>
+      <button class="btn-confirm" id="btnConfirmAddRepo" onclick="confirmAddRepo()">Add Repo</button>
+    </div>
+  </div>`;
+  overlay.style.display = "flex";
+  const repos = await ensureRepositories();
+  const boundNames = new Set((ws.repos || []).map(repo => repo.name));
+  const available = repos.filter(repo => !boundNames.has(repo.name));
+  const select = document.getElementById("addRepoKeySelect");
+  if (!available.length) {
+    select.innerHTML = "<option>No available repositories</option>";
+    document.getElementById("btnConfirmAddRepo").disabled = true;
+    document.getElementById("addRepoBranchSelect").innerHTML = "<option>-</option>";
+    return;
+  }
+  select.innerHTML = available.map(repo =>
+    `<option value="${escapeHtml(repo.key)}">${escapeHtml(repo.name)}</option>`
+  ).join("");
+  await fillAddRepoBranchSelect();
+}
+
+function closeAddRepoDialog() {
+  const overlay = document.getElementById("addRepoDialogOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+async function fillAddRepoBranchSelect() {
+  const repoKey = document.getElementById("addRepoKeySelect")?.value;
+  const select = document.getElementById("addRepoBranchSelect");
+  if (!repoKey || !select) return;
+  await fillRepositoryBranchSelect(repoKey, select);
+}
+
+async function confirmAddRepo() {
+  const workspaceId = document.getElementById("addRepoWorkspaceInput").value;
+  const repoKey = document.getElementById("addRepoKeySelect").value;
+  const branch = document.getElementById("addRepoBranchSelect").value;
+  if (!repoKey || !branch) return alert("Select repository and branch");
+  setDialogSubmitting("btnConfirmAddRepo", true, "Adding");
+  try {
+    await api("POST", "/workspaces/" + workspaceId + "/repos", { repo_key: repoKey, branch });
+    closeAddRepoDialog();
+    await loadWorkspaces();
+    state.activeWorkspace = workspaceId;
+    renderWorkspaces();
+  } catch (e) {
+    setDialogSubmitting("btnConfirmAddRepo", false);
+    alert("Failed to add repo: " + e.message);
   }
 }
 
@@ -1621,6 +1886,32 @@ function toggleTheme() {
   html.setAttribute("data-theme", current === "dark" ? "light" : "dark");
 }
 
+function initSidebarResize() {
+  const handle = $("#sidebarResizeHandle");
+  if (!handle) return;
+  const savedWidth = localStorage.getItem("sidebarWidth");
+  if (savedWidth) app.style.setProperty("--sidebar-width", savedWidth + "px");
+
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    app.classList.add("app--resizing");
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!app.classList.contains("app--resizing")) return;
+    const width = Math.max(220, Math.min(480, event.clientX));
+    app.style.setProperty("--sidebar-width", width + "px");
+    localStorage.setItem("sidebarWidth", String(width));
+  });
+  handle.addEventListener("pointerup", (event) => {
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    app.classList.remove("app--resizing");
+  });
+  handle.addEventListener("pointercancel", () => {
+    app.classList.remove("app--resizing");
+  });
+}
+
 /* ═══════════════════════ INPUT AUTO-RESIZE ═══════════════════════ */
 
 function resizePromptInput() {
@@ -1649,8 +1940,6 @@ promptInput.addEventListener("keydown", (e) => {
 
 /* ═══════════════════════ EVENT BINDINGS ═══════════════════════ */
 
-$("#btnNewSession").addEventListener("click", createSession);
-$("#btnNewWorkspace").addEventListener("click", createWorkspace);
 $("#btnAddWs").addEventListener("click", createWorkspace);
 btnSend.addEventListener("click", () => {
   if (state.streaming) {
@@ -1687,6 +1976,7 @@ panelTabs.addEventListener("click", (e) => {
 
 loadWorkspaces();
 loadSessions();
+initSidebarResize();
 </script>
 </body>
 </html>

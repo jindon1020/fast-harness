@@ -12,13 +12,16 @@ from starlette.responses import JSONResponse
 
 from src.api.schemas import (
     QueryRequest,
+    RenameRequest,
     SessionCreateRequest,
     SessionCreateResponse,
     SessionInfo,
     SessionListResponse,
     WorkspaceCreateRequest,
+    WorkspaceRepoAddRequest,
     WorkspaceResponse,
     WorkspaceListResponse,
+    RepositoryListResponse,
     RepoStatusResponse,
     CapabilityResponse,
     HealthResponse,
@@ -53,6 +56,23 @@ async def health():
 async def capabilities():
     caps = get_capabilities()
     return CapabilityResponse(**caps)
+
+
+# ═══════════════════════ Registered repositories ═══════════════════════
+
+@router.get("/repositories", response_model=RepositoryListResponse)
+async def list_repositories():
+    return RepositoryListResponse(repositories=settings.enabled_repositories)
+
+
+@router.get("/repositories/{repo_key}/branches")
+async def repository_branches(repo_key: str):
+    try:
+        repo = settings.get_repository(repo_key)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    branches = remote_branches(repo["url"])
+    return {"branches": branches or [repo["default_branch"]]}
 
 
 # ═══════════════════════ Sessions ═══════════════════════
@@ -116,6 +136,15 @@ async def get_session(session_id: str):
     rec = session_store.get(session_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Session not found")
+    return SessionInfo(**rec)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionInfo)
+async def rename_session(session_id: str, body: RenameRequest):
+    try:
+        rec = session_store.rename(session_id, body.name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     return SessionInfo(**rec)
 
 
@@ -218,13 +247,48 @@ async def get_session_file(session_id: str, file_path: str):
 @router.post("/workspaces", response_model=WorkspaceResponse, status_code=201)
 async def create_workspace(body: WorkspaceCreateRequest):
     legacy_repo = body.repos[0] if body.repos else None
+    repositories = _workspace_repositories_from_request(body, legacy_repo)
     rec = workspace_store.create(
         body.name,
-        repo_url=body.repo_url or (legacy_repo.url if legacy_repo else None),
-        repo_name=body.repo_name or (legacy_repo.name if legacy_repo else None),
-        branch=body.branch or (legacy_repo.branch if legacy_repo else None),
+        repositories=repositories,
     )
     return WorkspaceResponse(**rec)
+
+
+def _workspace_repositories_from_request(body: WorkspaceCreateRequest, legacy_repo=None) -> list[dict]:
+    if body.repo_keys:
+        branches = body.repo_branches or {}
+        return [
+            _repo_spec_from_config(repo_key, branches.get(repo_key))
+            for repo_key in body.repo_keys
+        ]
+
+    if legacy_repo or body.repo_url:
+        return [{
+            "url": body.repo_url or legacy_repo.url,
+            "name": body.repo_name or (legacy_repo.name if legacy_repo else None),
+            "branch": body.branch or (legacy_repo.branch if legacy_repo else None),
+        }]
+
+    enabled = settings.enabled_repositories
+    if len(enabled) == 1:
+        repo = enabled[0]
+        return [_repo_spec_from_config(repo["key"], body.branch)]
+
+    raise HTTPException(status_code=400, detail="Select at least one registered repository")
+
+
+def _repo_spec_from_config(repo_key: str, branch: str | None = None) -> dict:
+    try:
+        repo = settings.get_repository(repo_key)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {
+        "key": repo["key"],
+        "name": repo["name"],
+        "url": repo["url"],
+        "branch": branch or repo["default_branch"],
+    }
 
 
 @router.get("/workspaces", response_model=WorkspaceListResponse)
@@ -241,6 +305,15 @@ async def get_workspace(workspace_id: str):
     return WorkspaceResponse(**rec)
 
 
+@router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+async def rename_workspace(workspace_id: str, body: RenameRequest):
+    try:
+        rec = workspace_store.rename(workspace_id, body.name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return WorkspaceResponse(**rec)
+
+
 @router.delete("/workspaces/{workspace_id}")
 async def delete_workspace(workspace_id: str):
     if not workspace_store.get(workspace_id):
@@ -254,7 +327,30 @@ async def delete_workspace(workspace_id: str):
 
 @router.get("/default-repo/branches")
 async def default_repo_branches():
-    return {"branches": remote_branches(settings.default_project_git_url)}
+    repos = settings.enabled_repositories
+    if not repos:
+        return {"branches": []}
+    branches = remote_branches(repos[0]["url"])
+    return {"branches": branches or [repos[0]["default_branch"]]}
+
+
+@router.post("/workspaces/{workspace_id}/repos", response_model=WorkspaceResponse)
+async def add_workspace_repo(workspace_id: str, body: WorkspaceRepoAddRequest):
+    if not workspace_store.get(workspace_id):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    repo = _repo_spec_from_config(body.repo_key, body.branch)
+    try:
+        workspace_store.add_repo(
+            workspace_id,
+            repo["url"],
+            name=repo["name"],
+            branch=repo["branch"],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    rec = workspace_store.get(workspace_id)
+    assert rec is not None
+    return WorkspaceResponse(**rec)
 
 
 @router.post("/workspaces/{workspace_id}/pull")

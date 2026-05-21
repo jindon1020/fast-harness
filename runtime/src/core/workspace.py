@@ -42,6 +42,7 @@ class WorkspaceStore:
     def create(
         self,
         name: str,
+        repositories: Optional[list[dict]] = None,
         repo_url: Optional[str] = None,
         repo_name: Optional[str] = None,
         branch: Optional[str] = None,
@@ -62,12 +63,23 @@ class WorkspaceStore:
         self._path(ws_id).write_text(json.dumps(record, indent=2))
 
         try:
-            self.add_repo(
-                ws_id,
-                repo_url or settings.default_project_git_url,
-                repo_name or settings.default_project_repo_name,
-                branch,
-            )
+            repo_specs = repositories
+            if repo_specs is None and repo_url:
+                repo_specs = [{
+                    "url": repo_url,
+                    "name": repo_name or settings.default_project_repo_name,
+                    "branch": branch,
+                }]
+            if not repo_specs:
+                raise ValueError("Workspace requires at least one git repository")
+
+            for repo in repo_specs:
+                self.add_repo(
+                    ws_id,
+                    repo["url"],
+                    repo.get("name"),
+                    repo.get("branch"),
+                )
         except Exception:
             self.delete(ws_id)
             raise
@@ -89,6 +101,15 @@ class WorkspaceStore:
         for f in sorted(self._dir.glob("*.json")):
             records.append(json.loads(f.read_text()))
         return records
+
+    def rename(self, ws_id: str, name: str) -> dict:
+        record = self.get(ws_id)
+        if not record:
+            raise ValueError(f"Workspace not found: {ws_id}")
+        record["name"] = name.strip()
+        record["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._path(ws_id).write_text(json.dumps(record, indent=2), encoding="utf-8")
+        return record
 
     def delete(self, ws_id: str) -> None:
         record = self.get(ws_id)
@@ -142,11 +163,14 @@ class WorkspaceStore:
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         ws_dir = Path(record["cwd"])
+        repo_name = name or settings.default_project_repo_name
+        if any(repo.get("name") == repo_name for repo in record.get("repos", [])):
+            raise ValueError(f"Repo already bound to workspace: {repo_name}")
 
         repo = create_worktree(
             url=url,
             source_dir=Path(settings.workspace_root) / ".sources",
-            worktree_path=ws_dir / (name or settings.default_project_repo_name),
+            worktree_path=ws_dir / repo_name,
             branch=branch,
         )
 

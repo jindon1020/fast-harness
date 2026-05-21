@@ -1,3 +1,16 @@
+repositories:
+  - key: creation-tool
+    name: creation-tool
+    url: https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/creation-tool.git
+    default_branch: main
+    enabled: true
+
+  - key: asset-manager
+    name: asset-manager
+    url: https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/asset-manager.git
+    default_branch: main
+    enabled: true
+
 # UI/stream display configuration for fast-harness runtime.
 stream:
   # Empty list hides SDK tool process cards such as Bash, Grep, and Read.

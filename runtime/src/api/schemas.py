@@ -13,23 +13,34 @@ class QueryRequest(BaseModel):
     permission_mode: str = Field(default="acceptEdits")
 
 
+class RenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, description="New display name")
+
+
 class SessionCreateRequest(BaseModel):
     workspace_id: str = Field(..., description="Workspace this session belongs to")
     repo_name: str | None = Field(default=None, description="Repo to checkout before the session starts")
     branch: str | None = Field(default=None, description="Branch to checkout for this session")
 
 
+class RepoInput(BaseModel):
+    url: str = Field(..., description="Git URL (HTTPS or SSH)")
+    name: str | None = Field(default=None)
+    branch: str | None = Field(default=None)
+
+
 class WorkspaceCreateRequest(BaseModel):
     name: str = Field(..., description="Human-readable workspace name")
+    repo_keys: list[str] | None = Field(default=None, description="Registered repository keys to enable")
+    repo_branches: dict[str, str] | None = Field(default=None, description="Branch by registered repository key")
     repo_url: str | None = Field(default=None, description="Git URL; defaults to the configured creation-tool repo")
     repo_name: str | None = Field(default=None)
     branch: str | None = Field(default=None)
     repos: list[RepoInput] | None = Field(default=None, description="Legacy repo payload; first entry is used if present")
 
 
-class RepoInput(BaseModel):
-    url: str = Field(..., description="Git URL (HTTPS or SSH)")
-    name: str | None = Field(default=None)
+class WorkspaceRepoAddRequest(BaseModel):
+    repo_key: str = Field(..., description="Registered repository key to add")
     branch: str | None = Field(default=None)
 
 
@@ -42,6 +53,7 @@ class SessionCreateResponse(BaseModel):
 
 class SessionInfo(BaseModel):
     session_id: str
+    name: str | None = Field(default=None)
     workspace: str
     created_at: str
     last_access: str
@@ -63,6 +75,18 @@ class WorkspaceResponse(BaseModel):
 
 class WorkspaceListResponse(BaseModel):
     workspaces: list[WorkspaceResponse]
+
+
+class RepositoryConfigInfo(BaseModel):
+    key: str
+    name: str
+    url: str
+    default_branch: str
+    enabled: bool
+
+
+class RepositoryListResponse(BaseModel):
+    repositories: list[RepositoryConfigInfo]
 
 
 class RepoStatusResponse(BaseModel):

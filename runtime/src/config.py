@@ -33,6 +33,46 @@ def _stream_config() -> dict[str, Any]:
     return stream
 
 
+def _repository_configs() -> list[dict[str, Any]]:
+    repositories = _load_runtime_config().get("repositories", [])
+    if repositories is None:
+        return []
+    if not isinstance(repositories, list):
+        raise ValueError("runtime config key 'repositories' must be a YAML list")
+
+    seen_keys: set[str] = set()
+    seen_names: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for raw_repo in repositories:
+        if not isinstance(raw_repo, dict):
+            raise ValueError("each repository config must be a YAML mapping")
+        key = str(raw_repo.get("key", "")).strip()
+        name = str(raw_repo.get("name", key)).strip()
+        url = str(raw_repo.get("url", "")).strip()
+        if not key:
+            raise ValueError("repository config is missing required key 'key'")
+        if not name:
+            raise ValueError(f"repository {key!r} is missing required key 'name'")
+        if not url:
+            raise ValueError(f"repository {key!r} is missing required key 'url'")
+        if key in seen_keys:
+            raise ValueError(f"Duplicate repository key: {key}")
+        if name in seen_names:
+            raise ValueError(f"Duplicate repository name: {name}")
+        seen_keys.add(key)
+        seen_names.add(name)
+        normalized.append(
+            {
+                "key": key,
+                "name": name,
+                "url": url,
+                "default_branch": str(raw_repo.get("default_branch", "main")).strip() or "main",
+                "enabled": bool(raw_repo.get("enabled", True)),
+            }
+        )
+    return normalized
+
+
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -106,6 +146,24 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @property
+    def registered_repositories(self) -> list[dict[str, Any]]:
+        return _repository_configs()
+
+    @property
+    def enabled_repositories(self) -> list[dict[str, Any]]:
+        return [
+            repo
+            for repo in self.registered_repositories
+            if repo.get("enabled", True)
+        ]
+
+    def get_repository(self, key: str) -> dict[str, Any]:
+        for repo in self.enabled_repositories:
+            if repo["key"] == key:
+                return repo
+        raise ValueError(f"Repository not found or disabled: {key}")
 
 
 settings = Settings()
