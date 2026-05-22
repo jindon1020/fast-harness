@@ -62,6 +62,110 @@ def test_create_worktree_uses_source_repo_and_branch(monkeypatch, tmp_path):
     assert any(cmd == ["git", "worktree", "add", str(tmp_path / "ws-1" / "app"), "origin/feature/x"] for cmd, _cwd in commands)
 
 
+def test_create_worktree_installs_fast_harness_suite_after_worktree_add(monkeypatch, tmp_path):
+    commands = []
+    worktree_path = tmp_path / "ws-1" / "app"
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd, timeout))
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    git.create_worktree(
+        url="https://example.com/app.git",
+        source_dir=tmp_path / ".sources",
+        worktree_path=worktree_path,
+        branch="feature/x",
+    )
+
+    worktree_add = next(
+        i for i, (cmd, _cwd, _timeout) in enumerate(commands)
+        if cmd == ["git", "worktree", "add", str(worktree_path), "origin/feature/x"]
+    )
+    install = next(
+        i for i, (cmd, cwd, _timeout) in enumerate(commands)
+        if cmd[:2] == ["bash", "-lc"] and cwd == worktree_path
+    )
+    assert install > worktree_add
+    assert "cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh" in commands[install][0][2]
+    assert "bash -s -- --force" in commands[install][0][2]
+
+
+def test_create_worktree_removes_worktree_when_fast_harness_install_fails(monkeypatch, tmp_path):
+    commands = []
+    source_repo = tmp_path / ".sources" / "app"
+    worktree_path = tmp_path / "ws-1" / "app"
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        if cmd[:2] == ["bash", "-lc"]:
+            return 1, "", "install failed"
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    try:
+        git.create_worktree(
+            url="https://example.com/app.git",
+            source_dir=tmp_path / ".sources",
+            worktree_path=worktree_path,
+            branch="feature/x",
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "fast-harness install failed: install failed"
+    else:
+        raise AssertionError("Expected RuntimeError")
+
+    assert (["git", "worktree", "remove", "--force", str(worktree_path)], source_repo) in commands
+
+
+def test_create_worktree_replaces_invalid_source_cache(monkeypatch, tmp_path):
+    source_repo = tmp_path / ".sources" / "app"
+    source_repo.mkdir(parents=True)
+    commands = []
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    repo = git.create_worktree(
+        url="https://example.com/app.git",
+        source_dir=tmp_path / ".sources",
+        worktree_path=tmp_path / "ws-1" / "app",
+        branch="feature/x",
+    )
+
+    assert repo.branch == "feature/x"
+    assert any(cmd == ["git", "clone", "https://example.com/app.git", "app"] for cmd, _cwd in commands)
+
+
+def test_create_worktree_reports_fetch_failure(monkeypatch, tmp_path):
+    source_repo = tmp_path / ".sources" / "app"
+    (source_repo / ".git").mkdir(parents=True)
+
+    def fake_run(cmd, cwd, timeout=120):
+        if cmd[:2] == ["git", "fetch"]:
+            return 128, "", "authentication failed"
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    try:
+        git.create_worktree(
+            url="https://example.com/app.git",
+            source_dir=tmp_path / ".sources",
+            worktree_path=tmp_path / "ws-1" / "app",
+            branch="feature/x",
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "Source fetch failed: authentication failed"
+    else:
+        raise AssertionError("Expected RuntimeError")
+
+
 def test_branches_fetches_remote_branches(monkeypatch, tmp_path):
     repo_path = tmp_path / "app"
     repo_path.mkdir()
@@ -102,6 +206,42 @@ def test_checkout_branch_creates_tracking_branch_from_origin(monkeypatch, tmp_pa
 
     assert repo.branch == "feature/x"
     assert ["git", "checkout", "-B", "feature/x", "origin/feature/x"] in commands
+
+
+def test_checkout_resets_fast_harness_paths_before_switch_and_reinstalls(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    repo_path.mkdir()
+    (repo_path / ".git").mkdir()
+    commands = []
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append(cmd)
+        if cmd[:2] == ["git", "ls-files"]:
+            return 0, ".cursor/commands/implement.md\n.ether/commands/implement-command.md", ""
+        if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            return 0, "bugfix/x", ""
+        if cmd == ["git", "remote", "get-url", "origin"]:
+            return 0, "https://example.com/app.git", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    git.checkout(repo_path, "bugfix/x")
+
+    reset_index = commands.index([
+        "git",
+        "checkout",
+        "--",
+        ".cursor/commands/implement.md",
+        ".ether/commands/implement-command.md",
+    ])
+    clean_index = commands.index(["git", "clean", "-fd", "--", *git.FAST_HARNESS_MANAGED_PATHS])
+    checkout_index = commands.index(["git", "checkout", "bugfix/x"])
+    install_index = next(i for i, cmd in enumerate(commands) if cmd[:2] == ["bash", "-lc"])
+
+    assert reset_index < checkout_index
+    assert clean_index < checkout_index
+    assert install_index > checkout_index
 
 
 def test_checkout_branch_falls_back_to_detached_origin_when_branch_is_in_use(monkeypatch, tmp_path):

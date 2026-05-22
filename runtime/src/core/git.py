@@ -7,6 +7,7 @@ import logging
 import subprocess
 import re
 import shlex
+import shutil
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -15,6 +16,24 @@ from typing import Optional
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+FAST_HARNESS_INSTALL_COMMAND = (
+    "curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh "
+    "| bash -s -- --force"
+)
+FAST_HARNESS_MANAGED_PATHS = [
+    ".cursor",
+    ".ether",
+    ".qoder",
+    ".claude",
+    ".codex",
+    ".gemini",
+    ".gitignore",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "QODER.md",
+]
 
 
 class GitProvider(str, Enum):
@@ -129,6 +148,29 @@ def remote_branches(url: str) -> list[str]:
     return sorted(set(branches_list))
 
 
+def _install_fast_harness_suite(repo_path: Path) -> None:
+    """Install or refresh fast-harness project files inside a workspace worktree."""
+    logger.info("Installing fast-harness suite in %s", repo_path)
+    rc, stdout, stderr = _run(
+        ["bash", "-lc", FAST_HARNESS_INSTALL_COMMAND],
+        repo_path,
+        timeout=300,
+    )
+    if rc != 0:
+        message = stderr or stdout or "unknown error"
+        raise RuntimeError(f"fast-harness install failed: {message}")
+
+
+def _reset_fast_harness_managed_paths(repo_path: Path) -> None:
+    """Discard installer-managed file changes before switching branches."""
+    rc, stdout, _stderr = _run(["git", "ls-files", *FAST_HARNESS_MANAGED_PATHS], repo_path, timeout=30)
+    if rc == 0 and stdout:
+        tracked_paths = [line for line in stdout.splitlines() if line.strip()]
+        if tracked_paths:
+            _run(["git", "checkout", "--", *tracked_paths], repo_path, timeout=60)
+    _run(["git", "clean", "-fd", "--", *FAST_HARNESS_MANAGED_PATHS], repo_path, timeout=60)
+
+
 def clone(url: str, target_dir: Path, branch: Optional[str] = None, directory_name: Optional[str] = None) -> RepoInfo:
     """Clone a repository into target_dir. Auto-detects default branch if not specified."""
     provider = detect_provider(url)
@@ -168,12 +210,22 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
     source_dir.mkdir(parents=True, exist_ok=True)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
+    if source_repo.exists() and not (source_repo / ".git").exists():
+        logger.warning("Removing invalid source clone cache at %s", source_repo)
+        shutil.rmtree(source_repo)
+
     if not source_repo.exists():
         rc, _stdout, stderr = _run(["git", "clone", auth_url, repo_name], source_dir)
         if rc != 0:
             raise RuntimeError(f"Source clone failed: {stderr}")
 
-    _run(["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"], source_repo, timeout=60)
+    rc, _stdout, stderr = _run(
+        ["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"],
+        source_repo,
+        timeout=60,
+    )
+    if rc != 0:
+        raise RuntimeError(f"Source fetch failed: {stderr}")
 
     if branch is None:
         branch = _detect_default_branch(auth_url)
@@ -185,6 +237,12 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
     )
     if rc != 0:
         raise RuntimeError(f"Worktree creation failed: {stderr}")
+
+    try:
+        _install_fast_harness_suite(worktree_path)
+    except RuntimeError:
+        _run(["git", "worktree", "remove", "--force", str(worktree_path)], source_repo, timeout=60)
+        raise
 
     return RepoInfo(name=repo_name, url=url, provider=provider, branch=branch, local_path=worktree_path)
 
@@ -217,6 +275,7 @@ def checkout(repo_path: Path, branch: str) -> RepoInfo:
         raise RuntimeError(f"Not a git repository: {repo_path}")
 
     _run(["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"], repo_path, timeout=60)
+    _reset_fast_harness_managed_paths(repo_path)
     rc, _stdout, stderr = _run(["git", "checkout", branch], repo_path)
     if rc != 0:
         rc, _stdout, stderr = _run(["git", "checkout", "-B", branch, f"origin/{branch}"], repo_path)
@@ -228,6 +287,8 @@ def checkout(repo_path: Path, branch: str) -> RepoInfo:
     rc, _stdout, stderr = _run(["git", "pull", "--ff-only"], repo_path)
     if rc != 0:
         logger.warning("Pull may have conflicts: %s", stderr)
+
+    _install_fast_harness_suite(repo_path)
 
     remote_url = _get_remote_url(repo_path)
     return RepoInfo(

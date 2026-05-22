@@ -74,6 +74,22 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn("function renderHistoryMessage", html)
         self.assertIn("function renderUserPrompt", html)
 
+    def test_ui_renders_markdown_blocks_and_tables(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn("function renderMarkdown(md)", html)
+        self.assertIn("function renderMarkdownTable(tableLines)", html)
+        self.assertIn("function isMarkdownTableStart(lines, index)", html)
+        self.assertIn(".msg__text table", html)
+        self.assertIn(".msg__text h2", html)
+        self.assertIn(".msg__text blockquote", html)
+
+    def test_ui_uses_same_origin_api_base(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('const API = "/api";', html)
+        self.assertNotIn('const API = "http://localhost:8002/api";', html)
+
     def test_ui_supports_registered_repo_selection(self):
         html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
 

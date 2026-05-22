@@ -11,6 +11,12 @@ repositories:
     default_branch: main
     enabled: true
 
+  - key: perf-sql-gen
+    name: perf-sql-gen
+    url: https://github.com/jindon1020/perf-sql-gen.git
+    default_branch: main
+    enabled: true
+
 # UI/stream display configuration for fast-harness runtime.
 stream:
   # Empty list hides SDK tool process cards such as Bash, Grep, and Read.
