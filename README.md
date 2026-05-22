@@ -205,9 +205,6 @@ your-project/
     │   ├── kafka-connector/
     │   ├── code-wiki-gen/             # 代码知识库生成
     │   ├── harness-meta-skill/
-    │   ├── k8s-monitor/
-    │   ├── loki-log-keyword-search/
-    │   ├── prometheus-metrics-query/
     │   ├── xmind-test-extractor/
     │   └── feishu-doc-reader/
     ├── configure.sh                   # 交互式项目配置脚本

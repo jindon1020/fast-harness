@@ -188,21 +188,25 @@ SendMessage(to="planner-agent", message="
 | 错误描述 | 必填 | 报错信息、异常行为、复现步骤 |
 | 发生时间范围 | 建议提供 | 帮助缩小日志查询窗口 |
 
-### B-Step 1: 查询 Loki 日志
+### B-Step 1: 查询线上观测数据
 
 > **Extension Point `@data-source`**：此处加载所有声明 `extension-point: data-source` 的扩展。
 > 用户可在 `extensions/` 下添加自定义数据源（如 Redis、ES、MQ），Agent 会在此阶段一并执行数据收集。
 
-开启 Sub-agent，调用 **skill `loki-log-keyword-search`**：
+直接调用 `kube-observability` MCP 工具，禁止使用 kubectl、端口转发或本地 kubeconfig。
 
-```
-Sub-agent 指令：
-- 环境：{drama-dev / drama-prod}
-- 服务：{creation-tool / algo-manager / asset-manager}
-- 查询参数：request_id={xxx} 或 关键词={错误描述关键词}
-- 时间范围：{用户提供 or 最近 1 小时}
-- 目标：提取完整调用链路日志、异常堆栈、关键业务日志
-```
+优先级：
+1. 有 `request_id`：调用 `mcp__kube-observability__loki_search_logs`，以 `request_id` 精准检索。
+2. 无 `request_id` 但有错误关键词：调用 `mcp__kube-observability__loki_search_logs`，使用错误关键词、服务名和时间范围检索。
+3. 服务级异常或无法定位 Pod：调用 `mcp__kube-observability__diagnose_service` 汇总 Pod、Deployment、Events、ERROR 日志和 Prometheus 指标。
+4. Pod 异常、重启或日志截断：调用 `mcp__kube-observability__k8s_list_pods`、`mcp__kube-observability__k8s_get_pod_detail`、`mcp__kube-observability__k8s_get_pod_logs`。
+5. 错误率、延迟或资源异常：调用 `mcp__kube-observability__prometheus_service_http_overview` 或 `mcp__kube-observability__prometheus_pod_resources`。
+
+参数约束：
+- namespace：仅使用 B-Step 0 确认的 `drama-dev` 或 `drama-prod`
+- 服务：`creation-tool` / `algo-manager` / `asset-manager`
+- 时间范围：用户提供；未提供则使用最近 1 小时
+- 查询目标：提取完整调用链路日志、异常堆栈、关键业务日志、Pod/Deployment/Event/指标证据
 
 **日志分析重点**：
 - 异常类型与堆栈（`ERROR`、`CRITICAL` 级别）

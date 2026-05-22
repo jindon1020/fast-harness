@@ -30,6 +30,17 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertEqual(normalize_command_prompt("普通需求描述"), "普通需求描述")
         self.assertEqual(normalize_command_prompt("/unknown something"), "/unknown something")
 
+    def test_monitor_agent_uses_kube_observability_mcp(self):
+        config = load_harness_config()
+        monitor = config.agents["monitor-agent"]
+
+        self.assertEqual(monitor.mcpServers, ["kube-observability"])
+        self.assertIn("mcp__kube-observability__diagnose_service", monitor.tools)
+        self.assertIn("kube-observability", monitor.prompt)
+        self.assertNotIn("可用 Skill", monitor.prompt)
+        self.assertNotIn("KUBECONFIG", monitor.prompt)
+        self.assertNotIn("kubectl get pods", monitor.prompt)
+
     def test_ui_contains_slash_command_suggestion_contract(self):
         html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
 

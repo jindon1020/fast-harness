@@ -78,6 +78,7 @@ def _discover_agents(plugin_path: Path, config: PluginConfig) -> None:
             description = frontmatter.get("description", f"Agent: {name}")
             tools = _parse_list(frontmatter.get("tools", ""))
             disallowed = _parse_list(frontmatter.get("disallowedTools", ""))
+            mcp_servers = _parse_list(frontmatter.get("mcpServers", ""))
             model = frontmatter.get("model", "inherit")
 
             config.agents[name] = AgentDefinition(
@@ -85,6 +86,7 @@ def _discover_agents(plugin_path: Path, config: PluginConfig) -> None:
                 prompt=body,
                 tools=tools if tools else None,
                 disallowedTools=disallowed if disallowed else None,
+                mcpServers=mcp_servers if mcp_servers else None,
                 model=model if model != "inherit" else None,
             )
 

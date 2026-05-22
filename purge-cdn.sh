@@ -110,9 +110,6 @@ echo ""
 
 # Skills
 info "[ Skills ]"
-purge_file "plugin/skills/k8s-monitor/SKILL.md"
-purge_file "plugin/skills/loki-log-keyword-search/SKILL.md"
-purge_file "plugin/skills/prometheus-metrics-query/SKILL.md"
 purge_file "plugin/skills/xmind-test-extractor/SKILL.md"
 purge_file "plugin/skills/db-connector/SKILL.md"
 purge_file "plugin/skills/redis-connector/SKILL.md"
