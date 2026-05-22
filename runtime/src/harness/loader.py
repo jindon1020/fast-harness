@@ -28,6 +28,7 @@ class PluginConfig:
     agents: dict[str, AgentDefinition] = field(default_factory=dict)
     commands: list[dict] = field(default_factory=list)
     skills: list[dict] = field(default_factory=list)
+    mcp_servers: Path | None = None
 
 
 def load_harness_config() -> PluginConfig:
@@ -41,6 +42,9 @@ def load_harness_config() -> PluginConfig:
 
     # Load as a local SDK plugin (gives access to commands/, skills/, agents/, hooks/)
     config.plugins.append({"type": "local", "path": str(plugin_path)})
+    mcp_config = plugin_path / ".mcp.json"
+    if mcp_config.exists():
+        config.mcp_servers = mcp_config
 
     # Discovery: parse agent definitions for programmatic registration
     _discover_agents(plugin_path, config)

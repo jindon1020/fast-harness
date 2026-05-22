@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk import (
@@ -11,6 +12,30 @@ from claude_agent_sdk import (
 )
 
 from src.core import agent
+
+
+def test_build_options_loads_plugin_mcp_config_and_allows_kube_tools(monkeypatch, tmp_path):
+    mcp_config = tmp_path / ".mcp.json"
+    mcp_config.write_text('{"mcpServers": {}}', encoding="utf-8")
+
+    class FakeSessionStore:
+        def get(self, session_id):
+            return {"session_id": session_id, "metadata": {}}
+
+    monkeypatch.setattr(agent, "session_store", FakeSessionStore())
+    monkeypatch.setattr(agent, "_resolve_cwd", lambda session_id: Path(tmp_path))
+    monkeypatch.setattr(
+        agent,
+        "load_harness_config",
+        lambda: SimpleNamespace(plugins=[], agents={}, mcp_servers=mcp_config),
+    )
+
+    options = agent._build_options("runtime-session", allowed_tools=["Read"])
+
+    assert options.mcp_servers == mcp_config
+    assert "Read" in options.allowed_tools
+    assert "mcp__kube-observability__diagnose_service" in options.allowed_tools
+    assert "mcp__kube-observability__k8s_get_pod_logs" in options.allowed_tools
 
 
 @pytest.mark.asyncio

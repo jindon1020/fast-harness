@@ -30,6 +30,21 @@ from src.harness.loader import load_harness_config
 logger = logging.getLogger(__name__)
 
 
+KUBE_OBSERVABILITY_ALLOWED_TOOLS = [
+    "mcp__kube-observability__k8s_list_pods",
+    "mcp__kube-observability__k8s_get_pod_detail",
+    "mcp__kube-observability__k8s_list_deployments",
+    "mcp__kube-observability__k8s_get_events",
+    "mcp__kube-observability__k8s_get_pod_logs",
+    "mcp__kube-observability__loki_search_logs",
+    "mcp__kube-observability__loki_query_range",
+    "mcp__kube-observability__prometheus_query_range",
+    "mcp__kube-observability__prometheus_service_http_overview",
+    "mcp__kube-observability__prometheus_pod_resources",
+    "mcp__kube-observability__diagnose_service",
+]
+
+
 def _apply_api_config() -> None:
     """Inject API auth and base URL into environment for the SDK to pick up."""
     if settings.anthropic_auth_token:
@@ -91,10 +106,12 @@ def _build_options(
             "Read", "Write", "Edit", "Bash", "Glob", "Grep",
             "WebSearch", "WebFetch", "Agent",
         ]
+    allowed_tools = _with_kube_observability_tools(allowed_tools)
 
     return ClaudeAgentOptions(
         cwd=str(ws),
         allowed_tools=allowed_tools,
+        mcp_servers=harness.mcp_servers or {},
         permission_mode=permission_mode,
         resume=_get_sdk_session_id(session_id, ws),
         max_turns=max_turns or settings.default_max_turns,
@@ -107,6 +124,16 @@ def _build_options(
         # Enable all skills (both from harness plugin and any project-local ones)
         skills="all",
     )
+
+
+def _with_kube_observability_tools(allowed_tools: list[str]) -> list[str]:
+    merged = list(allowed_tools)
+    seen = set(merged)
+    for tool_name in KUBE_OBSERVABILITY_ALLOWED_TOOLS:
+        if tool_name not in seen:
+            merged.append(tool_name)
+            seen.add(tool_name)
+    return merged
 
 
 def _get_sdk_session_id(session_id: str, cwd: Path) -> Optional[str]:
