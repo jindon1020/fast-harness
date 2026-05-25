@@ -34,10 +34,12 @@ skill: ahe-observer
 ## Command Format
 
 ```
-/integration-test [xmind=<path>] [yaml=<path>] [module=<name>] [scope=staged|all]
+/integration-test [xmind=<path>] [yaml=<path>]
 ```
 
-### 参数
+> 流水线参数（`module`、`scope`）不再通过命令行传入，改为 Pre-flight 阶段通过 `AskUserQuestion` 主动询问用户。若用户输入中已包含参数值（如 `/integration-test scope=staged`）则跳过对应询问。`xmind` 和 `yaml` 也可在 Pre-flight 交互选择。
+
+### 参数（Pre-flight 交互收集）
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -56,12 +58,18 @@ skill: ahe-observer
    ```
    若非 git 仓库 → 提示「/integration-test 需要在 git 仓库中运行」并终止。
 
-2. 校验测试用例输入：
+2. **交互收集参数**：若用户未在命令中指定以下参数，通过 `AskUserQuestion` 依次询问：
+   - **测试用例来源**（若 `xmind` 和 `yaml` 均未传入且 `.ai/integration-test/{branch}/test_case_input` 不存在）：「未指定测试用例来源。(A) 提供 xmind 路径 (B) 提供 yaml 路径 (C) 取消」
+   - **scope**：「请选择改动范围。(A) all — 暂存 + 未暂存 (B) staged — 仅暂存区」
+     - 默认 `all`，用户选 B 时 `scope=staged`
+   - **module**（若无法自动推断）：「请指定目标模块名」
+
+3. 校验测试用例输入：
    - `xmind=<path>` 且文件存在 → 复制到 `.ai/integration-test/{branch}/test_case_input`，标记 `input_type=xmind`
    - `yaml=<path>` 且文件存在 → 复制到 `.ai/integration-test/{branch}/test_case_input`，标记 `input_type=yaml`
-   - 均未传入 → 检查 `.ai/integration-test/{branch}/test_case_input` 是否存在（复用上次），若无则 AskQuestion：「未指定测试用例来源。(A) 提供 xmind 路径 (B) 提供 yaml 路径 (C) 取消」
+   - 均未传入 → 检查 `.ai/integration-test/{branch}/test_case_input` 是否存在（复用上次），若无则已在上一步 AskQuestion 处理
 
-3. 获取改动文件：
+4. 获取改动文件：
    ```bash
    BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')
 
@@ -74,9 +82,9 @@ skill: ahe-observer
    git diff --cached --name-only
    ```
 
-4. 若改动文件列表为空 → AskQuestion：「未检测到任何改动文件。(A) 指定 scope=staged 查看暂存区 (B) 手动输入文件路径 (C) 取消」
+5. 若改动文件列表为空 → AskQuestion：「未检测到任何改动文件。(A) 指定 scope=staged 查看暂存区 (B) 手动输入文件路径 (C) 取消」
 
-5. 写入契约文件并展示执行计划：
+6. 写入契约文件并展示执行计划：
    ```bash
    mkdir -p .ai/integration-test/{branch}
    # 将改动文件列表写入 changed_files.txt
@@ -92,7 +100,7 @@ skill: ahe-observer
    → Phase 2: 执行集成测试（test-runner-agent）
    → Retry Loop（MAX=3，失败时 debugger-agent 最小化修复代码）」
 
-6. **AHE 轨迹初始化**：
+7. **AHE 轨迹初始化**：
    ```bash
    mkdir -p .ai/harness-trace
    python3 -c "
@@ -115,7 +123,7 @@ skill: ahe-observer
    ```
    > **AHE**: Observer Skill 读取此文件，在 Command 执行完毕后生成轨迹。
 
-7. **AHE Pre-flight 完成标记**：
+8. **AHE Pre-flight 完成标记**：
    ```bash
    python3 -c "
    import json, time

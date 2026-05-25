@@ -58,9 +58,11 @@ skill: ahe-observer
 ## Command Format
 
 ```
-/modify <变更描述> [module=xxx] [from=implement] [mode=fast] [unit_test=off] [inte_test=on]
-/modify change_card=<path> [mode=fast] [unit_test=off] [inte_test=on]
+/modify <变更描述>
+/modify change_card=<path>
 ```
+
+> 流水线控制参数（`mode`、`unit_test`、`inte_test`）不再通过命令行传入，改为 Pre-flight 阶段通过 `AskUserQuestion` 主动询问用户。若用户输入中已包含参数值（如 `/modify xxx mode=fast`）则跳过对应询问。
 
 ### 输入参数
 
@@ -76,7 +78,7 @@ skill: ahe-observer
 | `module` | 自动推断 | 模块名。未传入时从变更描述或分支名推断 |
 | `from` | - | `implement` 时从 `task_card.json` 读取接口上下文，导入 `existing_interfaces` |
 
-### 流水线控制参数
+### 流水线控制参数（Pre-flight 交互收集）
 
 | 参数 | 默认值 | 取值 | 说明 |
 |------|--------|------|------|
@@ -92,11 +94,14 @@ skill: ahe-observer
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`，`module` 未传入时自动推断
 3. 传入 `change_card=...` 且文件存在 → 跳过 Phase 0
 4. `from=implement` → 从 `.ai/implement/{module}/{branch}/task_card.json` 读取接口上下文，导入 `existing_interfaces`，复用已有测试文件
-5. 解析运行模式，向用户确认流水线配置：
-   - `mode=fast` → 跳过 Phase 2 GAN 审查
-   - `unit_test=off` → 跳过 Phase 3 单元测试；`unit_test={router_name}` → Phase 3 仅运行 `tests/{router_name}/`
-   - `inte_test=on` → 追加 Phase 3c 集成测试回归（若存在 `tests/{branch}/{module}_api_test.py`）；`inte_test={module_name}` → 仅运行指定模块的集成测试
-6. 告知用户流水线路径：
+5. **交互收集流水线控制参数**：若用户未在命令中指定以下参数，通过 `AskUserQuestion` 依次询问：
+   - **mode**：「请选择运行模式。(A) 完整模式 — 变更分析 → 代码修改 → GAN 审查 → 单元测试 (B) 快速模式 — 跳过 GAN 审查，省 30-40% Token」
+     - 默认 `full`，用户选 B 时 `mode=fast`
+   - **unit_test**：「是否执行单元测试？(A) 是，全部 (B) 否，跳过 (C) 仅指定 router」
+     - 默认 `on`，选 B 时 `unit_test=off`，选 C 时追问 router 名
+   - **inte_test**：「是否启用集成测试回归？(A) 否，跳过（modify 为局部变更，默认关闭）(B) 是，测试文件存在时自动触发 (C) 仅指定模块」
+     - 默认 `off`，选 B 时 `inte_test=on`，选 C 时追问模块名
+6. 向用户确认并展示流水线路径：
    - 完整模式（默认）：「变更分析 → 代码修改 → GAN 审查 → 单元测试。关键节点暂停确认」
    - 快速模式（mode=fast）：「变更分析 → 代码修改 → 单元测试」
    - 根据 unit_test/inte_test 开关动态裁剪路径展示
@@ -185,6 +190,17 @@ mkdir -p .ai/modify/{module}/{branch}
 ### Phase 2: GAN 对抗审查（Discriminator Round 1）
 
 **Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
+
+**🔴 动态范围判断（AI 不可替用户做主 — 红线）**:
+若 `mode=full`，进入审查前先检查改动范围：
+1. 读取 `changed_files.txt`，统计改动文件数和改动行数（`git diff --stat`）
+2. 若改动范围较小（如 ≤ 2 个文件且改动行数较少），必须通过 `AskUserQuestion` 主动询问用户：
+   > 「本次变更改动范围较小（仅 N 个文件，约 M 行变更）。GAN 审查环节将耗费较多 Token（约 30-40%），是否跳过审查直接进入单元测试？
+   > (A) 跳过审查，进入单元测试
+   > (B) 继续完整审查流程」
+3. 用户选 A → 按 `mode=fast` 处理，跳过 Phase 2，报告中标注「⚡ 用户确认跳过 — 改动范围较小」
+4. 用户选 B → 正常执行 Phase 2
+5. **严禁 AI 自行判断并跳过审查，必须等待用户明确选择。这是红线。**
 
 **Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
 > ⛔ **MANDATORY DELEGATION**: 本步骤必须同时委托两个 Sub-agent 并行执行审查。
@@ -335,6 +351,7 @@ modify: {变更描述一句话}
 - **歧义必须停下**: 遇到缺失/歧义暂停确认，禁止猜测
 
 ### 禁止行为（无论任务复杂度如何，一律适用）
+- 🔴 **红线**：禁止 AI 自行判断「改动范围小」而跳过 GAN 审查——即便改动仅 1 行也必须通过 `AskUserQuestion` 由用户决定是否跳过。AI 不可替用户做主
 - 禁止以「任务简单」「改动很小」为由跳过标注 (Sub-agent) 的步骤
 - 禁止 Planner 自行执行代码修改、审查或测试（即便能力上可行）
 - 禁止自动通过 HARD STOP 卡点，必须等待用户明确响应

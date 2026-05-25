@@ -33,10 +33,12 @@ skill: ahe-observer
 ## Command Format
 
 ```
-/unit-test [scope=staged|all] [router=<name>]
+/unit-test
 ```
 
-### 参数
+> 启动参数（`scope`、`router`）不再通过命令行传入，改为 Pre-flight 阶段通过 `AskUserQuestion` 主动询问用户。若用户输入中已包含参数值（如 `/unit-test scope=staged`）则跳过对应询问。
+
+### 参数（Pre-flight 交互收集）
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -51,7 +53,13 @@ skill: ahe-observer
    ```
    若非 git 仓库 → 提示「/unit-test 需要在 git 仓库中运行」并终止。
 
-2. 获取改动文件：
+2. **交互收集参数**：若用户未在命令中指定以下参数，通过 `AskUserQuestion` 依次询问：
+   - **scope**：「请选择改动范围。(A) all — 暂存 + 未暂存 (B) staged — 仅暂存区」
+     - 默认 `all`，用户选 B 时 `scope=staged`
+   - **router**（可选）：「是否限定测试范围到某个 router？(A) 不限，覆盖所有涉及的 router (B) 指定 router」
+     - 默认不限定（自动推断），选 B 时追问 router 名
+
+3. 获取改动文件：
    ```bash
    BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')
 
@@ -64,15 +72,15 @@ skill: ahe-observer
    git diff --cached --name-only
    ```
 
-3. 若 `changed_files.txt` 为空 → AskQuestion：「未检测到任何改动文件。(A) 指定 scope=staged 查看暂存区 (B) 手动输入文件路径 (C) 取消」
+4. 若 `changed_files.txt` 为空 → AskQuestion：「未检测到任何改动文件。(A) 指定 scope=staged 查看暂存区 (B) 手动输入文件路径 (C) 取消」
 
-4. 若传入 `router=<name>`，过滤改动列表只保留包含 `routers/{name}` 的文件（及其对应 service/dao/schema）。
+5. 若指定了 `router`，过滤改动列表只保留包含 `routers/{name}` 的文件（及其对应 service/dao/schema）。
 
-5. 检查改动文件中是否包含 router 相关文件（`*router*.py` 或 `*routers*`）：
+6. 检查改动文件中是否包含 router 相关文件（`*router*.py` 或 `*routers*`）：
    - **包含** → 正常继续
    - **不包含** → AskQuestion：「改动文件中未检测到 router 文件（变更可能在 service/dao 层）。unit-test-gen-agent 将从改动文件推导测试入口，可能覆盖范围有限。(A) 继续 (B) 取消」
 
-6. 写入契约文件并展示执行计划：
+7. 写入契约文件并展示执行计划：
    ```bash
    mkdir -p .ai/unit-test/{branch}
    # 将改动文件列表写入 changed_files.txt
@@ -83,7 +91,7 @@ skill: ahe-observer
    → Phase 1: 生成测试（unit-test-gen-agent）
    → Phase 2: 执行测试（test-runner-agent）
    → Retry Loop（MAX=3，失败时 debugger-agent 最小化修复代码）」
-7. **AHE 轨迹初始化**：
+8. **AHE 轨迹初始化**：
    ```bash
    mkdir -p .ai/harness-trace
    python3 -c "
@@ -105,7 +113,7 @@ skill: ahe-observer
    "
    ```
    > **AHE**: Observer Skill 读取此文件，在 Command 执行完毕后生成轨迹。
-8. **AHE Pre-flight 完成标记**：
+9. **AHE Pre-flight 完成标记**：
    ```bash
    python3 -c "
    import json, time

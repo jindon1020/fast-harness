@@ -50,10 +50,12 @@ skill: ahe-observer
 ## Command Format
 
 ```
-/refactor <重构目标描述> [module=xxx] [scope=app/services/] [mode=fast] [unit_test=off] [inte_test=off]
-/refactor from=implement [module=xxx] [mode=fast] [unit_test=off] [inte_test=off]
-/refactor plan=<path> [mode=fast] [unit_test=off] [inte_test=off]
+/refactor <重构目标描述>
+/refactor from=implement
+/refactor plan=<path>
 ```
+
+> 流水线控制参数（`mode`、`unit_test`、`inte_test`、`scope`）不再通过命令行传入，改为 Pre-flight 阶段通过 `AskUserQuestion` 主动询问用户。若用户输入中已包含参数值（如 `/refactor xxx mode=fast`）则跳过对应询问。
 
 ### 输入参数
 
@@ -68,9 +70,9 @@ skill: ahe-observer
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `module` | 自动推断 | 模块名。未传入时从重构描述或分支名推断 |
-| `scope` | - | 限定重构扫描范围（目录或文件路径），缩小诊断和改动边界 |
+| `scope` | - | 限定重构扫描范围（目录或文件路径），缩小诊断和改动边界。未传入时 Pre-flight 通过 AskUserQuestion 询问 |
 
-### 流水线控制参数
+### 流水线控制参数（Pre-flight 交互收集）
 
 | 参数 | 默认值 | 取值 | 说明 |
 |------|--------|------|------|
@@ -85,11 +87,16 @@ skill: ahe-observer
 1. 检查参数：至少需要重构目标描述或审查反馈文件
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`
 3. `from=implement` → 从 `.ai/implement/{module}/{branch}/review_feedback.md` 读取 Improvements/Nitpicks + task_card.json 上下文 + 复用已有测试文件
-4. 解析运行模式，向用户确认流水线配置：
-   - `mode=fast` → 跳过 Phase 4 质量审计
-   - `unit_test=off` → Phase 1/3 跳过单元测试基线采集与行为验证；`unit_test={module_name}` → 仅运行指定模块的单元测试
-   - `inte_test=off` → Phase 1/3 跳过集成测试基线采集与行为验证；`inte_test={module_name}` → 仅运行指定模块的集成测试
-5. 告知用户流水线路径：
+4. **交互收集流水线控制参数**：若用户未在命令中指定以下参数，通过 `AskUserQuestion` 依次询问：
+   - **scope**（若未传入）：「是否限定重构范围？(A) 不限，全局扫描 (B) 限定目录或文件」
+     - 默认不限，选 B 时追问具体路径（如 `app/services/`）
+   - **mode**：「请选择运行模式。(A) 完整模式 — 范围定义 → 基线快照 → 批量重构 → 行为验证 → 质量审计 (B) 快速模式 — 跳过质量审计，适用于 rename/move 等低风险重构」
+     - 默认 `full`，用户选 B 时 `mode=fast`
+   - **unit_test**：「是否执行单元测试基线与验证？(A) 是，全部 (B) 否，跳过 (C) 仅指定模块」
+     - 默认 `on`，选 B 时 `unit_test=off`，选 C 时追问模块名
+   - **inte_test**：「是否执行集成测试基线与验证？(A) 是，测试文件存在时自动纳入基线 (B) 否，跳过 (C) 仅指定模块」
+     - 默认 `on`，选 B 时 `inte_test=off`，选 C 时追问模块名
+5. 向用户确认并展示流水线路径：
    - 完整模式（默认）：「范围定义 → 基线快照 → 批量重构 → 行为验证 → 质量审计。**不会改变任何接口外部行为**」
    - 快速模式（mode=fast）：「范围定义 → 基线快照 → 批量重构 → 行为验证。**不会改变任何接口外部行为**」
    - 根据 unit_test/inte_test 开关动态裁剪基线采集和验证范围
