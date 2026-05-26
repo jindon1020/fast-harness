@@ -20,9 +20,15 @@ HOOK_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 [[ -f "$MANIFEST" ]] || exit 0
 
 # ----- 获取本次 commit 改动的文件列表 -----
-# 支持：git diff --name-only HEAD~1 HEAD   （post-commit 时 HEAD 就是刚提交的 commit）
-COMMIT_RANGE="${1:-HEAD~1..HEAD}"
-CHANGED_FILES=$(git diff --name-only "$COMMIT_RANGE" 2>/dev/null || echo "")
+# --staged 模式：pre-commit 钩子，取暂存区文件
+# 默认：post-commit 模式，取最后一次 commit 的变更
+if [[ "${1:-}" == "--staged" ]]; then
+    CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null || echo "")
+    echo "[wiki-update] Pre-commit mode: checking staged files"
+else
+    COMMIT_RANGE="${1:-HEAD~1..HEAD}"
+    CHANGED_FILES=$(git diff --name-only "$COMMIT_RANGE" 2>/dev/null || echo "")
+fi
 
 [[ -z "$CHANGED_FILES" ]] && exit 0
 

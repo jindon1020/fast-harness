@@ -420,25 +420,44 @@ MDRULE
         skip "$rule_file"
     fi
 
-    # 创建 git post-commit hook（wiki 自动更新）
+    # 创建 git pre-commit hook（wiki 自动更新）
     if [[ -d "$PROJECT_DIR/.git" ]]; then
-        local post_commit_hook="$PROJECT_DIR/.git/hooks/post-commit"
-        if [[ ! -f "$post_commit_hook" ]]; then
-            cat > "$post_commit_hook" << 'POSTHOOK'
+        local pre_commit_hook="$PROJECT_DIR/.git/hooks/pre-commit"
+        if [[ -f "$pre_commit_hook" ]]; then
+            if grep -qF "fast-harness" "$pre_commit_hook" 2>/dev/null; then
+                # 已存在我们的 hook，更新它
+                local backup="$pre_commit_hook.backup.fast-harness.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                ok "已备份原有 pre-commit → $(basename "$backup")"
+            else
+                # 存在非 fast-harness 的 hook，备份后覆盖
+                local backup="$pre_commit_hook.backup.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                warn "已有 pre-commit hook 已备份到 $(basename "$backup")，将被覆盖"
+            fi
+        fi
+        cat > "$pre_commit_hook" << 'PREHOOK'
 #!/bin/bash
-# fast-harness wiki auto-update hook
+# fast-harness wiki auto-update hook (pre-commit)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 
-if [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
-    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" HEAD~1..HEAD
+# 优先使用 .cursor/hooks，fallback 到 .claude/hooks
+if [[ -f "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" --staged
+elif [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" --staged
 fi
-POSTHOOK
-            chmod +x "$post_commit_hook"
-            ok "创建: .git/hooks/post-commit (wiki 自动更新)"
-        else
-            skip ".git/hooks/post-commit (已存在)"
-        fi
+
+# 标记过期的 MANIFEST.json 变更一并纳入本次 commit
+if [[ -f "$PROJECT_ROOT/.wiki/MANIFEST.json" ]]; then
+    git -C "$PROJECT_ROOT" add .wiki/MANIFEST.json 2>/dev/null || true
+fi
+
+exit 0
+PREHOOK
+        chmod +x "$pre_commit_hook"
+        ok "创建: .git/hooks/pre-commit (wiki 自动更新)"
     fi
 
     # 若启用 --wiki-llm，配置 WIKI_AUTO_LLM_UPDATE 环境变量
@@ -604,28 +623,42 @@ MDRULE
         skip "$rule_file"
     fi
 
-    # 创建 git post-commit hook（wiki 自动更新）- Cursor 也使用相同逻辑
+    # 创建 git pre-commit hook（wiki 自动更新）
     if [[ -d "$PROJECT_DIR/.git" ]]; then
-        local post_commit_hook="$PROJECT_DIR/.git/hooks/post-commit"
-        if [[ ! -f "$post_commit_hook" ]]; then
-            cat > "$post_commit_hook" << 'POSTHOOK'
+        local pre_commit_hook="$PROJECT_DIR/.git/hooks/pre-commit"
+        if [[ -f "$pre_commit_hook" ]]; then
+            if grep -qF "fast-harness" "$pre_commit_hook" 2>/dev/null; then
+                local backup="$pre_commit_hook.backup.fast-harness.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                ok "已备份原有 pre-commit → $(basename "$backup")"
+            else
+                local backup="$pre_commit_hook.backup.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                warn "已有 pre-commit hook 已备份到 $(basename "$backup")，将被覆盖"
+            fi
+        fi
+        cat > "$pre_commit_hook" << 'PREHOOK'
 #!/bin/bash
-# fast-harness wiki auto-update hook
+# fast-harness wiki auto-update hook (pre-commit)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 
-# 优先使用 .cursor/hooks，fallback 到 .claude/hooks，再 fallback 到 .qoder 不支持 hooks
+# 优先使用 .cursor/hooks，fallback 到 .claude/hooks
 if [[ -f "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" ]]; then
-    bash "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" HEAD~1..HEAD
+    bash "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" --staged
 elif [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
-    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" HEAD~1..HEAD
+    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" --staged
 fi
-POSTHOOK
-            chmod +x "$post_commit_hook"
-            ok "创建: .git/hooks/post-commit (wiki 自动更新)"
-        else
-            skip ".git/hooks/post-commit (已存在)"
-        fi
+
+# 标记过期的 MANIFEST.json 变更一并纳入本次 commit
+if [[ -f "$PROJECT_ROOT/.wiki/MANIFEST.json" ]]; then
+    git -C "$PROJECT_ROOT" add .wiki/MANIFEST.json 2>/dev/null || true
+fi
+
+exit 0
+PREHOOK
+        chmod +x "$pre_commit_hook"
+        ok "创建: .git/hooks/pre-commit (wiki 自动更新)"
     fi
 }
 
@@ -712,6 +745,44 @@ MDRULE
         ok "创建: $rule_file"
     else
         skip "$rule_file"
+    fi
+
+    # 创建 git pre-commit hook（wiki 自动更新）
+    if [[ -d "$PROJECT_DIR/.git" ]]; then
+        local pre_commit_hook="$PROJECT_DIR/.git/hooks/pre-commit"
+        if [[ -f "$pre_commit_hook" ]]; then
+            if grep -qF "fast-harness" "$pre_commit_hook" 2>/dev/null; then
+                local backup="$pre_commit_hook.backup.fast-harness.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                ok "已备份原有 pre-commit → $(basename "$backup")"
+            else
+                local backup="$pre_commit_hook.backup.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                warn "已有 pre-commit hook 已备份到 $(basename "$backup")，将被覆盖"
+            fi
+        fi
+        cat > "$pre_commit_hook" << 'PREHOOK'
+#!/bin/bash
+# fast-harness wiki auto-update hook (pre-commit)
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+# 优先使用 .cursor/hooks，fallback 到 .claude/hooks
+if [[ -f "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" --staged
+elif [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" --staged
+fi
+
+# 标记过期的 MANIFEST.json 变更一并纳入本次 commit
+if [[ -f "$PROJECT_ROOT/.wiki/MANIFEST.json" ]]; then
+    git -C "$PROJECT_ROOT" add .wiki/MANIFEST.json 2>/dev/null || true
+fi
+
+exit 0
+PREHOOK
+        chmod +x "$pre_commit_hook"
+        ok "创建: .git/hooks/pre-commit (wiki 自动更新)"
     fi
 }
 
