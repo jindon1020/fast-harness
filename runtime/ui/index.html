@@ -366,6 +366,36 @@ body::before {
 .ask-question-answered {
   opacity: 0.7;
 }
+.ask-question-submit {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.ask-question-submit:hover { opacity: 0.88; }
+.ask-question-submit:disabled { opacity: 0.35; cursor: not-allowed; }
+.ask-question-submitted {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--success);
+  background: transparent;
+  color: var(--success);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  text-align: center;
+}
 
 .branch-select {
   background: var(--bg-elevated); border: 1px solid var(--border-v);
@@ -838,8 +868,7 @@ let state = {
   repositories: [],
   defaultBranches: [],
   capabilities: null,
-  abortController: null,
-  streaming: false,
+  sessionStreams: {},
   panelOpen: false,
   panelTab: "capabilities",
   commandSuggestions: [],
@@ -965,7 +994,7 @@ async function selectSession(id) {
   }
   renderSessions();
   promptInput.disabled = false;
-  btnSend.disabled = false;
+  updateSendButton();
   const ws = getActiveWorkspace();
   inputHint.textContent = `${ws?.name || "Workspace"} · ${session?.metadata?.repo_name || "repo"} · ${session?.metadata?.branch || "branch"}`;
   toolbarTitle.textContent = `Session · ${session?.name || id} · ${session?.metadata?.branch || "branch"}`;
@@ -1003,11 +1032,14 @@ function renderHistoryMessage(msg) {
 async function deleteSession(e, id) {
   e.stopPropagation();
   if (!confirm("Delete session " + id + "?")) return;
+  const stream = getSessionStream(id);
+  if (stream?.abortController) stream.abortController.abort();
+  stopStreaming(id);
   await api("DELETE", "/sessions/" + id);
   if (state.activeSession === id) {
     state.activeSession = null;
     promptInput.disabled = true;
-    btnSend.disabled = true;
+    updateSendButton();
     inputHint.textContent = "No session selected";
     toolbarTitle.textContent = "Select or create a session";
     chatEmpty.style.display = "flex";
@@ -1147,12 +1179,17 @@ async function deleteWorkspace(e, id) {
   e.stopPropagation();
   const ws = state.workspaces.find(w => w.workspace_id === id);
   if (!confirm(`Delete workspace "${ws?.name || id}" and its sessions?`)) return;
+  for (const session of state.sessions.filter(s => s.metadata?.workspace_id === id)) {
+    const stream = getSessionStream(session.session_id);
+    if (stream?.abortController) stream.abortController.abort();
+    stopStreaming(session.session_id);
+  }
   await api("DELETE", "/workspaces/" + id);
   if (state.activeWorkspace === id) state.activeWorkspace = null;
   if (state.activeSession && state.sessions.find(s => s.session_id === state.activeSession)?.metadata?.workspace_id === id) {
     state.activeSession = null;
     promptInput.disabled = true;
-    btnSend.disabled = true;
+    updateSendButton();
     chatEmpty.style.display = "flex";
     chatInner.style.display = "none";
   }
@@ -1536,33 +1573,142 @@ function createAskBlock(block) {
   const div = document.createElement("div");
   div.className = "ask-question-block";
   div.dataset.toolUseId = block.id;
-  let html = '<div class="ask-question-block__title">💬 Claude needs your input:</div>';
+  div.dataset.answers = JSON.stringify({});
+
+  const title = document.createElement("div");
+  title.className = "ask-question-block__title";
+  title.textContent = "Claude needs your input:";
+  div.appendChild(title);
+
   for (const q of (block.questions || [])) {
     const qText = q.question || q.header || "";
-    html += `<div class="ask-question-item"><div class="ask-question-item__q">${escapeHtml(qText)}</div><div class="ask-question-opts">`;
+    const item = document.createElement("div");
+    item.className = "ask-question-item";
+    item.dataset.question = qText;
+    item.dataset.multiSelect = q.multiSelect ? "true" : "false";
+
+    const questionEl = document.createElement("div");
+    questionEl.className = "ask-question-item__q";
+    questionEl.textContent = qText;
+    item.appendChild(questionEl);
+
+    const optsEl = document.createElement("div");
+    optsEl.className = "ask-question-opts";
     for (const opt of (q.options || [])) {
-      html += `<button class="ask-question-opt" data-question="${escapeHtml(qText)}" data-answer="${escapeHtml(opt.label)}" onclick="selectAskOption(this, '${escapeHtml(qText)}', '${escapeHtml(opt.label)}')">${escapeHtml(opt.label)}</button>`;
+      const label = String(opt.label || "");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ask-question-opt";
+      btn.dataset.answer = label;
+      btn.textContent = label;
+      if (opt.description) btn.title = opt.description;
+      btn.addEventListener("click", () => selectAskOption(btn));
+      optsEl.appendChild(btn);
     }
-    html += '</div><div class="ask-question-answer" style="display:none"></div></div>';
+    item.appendChild(optsEl);
+
+    const answerEl = document.createElement("div");
+    answerEl.className = "ask-question-answer";
+    answerEl.style.display = "none";
+    item.appendChild(answerEl);
+    div.appendChild(item);
   }
-  div.innerHTML = html;
+
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "ask-question-submit";
+  submitBtn.textContent = "Submit Answers";
+  submitBtn.disabled = true;
+  submitBtn.addEventListener("click", () => submitAskAnswers(div));
+  div.appendChild(submitBtn);
+
   return div;
 }
 
-function selectAskOption(btn, question, answer) {
-  // Highlight selected
-  const opts = btn.parentElement.querySelectorAll(".ask-question-opt");
-  opts.forEach(o => o.classList.remove("ask-question-opt--selected"));
-  btn.classList.add("ask-question-opt--selected");
-  // Show answer
-  const answerEl = btn.parentElement.nextElementSibling;
-  if (answerEl) {
-    answerEl.style.display = "inline-block";
-    answerEl.textContent = "✓ " + answer;
+function selectAskOption(btn) {
+  const item = btn.closest(".ask-question-item");
+  const block = btn.closest(".ask-question-block");
+  if (!item || !block) return;
+
+  const question = item.dataset.question || "";
+  const answer = btn.dataset.answer || "";
+  const multiSelect = item.dataset.multiSelect === "true";
+  const opts = item.querySelectorAll(".ask-question-opt");
+  if (multiSelect) {
+    btn.classList.toggle("ask-question-opt--selected");
+  } else {
+    opts.forEach(o => o.classList.remove("ask-question-opt--selected"));
+    btn.classList.add("ask-question-opt--selected");
   }
-  // Mark block as answered
-  btn.closest(".ask-question-block").classList.add("ask-question-answered");
-  // TODO: send answer to server via POST /api/sessions/{id}/answer
+
+  const selectedAnswers = Array.from(opts)
+    .filter(o => o.classList.contains("ask-question-opt--selected"))
+    .map(o => o.dataset.answer || "")
+    .filter(Boolean);
+
+  const answerEl = item.querySelector(".ask-question-answer");
+  if (answerEl) {
+    answerEl.style.display = selectedAnswers.length ? "inline-block" : "none";
+    answerEl.textContent = selectedAnswers.length ? "✓ " + selectedAnswers.join(", ") : "";
+  }
+
+  const answers = JSON.parse(block.dataset.answers || "{}");
+  if (selectedAnswers.length) {
+    answers[question] = multiSelect ? selectedAnswers : answer;
+  } else {
+    delete answers[question];
+  }
+  block.dataset.answers = JSON.stringify(answers);
+
+  const totalQuestions = block.querySelectorAll(".ask-question-item").length;
+  const submitBtn = block.querySelector(".ask-question-submit");
+  if (submitBtn) {
+    submitBtn.disabled = Object.keys(answers).length < totalQuestions;
+  }
+  block.classList.toggle("ask-question-answered", Object.keys(answers).length > 0);
+}
+
+async function submitAskAnswers(block) {
+  if (!state.activeSession) return;
+  const toolUseId = block.dataset.toolUseId;
+  const answers = JSON.parse(block.dataset.answers || "{}");
+  const entries = Object.entries(answers);
+  if (!entries.length) return;
+
+  const submitBtn = block.querySelector(".ask-question-submit");
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Submitting...";
+  }
+
+  try {
+    await api("POST", `/sessions/${state.activeSession}/answer`, {
+      answers: entries.map(([question, answer]) => ({
+        question,
+        answer,
+        tool_use_id: toolUseId,
+      })),
+    });
+    // Replace submit button with success indicator
+    if (submitBtn) {
+      submitBtn.style.display = "none";
+      const confirmed = document.createElement("div");
+      confirmed.className = "ask-question-submitted";
+      confirmed.textContent = "✓ Answers submitted — Claude is processing";
+      block.appendChild(confirmed);
+    }
+    // Disable all option buttons
+    block.querySelectorAll(".ask-question-opt").forEach(btn => {
+      btn.disabled = true;
+      btn.style.pointerEvents = "none";
+    });
+  } catch (e) {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit Answers";
+    }
+    alert("Failed to submit answers: " + e.message);
+  }
 }
 
 function addSystemMessage(text) { addMessage("system", { text }); }
@@ -1742,40 +1888,69 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
-let currentMsgEl = null;
+function getSessionStream(sessionId) {
+  return state.sessionStreams[sessionId] || null;
+}
+
+function isSessionStreaming(sessionId) {
+  return !!getSessionStream(sessionId)?.streaming;
+}
+
+function updateSendButton() {
+  const hasSession = !!state.activeSession;
+  promptInput.disabled = !hasSession;
+  btnSend.disabled = !hasSession;
+  if (!hasSession) {
+    btnSend.textContent = "↑";
+    btnSend.classList.remove("btn-send--stop");
+    return;
+  }
+  if (isSessionStreaming(state.activeSession)) {
+    btnSend.textContent = "■";
+    btnSend.classList.add("btn-send--stop");
+  } else {
+    btnSend.textContent = "↑";
+    btnSend.classList.remove("btn-send--stop");
+  }
+}
 
 async function sendPrompt() {
+  const sessionId = state.activeSession;
   const prompt = promptInput.value.trim();
-  if (!prompt || !state.activeSession || state.streaming) return;
+  if (!prompt || !sessionId || isSessionStreaming(sessionId)) return;
   hideCommandSuggestions();
-
-  // Stop existing stream
-  if (state.abortController) { state.abortController.abort(); }
 
   promptInput.value = "";
   promptInput.style.height = "auto";
-  state.streaming = true;
-  btnSend.textContent = "■";
-  btnSend.classList.add("btn-send--stop");
-  state.abortController = new AbortController();
+  const stream = {
+    streaming: true,
+    abortController: new AbortController(),
+    messageEl: null,
+    textEl: null,
+  };
+  state.sessionStreams[sessionId] = stream;
+  updateSendButton();
 
   // Show user message
-  renderUserPrompt(prompt);
-  scrollToBottom();
+  if (state.activeSession === sessionId) {
+    renderUserPrompt(prompt);
+    scrollToBottom();
+  }
 
   // Create streaming message container
-  currentMsgEl = document.createElement("div");
-  currentMsgEl.className = "msg";
-  chatInner.appendChild(currentMsgEl);
-  let textEl = null;
+  if (state.activeSession === sessionId) {
+    stream.messageEl = document.createElement("div");
+    stream.messageEl.className = "msg";
+    chatInner.appendChild(stream.messageEl);
+  }
 
-  const url = API + "/sessions/" + state.activeSession + "/query";
+  const url = API + "/sessions/" + sessionId + "/query";
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
-      signal: state.abortController.signal,
+      signal: stream.abortController.signal,
     });
 
     const reader = res.body.getReader();
@@ -1793,42 +1968,39 @@ async function sendPrompt() {
         if (line.startsWith("data: ")) {
           try {
             const msg = JSON.parse(line.slice(6));
-            handleStreamMessage(msg, currentMsgEl, textEl);
-            if (msg.type === "assistant") {
-              for (const block of (msg.content || [])) {
-                if (block.type === "text") {
-                  if (!textEl) {
-                    textEl = document.createElement("div");
-                    textEl.className = "msg__text";
-                    currentMsgEl.appendChild(textEl);
-                    textEl._html = "";
-                  }
-                }
+            if (state.activeSession === sessionId) {
+              if (!stream.messageEl || !stream.messageEl.isConnected) {
+                stream.messageEl = document.createElement("div");
+                stream.messageEl.className = "msg";
+                stream.textEl = null;
+                chatInner.appendChild(stream.messageEl);
               }
+              stream.textEl = handleStreamMessage(msg, stream.messageEl, stream.textEl);
             }
           } catch (e) { /* skip parse errors */ }
         }
       }
     }
   } catch (e) {
-    if (e.name !== "AbortError") {
+    if (e.name !== "AbortError" && state.activeSession === sessionId) {
       addErrorMessage(e.message);
     }
   }
 
-  stopStreaming();
+  stopStreaming(sessionId);
 }
 
 function handleStreamMessage(msg, container, textEl) {
+  if (!container) return textEl;
   // system/init — show a compact startup line
   if (msg.type === "system" && msg.subtype === "init") {
     const div = document.createElement("div");
     div.className = "msg msg--system";
     div.textContent = `session · ${msg.session_id?.slice(0,8) || "?"} | model · ${msg.model || "?"} | cwd · ${msg.cwd || "?"}`;
     container.appendChild(div);
-    return;
+    return textEl;
   }
-  if (msg.type === "system") return; // skip other system messages
+  if (msg.type === "system") return textEl; // skip other system messages
 
   // tool_results — update corresponding tool block with result
   if (msg.type === "tool_results" && msg.content) {
@@ -1843,7 +2015,7 @@ function handleStreamMessage(msg, container, textEl) {
         }
       }
     }
-    return;
+    return textEl;
   }
 
   if (msg.type === "assistant") {
@@ -1890,14 +2062,20 @@ function handleStreamMessage(msg, container, textEl) {
     container.remove();
   }
   scrollToBottom();
+  return textEl;
 }
 
-function stopStreaming() {
-  state.streaming = false;
-  btnSend.textContent = "↑";
-  btnSend.classList.remove("btn-send--stop");
-  if (state.abortController) { state.abortController = null; }
-  currentMsgEl = null;
+function stopStreaming(sessionId = state.activeSession) {
+  if (!sessionId) return;
+  const stream = getSessionStream(sessionId);
+  if (stream) {
+    stream.streaming = false;
+    stream.abortController = null;
+    stream.messageEl = null;
+    stream.textEl = null;
+    delete state.sessionStreams[sessionId];
+  }
+  if (state.activeSession === sessionId) updateSendButton();
 }
 
 /* ═══════════════════════ PANEL ═══════════════════════ */
@@ -2153,9 +2331,10 @@ promptInput.addEventListener("keydown", (e) => {
 
 $("#btnAddWs").addEventListener("click", createWorkspace);
 btnSend.addEventListener("click", () => {
-  if (state.streaming) {
-    if (state.abortController) state.abortController.abort();
-    stopStreaming();
+  const stream = getSessionStream(state.activeSession);
+  if (stream?.streaming) {
+    if (stream.abortController) stream.abortController.abort();
+    stopStreaming(state.activeSession);
   } else {
     sendPrompt();
   }

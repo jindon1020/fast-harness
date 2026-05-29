@@ -105,6 +105,21 @@ class CapabilityResponse(BaseModel):
     skills: list[dict]
 
 
+class AnswerEntry(BaseModel):
+    question: str
+    answer: str | list[str]
+    tool_use_id: str
+
+
+class AnswerRequest(BaseModel):
+    answers: list[AnswerEntry] = Field(..., min_length=1)
+
+
+class AnswerResponse(BaseModel):
+    status: str
+    answered: int
+
+
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None

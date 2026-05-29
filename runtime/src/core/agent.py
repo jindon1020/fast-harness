@@ -2,8 +2,11 @@
 Agent session manager — wraps the Claude Agent SDK query().
 """
 
+import asyncio
 import logging
 import os
+import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
@@ -20,6 +23,7 @@ from claude_agent_sdk import (
     ToolResultBlock,
     ThinkingBlock,
 )
+from claude_agent_sdk.types import HookMatcher, PermissionResultAllow
 
 from src.config import settings
 from src.core.session import session_store
@@ -66,8 +70,16 @@ def resolve_session_repo_path(session_id: str) -> Path:
     rec = session_store.get(session_id)
     if not rec or not rec.get("workspace"):
         raise RuntimeError(f"Session has no bound workspace: {session_id}")
-    workspace_id = rec.get("metadata", {}).get("workspace_id")
-    repo_name = rec.get("metadata", {}).get("repo_name")
+    metadata = rec.get("metadata", {})
+    session_repo_path = metadata.get("session_repo_path")
+    if session_repo_path:
+        repo_path = Path(session_repo_path)
+        if not repo_path.exists():
+            raise RuntimeError(f"Session repo path does not exist: {repo_path}")
+        return repo_path
+
+    workspace_id = metadata.get("workspace_id")
+    repo_name = metadata.get("repo_name")
     workspace = workspace_store.get(workspace_id) if workspace_id else None
     if not workspace_id or not workspace:
         raise RuntimeError(f"Session is not bound to a valid workspace: {session_id}")
@@ -146,6 +158,28 @@ def _get_sdk_session_id(session_id: str, cwd: Path) -> Optional[str]:
     return metadata.get("sdk_session_id")
 
 
+# Per-session queues for feeding AskUserQuestion answers back to the SDK callback.
+_answer_queues: dict[str, asyncio.Queue] = {}
+
+
+def _get_answer_queue(session_id: str) -> asyncio.Queue:
+    if session_id not in _answer_queues:
+        _answer_queues[session_id] = asyncio.Queue()
+    return _answer_queues[session_id]
+
+
+def _cleanup_answer_queue(session_id: str) -> None:
+    _answer_queues.pop(session_id, None)
+
+
+async def provide_answers(session_id: str, answers: list[dict]) -> None:
+    """Push AskUserQuestion answers into the running SDK stream."""
+    queue = _answer_queues.get(session_id)
+    if not queue:
+        raise RuntimeError("No active query for this session")
+    await queue.put(answers)
+
+
 async def run_query_stream(
     session_id: str,
     prompt: str,
@@ -170,9 +204,13 @@ async def run_query_stream(
     _apply_api_config()
 
     try:
-        async for message in _run_sdk_query(prompt, options):
+        async for message in _run_sdk_query(prompt, options, session_id):
             sdk_session_id = _extract_session_id(message, sdk_session_id)
-            serialized = _serialize_message(message, process_filter)
+            serialized = (
+                message
+                if isinstance(message, dict)
+                else _serialize_message(message, process_filter)
+            )
             if serialized:
                 yield serialized
 
@@ -189,9 +227,13 @@ async def run_query_stream(
             )
             options.resume = None
             try:
-                async for message in _run_sdk_query(prompt, options):
+                async for message in _run_sdk_query(prompt, options, session_id):
                     sdk_session_id = _extract_session_id(message, sdk_session_id)
-                    serialized = _serialize_message(message, process_filter)
+                    serialized = (
+                        message
+                        if isinstance(message, dict)
+                        else _serialize_message(message, process_filter)
+                    )
                     if serialized:
                         yield serialized
             except Exception as retry_exc:
@@ -210,6 +252,7 @@ async def run_query_stream(
                 yield {"type": "error", "message": str(exc)}
 
     finally:
+        _cleanup_answer_queue(session_id)
         if sdk_session_id:
             session_store.update_metadata(
                 session_id,
@@ -220,9 +263,146 @@ async def run_query_stream(
             )
 
 
-async def _run_sdk_query(prompt: str, options: ClaudeAgentOptions):
-    async for message in query(prompt=prompt, options=options):
-        yield message
+async def _run_sdk_query(prompt: str, options: ClaudeAgentOptions, session_id: str = ""):
+    """Run SDK query in streaming mode so answers can be fed back via the queue."""
+    _get_answer_queue(session_id)
+    output_queue: asyncio.Queue = asyncio.Queue()
+    options.can_use_tool = _build_can_use_tool(session_id, output_queue)
+    options.hooks = _merge_pre_tool_use_hook(getattr(options, "hooks", None))
+
+    async def _prompt_stream():
+        yield {
+            "type": "user",
+            "session_id": "",
+            "message": {"role": "user", "content": prompt},
+            "parent_tool_use_id": None,
+        }
+
+    done = object()
+
+    async def _produce_messages():
+        try:
+            async for message in query(prompt=_prompt_stream(), options=options):
+                await output_queue.put(message)
+        except Exception as exc:
+            await output_queue.put(exc)
+        finally:
+            await output_queue.put(done)
+
+    task = asyncio.create_task(_produce_messages())
+    try:
+        while True:
+            item = await output_queue.get()
+            if item is done:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+def _build_can_use_tool(session_id: str, output_queue: asyncio.Queue | None = None):
+    async def can_use_tool(tool_name: str, input_data: dict, context):
+        if tool_name == "AskUserQuestion":
+            return await _answer_ask_user_question(
+                session_id,
+                input_data,
+                context=context,
+                output_queue=output_queue,
+            )
+        return PermissionResultAllow(updated_input=input_data)
+
+    return can_use_tool
+
+
+async def _answer_ask_user_question(
+    session_id: str,
+    input_data: dict,
+    context=None,
+    output_queue: asyncio.Queue | None = None,
+) -> PermissionResultAllow:
+    """Wait for the web UI to answer AskUserQuestion and return SDK-shaped input."""
+    queue = _get_answer_queue(session_id)
+    questions = input_data.get("questions", [])
+    if output_queue is not None:
+        await output_queue.put(_build_ask_user_question_event(input_data, context))
+
+    while True:
+        answer_batch = await queue.get()
+        try:
+            answers = _build_answers_map(answer_batch)
+            if _answers_cover_questions(questions, answers):
+                return PermissionResultAllow(
+                    updated_input={
+                        "questions": questions,
+                        "answers": answers,
+                    },
+                )
+            logger.warning(
+                "Ignoring incomplete AskUserQuestion answer batch for session %s: %s",
+                session_id,
+                list(answers),
+            )
+        finally:
+            queue.task_done()
+
+
+def _build_answers_map(answer_batch: list[dict]) -> dict:
+    """Map API answer entries to the object expected by AskUserQuestion."""
+    answers: dict = {}
+    for item in answer_batch:
+        question = item.get("question")
+        if not question:
+            continue
+        answers[question] = item.get("answer")
+    return answers
+
+
+def _answers_cover_questions(questions: list[dict], answers: dict) -> bool:
+    for question in questions:
+        q_text = question.get("question") or question.get("header") or ""
+        answer = answers.get(q_text)
+        if isinstance(answer, list):
+            if not answer:
+                return False
+        elif not answer:
+            return False
+    return True
+
+
+def _build_ask_user_question_event(input_data: dict, context=None) -> dict:
+    tool_use_id = (
+        getattr(context, "tool_use_id", None)
+        or getattr(context, "toolUseID", None)
+        or f"ask_{uuid.uuid4().hex}"
+    )
+    return {
+        "type": "assistant",
+        "content": [
+            {
+                "type": "ask_user_question",
+                "id": tool_use_id,
+                "questions": input_data.get("questions", []),
+            }
+        ],
+        "model": None,
+    }
+
+
+async def _keep_stream_open_hook(input_data, tool_use_id, context):
+    return {"continue_": True}
+
+
+def _merge_pre_tool_use_hook(hooks):
+    merged = dict(hooks or {})
+    pre_tool_hooks = list(merged.get("PreToolUse", []))
+    pre_tool_hooks.append(HookMatcher(matcher=None, hooks=[_keep_stream_open_hook]))
+    merged["PreToolUse"] = pre_tool_hooks
+    return merged
 
 
 def _is_missing_conversation_error(exc: Exception) -> bool:
@@ -280,11 +460,7 @@ def _serialize_message(
                 blocks.append({"type": "text", "text": block.text})
             elif isinstance(block, ToolUseBlock):
                 if block.name == "AskUserQuestion":
-                    blocks.append({
-                        "type": "ask_user_question",
-                        "id": block.id,
-                        "questions": block.input.get("questions", []),
-                    })
+                    continue
                 else:
                     if not process_filter.should_show_tool(block.name):
                         process_filter.hide_tool_use(block.id)

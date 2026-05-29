@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,6 +37,61 @@ def test_build_options_loads_plugin_mcp_config_and_allows_kube_tools(monkeypatch
     assert "Read" in options.allowed_tools
     assert "mcp__kube-observability__diagnose_service" in options.allowed_tools
     assert "mcp__kube-observability__k8s_get_pod_logs" in options.allowed_tools
+
+
+@pytest.mark.asyncio
+async def test_ask_user_question_answers_return_sdk_updated_input():
+    session_id = "ask-session"
+    agent._cleanup_answer_queue(session_id)
+    output_queue = asyncio.Queue()
+
+    task = asyncio.create_task(
+        agent._answer_ask_user_question(
+            session_id,
+            {
+                "questions": [
+                    {
+                        "question": "请选择运行模式。",
+                        "options": [{"label": "完整模式"}, {"label": "快速模式"}],
+                    }
+                ]
+            },
+            output_queue=output_queue,
+        )
+    )
+
+    event = await output_queue.get()
+    assert event["type"] == "assistant"
+    assert event["content"][0]["type"] == "ask_user_question"
+    assert event["content"][0]["questions"] == [
+        {
+            "question": "请选择运行模式。",
+            "options": [{"label": "完整模式"}, {"label": "快速模式"}],
+        }
+    ]
+
+    await agent.provide_answers(
+        session_id,
+        [
+            {
+                "question": "请选择运行模式。",
+                "answer": "完整模式",
+                "tool_use_id": "toolu_ask",
+            }
+        ],
+    )
+
+    result = await task
+    assert result.updated_input == {
+        "questions": [
+            {
+                "question": "请选择运行模式。",
+                "options": [{"label": "完整模式"}, {"label": "快速模式"}],
+            }
+        ],
+        "answers": {"请选择运行模式。": "完整模式"},
+    }
+    agent._cleanup_answer_queue(session_id)
 
 
 @pytest.mark.asyncio

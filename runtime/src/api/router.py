@@ -4,6 +4,7 @@ REST API routes for the fast-harness runtime service.
 
 import json
 import logging
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,8 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.responses import JSONResponse
 
 from src.api.schemas import (
+    AnswerRequest,
+    AnswerResponse,
     QueryRequest,
     RenameRequest,
     SessionCreateRequest,
@@ -27,8 +30,8 @@ from src.api.schemas import (
     HealthResponse,
 )
 from src.config import settings
-from src.core.git import remote_branches
-from src.core.agent import run_query_stream, resolve_session_repo_path
+from src.core.git import checkout as git_checkout, remote_branches
+from src.core.agent import provide_answers, run_query_stream, resolve_session_repo_path
 from src.core.session import session_store
 from src.core.workspace import workspace_store
 from src.harness.registry import get_capabilities
@@ -90,20 +93,35 @@ async def create_session(body: SessionCreateRequest):
     if not branch:
         raise HTTPException(status_code=400, detail="Branch is required")
 
+    sid = uuid.uuid4().hex[:12]
     try:
-        workspace_store.checkout_branch(body.workspace_id, repo["name"], branch)
+        session_repo = workspace_store.create_session_worktree(
+            body.workspace_id,
+            repo["name"],
+            sid,
+            branch,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
-    sid = session_store.create(
-        workspace_dir=ws_rec["cwd"],
-        metadata={
-            "workspace_id": body.workspace_id,
-            "repo_name": repo["name"],
-            "branch": branch,
-        },
-    )
+
+    session_workspace = Path(ws_rec["cwd"]) / ".session-worktrees" / sid
+    try:
+        sid = session_store.create(
+            workspace_dir=str(session_workspace),
+            metadata={
+                "workspace_id": body.workspace_id,
+                "repo_name": repo["name"],
+                "branch": branch,
+                "session_repo_path": str(session_repo.local_path),
+            },
+            session_id=sid,
+        )
+    except Exception:
+        if session_repo.local_path:
+            workspace_store.remove_session_worktree(session_repo.local_path)
+        raise
 
     rec = session_store.get(sid)
     assert rec is not None, "Session just created but not found"
@@ -164,6 +182,9 @@ async def delete_session(session_id: str):
     rec = session_store.get(session_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Session not found")
+    session_repo_path = rec.get("metadata", {}).get("session_repo_path")
+    if session_repo_path:
+        workspace_store.remove_session_worktree(session_repo_path)
     session_store.delete(session_id)
     return {"status": "deleted", "session_id": session_id}
 
@@ -195,6 +216,18 @@ async def query_session(session_id: str, body: QueryRequest):
     return EventSourceResponse(event_stream())
 
 
+@router.post("/sessions/{session_id}/answer", response_model=AnswerResponse)
+async def answer_question(session_id: str, body: AnswerRequest):
+    """Accept answers to an AskUserQuestion and feed them back to the running SDK session."""
+    if not session_store.get(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        await provide_answers(session_id, [entry.model_dump() for entry in body.answers])
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return AnswerResponse(status="ok", answered=len(body.answers))
+
+
 def _checkout_session_branch(session: dict) -> None:
     metadata = session.get("metadata", {})
     workspace_id = metadata.get("workspace_id")
@@ -202,6 +235,13 @@ def _checkout_session_branch(session: dict) -> None:
     branch = metadata.get("branch")
     if not workspace_id or not repo_name or not branch:
         raise HTTPException(status_code=400, detail="Session is missing workspace branch metadata")
+    session_repo_path = metadata.get("session_repo_path")
+    if session_repo_path:
+        try:
+            git_checkout(Path(session_repo_path), branch)
+        except RuntimeError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        return
     try:
         workspace_store.checkout_branch(workspace_id, repo_name, branch)
     except ValueError as e:
@@ -320,6 +360,9 @@ async def delete_workspace(workspace_id: str):
         raise HTTPException(status_code=404, detail="Workspace not found")
     for session in session_store.list_all():
         if session.get("metadata", {}).get("workspace_id") == workspace_id:
+            session_repo_path = session.get("metadata", {}).get("session_repo_path")
+            if session_repo_path:
+                workspace_store.remove_session_worktree(session_repo_path)
             session_store.delete(session["session_id"])
     workspace_store.delete(workspace_id)
     return {"status": "deleted", "workspace_id": workspace_id}

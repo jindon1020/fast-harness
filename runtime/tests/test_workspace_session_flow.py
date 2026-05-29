@@ -1,4 +1,7 @@
+import json
+
 import pytest
+from types import SimpleNamespace
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -190,33 +193,40 @@ async def test_session_can_be_renamed(monkeypatch):
 async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
     class FakeWorkspaceStore:
         def __init__(self):
-            self.checked_out = None
+            self.session_worktree = None
 
         def get(self, workspace_id):
             assert workspace_id == "ws-1"
             return {
                 "workspace_id": "ws-1",
                 "cwd": str(tmp_path),
-                "repos": [{"name": "app", "branch": "main"}],
+                "repos": [{"name": "app", "branch": "main", "url": "https://example.com/app.git"}],
             }
 
-        def checkout_branch(self, workspace_id, repo_name, branch):
-            self.checked_out = (workspace_id, repo_name, branch)
-            return {"repo": repo_name, "branch": branch, "status": "ok"}
+        def create_session_worktree(self, workspace_id, repo_name, session_id, branch):
+            self.session_worktree = (workspace_id, repo_name, session_id, branch)
+            return SimpleNamespace(local_path=tmp_path / ".session-worktrees" / session_id / repo_name)
+
+        def remove_session_worktree(self, repo_path):
+            raise AssertionError("session worktree should not be removed on successful creation")
 
     class FakeSessionStore:
         def __init__(self):
             self.metadata = None
+            self.workspace_dir = None
+            self.session_id = None
 
-        def create(self, *, workspace_dir, metadata):
+        def create(self, *, workspace_dir, metadata, session_id=None):
+            self.workspace_dir = workspace_dir
             self.metadata = metadata
-            return "sess-1"
+            self.session_id = session_id
+            return session_id
 
         def get(self, session_id):
-            assert session_id == "sess-1"
+            assert session_id == self.session_id
             return {
-                "session_id": "sess-1",
-                "workspace": str(tmp_path),
+                "session_id": session_id,
+                "workspace": self.workspace_dir,
                 "created_at": "now",
                 "last_access": "now",
                 "metadata": self.metadata,
@@ -231,12 +241,23 @@ async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
         SessionCreateRequest(workspace_id="ws-1", repo_name="app", branch="feature/x")
     )
 
-    assert response.session_id == "sess-1"
-    assert fake_workspace_store.checked_out == ("ws-1", "app", "feature/x")
+    assert response.session_id == fake_session_store.session_id
+    assert fake_workspace_store.session_worktree == (
+        "ws-1",
+        "app",
+        fake_session_store.session_id,
+        "feature/x",
+    )
+    assert fake_session_store.workspace_dir == str(
+        tmp_path / ".session-worktrees" / fake_session_store.session_id
+    )
     assert fake_session_store.metadata == {
         "workspace_id": "ws-1",
         "repo_name": "app",
         "branch": "feature/x",
+        "session_repo_path": str(
+            tmp_path / ".session-worktrees" / fake_session_store.session_id / "app"
+        ),
     }
 
 
@@ -367,6 +388,49 @@ async def test_query_checks_out_session_branch_before_streaming(monkeypatch, tmp
     ]
 
 
+@pytest.mark.asyncio
+async def test_query_checks_out_session_specific_repo(monkeypatch, tmp_path):
+    repo_path = tmp_path / ".session-worktrees" / "sess-1" / "app"
+    repo_path.mkdir(parents=True)
+    checked_out = []
+
+    async def fake_run_query_stream(**kwargs):
+        yield {"type": "result", "result": "ok"}
+
+    monkeypatch.setattr(router, "git_checkout", lambda path, branch: checked_out.append((path, branch)))
+    monkeypatch.setattr(
+        router.workspace_store,
+        "checkout_branch",
+        lambda workspace_id, repo_name, branch: (_ for _ in ()).throw(
+            AssertionError("shared workspace repo should not be checked out")
+        ),
+    )
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(repo_path.parent),
+            "created_at": "now",
+            "last_access": "now",
+            "metadata": {
+                "workspace_id": "ws-1",
+                "repo_name": "app",
+                "branch": "main",
+                "session_repo_path": str(repo_path),
+            },
+        },
+    )
+    monkeypatch.setattr(router.session_store, "append_message", lambda session_id, message: None)
+    monkeypatch.setattr(router, "run_query_stream", fake_run_query_stream)
+
+    response = await router.query_session("sess-1", router.QueryRequest(prompt="hi"))
+    async for _event in response.body_iterator:
+        break
+
+    assert checked_out == [(repo_path, "main")]
+
+
 def test_agent_rejects_unbound_session(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.core.agent.session_store.get",
@@ -414,6 +478,26 @@ def test_agent_cwd_resolves_to_bound_repo_local_path(monkeypatch, tmp_path):
     assert _resolve_cwd("sess-1") == repo_path
 
 
+def test_agent_cwd_prefers_session_repo_path(monkeypatch, tmp_path):
+    repo_path = tmp_path / "ws-1" / ".session-worktrees" / "sess-1" / "creation-tool"
+    repo_path.mkdir(parents=True)
+    monkeypatch.setattr(
+        "src.core.agent.session_store.get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(repo_path.parent),
+            "metadata": {
+                "workspace_id": "ws-1",
+                "repo_name": "creation-tool",
+                "branch": "dev_temp",
+                "session_repo_path": str(repo_path),
+            },
+        },
+    )
+
+    assert _resolve_cwd("sess-1") == repo_path
+
+
 def test_worktree_remove_checks_return_code_and_prunes_on_failure(monkeypatch, tmp_path, caplog):
     repo_path = tmp_path / "ws-1" / "app"
     source_repo = tmp_path / ".sources" / "app"
@@ -445,6 +529,43 @@ def test_worktree_remove_checks_return_code_and_prunes_on_failure(monkeypatch, t
         (["git", "worktree", "prune"], str(source_repo)),
     ]
     assert "Failed to remove git worktree" in caplog.text
+
+
+def test_workspace_creates_session_specific_worktree(monkeypatch, tmp_path):
+    monkeypatch.setattr(workspace.settings, "workspace_root", str(tmp_path))
+    store = workspace.WorkspaceStore()
+    ws_id = "ws-1"
+    ws_dir = tmp_path / ws_id
+    ws_dir.mkdir()
+    store._path(ws_id).write_text(
+        json.dumps(
+            {
+                "workspace_id": ws_id,
+                "name": "test",
+                "cwd": str(ws_dir),
+                "repos": [{"name": "app", "url": "https://example.com/app.git", "branch": "main"}],
+            }
+        )
+    )
+    calls = []
+
+    def fake_create_worktree(url, source_dir, worktree_path, branch=None):
+        calls.append((url, source_dir, worktree_path, branch))
+        return SimpleNamespace(local_path=worktree_path)
+
+    monkeypatch.setattr(workspace, "create_worktree", fake_create_worktree)
+
+    repo = store.create_session_worktree(ws_id, "app", "sess-1", "feature/x")
+
+    assert repo.local_path == ws_dir / ".session-worktrees" / "sess-1" / "app"
+    assert calls == [
+        (
+            "https://example.com/app.git",
+            tmp_path / ".sources",
+            ws_dir / ".session-worktrees" / "sess-1" / "app",
+            "feature/x",
+        )
+    ]
 
 
 def test_session_history_is_persisted_under_workspace_and_deleted(monkeypatch, tmp_path):

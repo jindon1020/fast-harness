@@ -24,8 +24,8 @@ class SessionStore:
     def _path(self, session_id: str) -> Path:
         return self._dir / f"{session_id}.json"
 
-    def create(self, *, workspace_dir: str, metadata: dict) -> str:
-        session_id = uuid.uuid4().hex[:12]
+    def create(self, *, workspace_dir: str, metadata: dict, session_id: str | None = None) -> str:
+        session_id = session_id or uuid.uuid4().hex[:12]
         ws = Path(workspace_dir)
         ws.mkdir(parents=True, exist_ok=True)
         (ws / ".session-history").mkdir(parents=True, exist_ok=True)

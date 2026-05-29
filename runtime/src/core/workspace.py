@@ -181,6 +181,34 @@ class WorkspaceStore:
 
         return repo
 
+    def create_session_worktree(
+        self,
+        ws_id: str,
+        repo_name: str,
+        session_id: str,
+        branch: str,
+    ) -> RepoInfo:
+        record = self.get(ws_id)
+        if not record:
+            raise ValueError(f"Workspace not found: {ws_id}")
+        repo_record = next(
+            (repo for repo in record.get("repos", []) if repo.get("name") == repo_name),
+            None,
+        )
+        if not repo_record:
+            raise ValueError(f"Repo not found: {repo_name}")
+
+        worktree_path = Path(record["cwd"]) / ".session-worktrees" / session_id / repo_name
+        return create_worktree(
+            url=repo_record["url"],
+            source_dir=Path(settings.workspace_root) / ".sources",
+            worktree_path=worktree_path,
+            branch=branch,
+        )
+
+    def remove_session_worktree(self, repo_path: str | Path) -> None:
+        self._remove_worktree(Path(repo_path))
+
     def pull_all(self, ws_id: str) -> list[dict]:
         record = self.get(ws_id)
         if not record:
