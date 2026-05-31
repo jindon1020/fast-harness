@@ -978,8 +978,20 @@ async function api(method, path, body) {
   const opts = { method, headers: { "Content-Type": "application/json", ...authHeaders() } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await responseErrorMessage(res));
   return res.json();
+}
+
+async function responseErrorMessage(res) {
+  const text = await res.text();
+  try {
+    const data = JSON.parse(text);
+    if (typeof data.detail === "string") return data.detail;
+    if (Array.isArray(data.detail)) return data.detail.map(item => item.msg || JSON.stringify(item)).join("; ");
+    return data.message || text || res.statusText;
+  } catch {
+    return text || res.statusText;
+  }
 }
 
 /* ═══════════════════════ STATE ═══════════════════════ */

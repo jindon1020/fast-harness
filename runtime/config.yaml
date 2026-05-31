@@ -2,13 +2,13 @@ repositories:
   - key: creation-tool
     name: creation-tool
     url: https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/creation-tool.git
-    default_branch: main
+    default_branch: master
     enabled: true
 
   - key: asset-manager
     name: asset-manager
     url: https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/asset-manager.git
-    default_branch: dev
+    default_branch: master
     enabled: true
 
   - key: algo-manager
