@@ -125,8 +125,9 @@ def test_create_worktree_installs_fast_harness_suite_after_worktree_add(monkeypa
         if cmd[:2] == ["bash", "-lc"] and cwd == worktree_path
     )
     assert install > worktree_add
-    assert "cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh" in commands[install][0][2]
-    assert "bash -s -- --force" in commands[install][0][2]
+    assert "install.sh" in commands[install][0][2]
+    assert "--force" in commands[install][0][2]
+    assert "--local" in commands[install][0][2]
 
 
 def test_create_worktree_removes_worktree_when_fast_harness_install_fails(monkeypatch, tmp_path):

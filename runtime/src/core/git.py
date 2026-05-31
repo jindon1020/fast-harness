@@ -178,13 +178,24 @@ def _install_fast_harness_suite(repo_path: Path) -> None:
     """Install or refresh fast-harness project files inside a workspace worktree."""
     logger.info("Installing fast-harness suite in %s", repo_path)
     rc, stdout, stderr = _run(
-        ["bash", "-lc", FAST_HARNESS_INSTALL_COMMAND],
+        ["bash", "-lc", _fast_harness_install_command()],
         repo_path,
         timeout=300,
     )
     if rc != 0:
         message = stderr or stdout or "unknown error"
         raise RuntimeError(f"fast-harness install failed: {message}")
+
+
+def _fast_harness_install_command() -> str:
+    repo_root = Path(__file__).resolve().parents[3]
+    install_script = repo_root / "install.sh"
+    if install_script.exists():
+        return (
+            f"bash {shlex.quote(str(install_script))} --force "
+            f"--local {shlex.quote(str(repo_root))}"
+        )
+    return FAST_HARNESS_INSTALL_COMMAND
 
 
 def _reset_fast_harness_managed_paths(repo_path: Path) -> None:
