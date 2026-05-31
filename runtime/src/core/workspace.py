@@ -31,9 +31,19 @@ class WorkspaceStore:
     def __init__(self) -> None:
         self._dir = Path(settings.workspace_root) / ".workspaces"
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._backfill_legacy_users()
 
     def _path(self, ws_id: str) -> Path:
         return self._dir / f"{ws_id}.json"
+
+    def _backfill_legacy_users(self) -> None:
+        for path in self._dir.glob("*.json"):
+            record = json.loads(path.read_text())
+            if record.get("user_id"):
+                continue
+            record["user_id"] = settings.default_user_id
+            record["updated_at"] = datetime.now(timezone.utc).isoformat()
+            path.write_text(json.dumps(record, indent=2), encoding="utf-8")
 
     def _sanitize(self, name: str) -> str:
         """Convert workspace name to a safe directory name."""
@@ -46,6 +56,7 @@ class WorkspaceStore:
         repo_url: Optional[str] = None,
         repo_name: Optional[str] = None,
         branch: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> dict:
         ws_id = f"ws-{uuid.uuid4().hex[:10]}"
         ws_dir = Path(settings.workspace_root) / ws_id
@@ -56,6 +67,7 @@ class WorkspaceStore:
             "name": name,
             "cwd": str(ws_dir),
             "repos": [],
+            "user_id": user_id or settings.default_user_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }

@@ -20,12 +20,33 @@ class SessionStore:
     def __init__(self) -> None:
         self._dir = Path(settings.workspace_root) / ".sessions"
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._backfill_legacy_users()
 
     def _path(self, session_id: str) -> Path:
         return self._dir / f"{session_id}.json"
 
-    def create(self, *, workspace_dir: str, metadata: dict, session_id: str | None = None) -> str:
+    def _backfill_legacy_users(self) -> None:
+        for path in self._dir.glob("*.json"):
+            record = json.loads(path.read_text())
+            metadata = record.get("metadata") or {}
+            user_id = record.get("user_id") or metadata.get("user_id")
+            if user_id and metadata.get("user_id"):
+                continue
+            owner_id = user_id or settings.default_user_id
+            record["user_id"] = owner_id
+            record["metadata"] = {**metadata, "user_id": owner_id}
+            path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+    def create(
+        self,
+        *,
+        workspace_dir: str,
+        metadata: dict,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> str:
         session_id = session_id or uuid.uuid4().hex[:12]
+        owner_id = user_id or metadata.get("user_id") or settings.default_user_id
         ws = Path(workspace_dir)
         ws.mkdir(parents=True, exist_ok=True)
         (ws / ".session-history").mkdir(parents=True, exist_ok=True)
@@ -33,9 +54,10 @@ class SessionStore:
             "session_id": session_id,
             "name": session_id,
             "workspace": str(ws),
+            "user_id": owner_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_access": datetime.now(timezone.utc).isoformat(),
-            "metadata": metadata,
+            "metadata": {**metadata, "user_id": owner_id},
         }
         self._path(session_id).write_text(json.dumps(record, indent=2))
         return session_id

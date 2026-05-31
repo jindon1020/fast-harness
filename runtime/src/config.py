@@ -73,8 +73,46 @@ def _repository_configs() -> list[dict[str, Any]]:
     return normalized
 
 
+def _user_configs() -> list[dict[str, Any]]:
+    users = _load_runtime_config().get("users", [])
+    if users is None:
+        users = []
+    if not isinstance(users, list):
+        raise ValueError("runtime config key 'users' must be a YAML list")
+
+    seen_ids: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for raw_user in users:
+        if not isinstance(raw_user, dict):
+            raise ValueError("each user config must be a YAML mapping")
+        user_id = str(raw_user.get("id", "")).strip()
+        name = str(raw_user.get("name", user_id)).strip()
+        if not user_id:
+            raise ValueError("user config is missing required key 'id'")
+        if not name:
+            raise ValueError(f"user {user_id!r} is missing required key 'name'")
+        if user_id in seen_ids:
+            raise ValueError(f"Duplicate user id: {user_id}")
+        seen_ids.add(user_id)
+        normalized.append(
+            {
+                "id": user_id,
+                "name": name,
+                "enabled": bool(raw_user.get("enabled", True)),
+            }
+        )
+
+    return normalized or [
+        {"id": "default", "name": "Default User", "enabled": True},
+    ]
+
+
 class Settings(BaseSettings):
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": str(Path(__file__).resolve().parent.parent / ".env"),
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
     anthropic_api_key: str = ""
     anthropic_auth_token: str = ""
@@ -164,6 +202,29 @@ class Settings(BaseSettings):
             if repo["key"] == key:
                 return repo
         raise ValueError(f"Repository not found or disabled: {key}")
+
+    @property
+    def configured_users(self) -> list[dict[str, Any]]:
+        return _user_configs()
+
+    @property
+    def enabled_users(self) -> list[dict[str, Any]]:
+        return [
+            user
+            for user in self.configured_users
+            if user.get("enabled", True)
+        ]
+
+    @property
+    def default_user_id(self) -> str:
+        enabled = self.enabled_users
+        return enabled[0]["id"] if enabled else "default"
+
+    def get_user(self, user_id: str) -> dict[str, Any]:
+        for user in self.enabled_users:
+            if user["id"] == user_id:
+                return user
+        raise ValueError(f"User not found or disabled: {user_id}")
 
 
 settings = Settings()

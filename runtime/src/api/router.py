@@ -4,22 +4,28 @@ REST API routes for the fast-harness runtime service.
 
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from sse_starlette.sse import EventSourceResponse
 from starlette.responses import JSONResponse
 
 from src.api.schemas import (
     AnswerRequest,
     AnswerResponse,
+    FeedbackRequest,
+    FeedbackResponse,
     QueryRequest,
     RenameRequest,
     SessionCreateRequest,
     SessionCreateResponse,
     SessionInfo,
     SessionListResponse,
+    UsageStatsResponse,
+    UserListResponse,
     WorkspaceCreateRequest,
     WorkspaceRepoAddRequest,
     WorkspaceResponse,
@@ -39,6 +45,184 @@ from src.harness.registry import get_capabilities
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+FEEDBACK_PATH = Path(__file__).resolve().parents[2] / "feedback.md"
+
+UserHeader = Annotated[str | None, Header(alias="X-User-Id")]
+
+
+def _current_user_id(x_user_id: str | None = None) -> str:
+    requested = x_user_id.strip() if isinstance(x_user_id, str) else ""
+    user_id = requested or settings.default_user_id
+    try:
+        settings.get_user(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    return user_id
+
+
+def _record_user_id(record: dict) -> str:
+    return record.get("user_id") or record.get("metadata", {}).get("user_id") or settings.default_user_id
+
+
+def _ensure_owned(record: dict | None, user_id: str, not_found: str):
+    if not record or _record_user_id(record) != user_id:
+        raise HTTPException(status_code=404, detail=not_found)
+    return record
+
+
+def _append_feedback(user_id: str, session_id: str, body: FeedbackRequest) -> Path:
+    FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    entry = _format_feedback_entry(user_id, session_id, body)
+    if not FEEDBACK_PATH.exists():
+        FEEDBACK_PATH.write_text("# Feedback\n\n", encoding="utf-8")
+    content = FEEDBACK_PATH.read_text(encoding="utf-8")
+    heading = f"## {user_id}"
+    if heading not in content:
+        next_content = content.rstrip() + f"\n\n{heading}\n\n{entry}\n"
+    else:
+        start = content.index(heading)
+        next_heading = content.find("\n## ", start + len(heading))
+        insert_at = len(content) if next_heading == -1 else next_heading + 1
+        next_content = content[:insert_at].rstrip() + f"\n\n{entry}\n\n" + content[insert_at:].lstrip()
+    FEEDBACK_PATH.write_text(next_content, encoding="utf-8")
+    return FEEDBACK_PATH
+
+
+def _format_feedback_entry(user_id: str, session_id: str, body: FeedbackRequest) -> str:
+    from datetime import datetime, timezone
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    feedback = body.feedback.strip()
+    excerpt = (body.message_excerpt or "").strip()
+    lines = [
+        f"### {timestamp}",
+        "",
+        f"- user_id: `{user_id}`",
+        f"- session_id: `{session_id}`",
+        "",
+        "Feedback:",
+        "",
+        _markdown_quote(feedback),
+    ]
+    if excerpt:
+        lines.extend(["", "AI message excerpt:", "", _markdown_quote(excerpt)])
+    return "\n".join(lines)
+
+
+def _markdown_quote(text: str) -> str:
+    return "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
+
+
+def _usage_stats() -> dict:
+    stats = {
+        user["id"]: {
+            "user_id": user["id"],
+            "name": user["name"],
+            "workspace_count": 0,
+            "session_count": 0,
+            "conversation_count": 0,
+            "result_count": 0,
+            "command_count": 0,
+            "feedback_count": 0,
+            "last_active": None,
+            "commands": {},
+        }
+        for user in settings.enabled_users
+    }
+
+    def user_stats(user_id: str) -> dict:
+        if user_id not in stats:
+            stats[user_id] = {
+                "user_id": user_id,
+                "name": user_id,
+                "workspace_count": 0,
+                "session_count": 0,
+                "conversation_count": 0,
+                "result_count": 0,
+                "command_count": 0,
+                "feedback_count": 0,
+                "last_active": None,
+                "commands": {},
+            }
+        return stats[user_id]
+
+    for workspace in workspace_store.list_all():
+        user_stats(_record_user_id(workspace))["workspace_count"] += 1
+
+    for session in session_store.list_all():
+        user_id = _record_user_id(session)
+        bucket = user_stats(user_id)
+        bucket["session_count"] += 1
+        _set_last_active(bucket, session.get("last_access") or session.get("created_at"))
+        for entry in _safe_session_messages(session):
+            timestamp = entry.get("timestamp")
+            message = entry.get("message") or entry
+            if message.get("type") == "user":
+                bucket["conversation_count"] += 1
+                _set_last_active(bucket, timestamp)
+                command = _extract_command(message.get("prompt", ""))
+                if command:
+                    bucket["command_count"] += 1
+                    bucket["commands"][command] = bucket["commands"].get(command, 0) + 1
+            elif message.get("type") == "result":
+                bucket["result_count"] += 1
+                _set_last_active(bucket, timestamp)
+
+    for user_id, count in _feedback_counts_by_user().items():
+        user_stats(user_id)["feedback_count"] = count
+
+    users = []
+    for item in stats.values():
+        commands = [
+            {"command": command, "count": count}
+            for command, count in sorted(item["commands"].items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        users.append({**item, "commands": commands})
+
+    users.sort(key=lambda item: (-item["conversation_count"], -item["command_count"], item["user_id"]))
+    totals = {
+        "workspace_count": sum(item["workspace_count"] for item in users),
+        "session_count": sum(item["session_count"] for item in users),
+        "conversation_count": sum(item["conversation_count"] for item in users),
+        "result_count": sum(item["result_count"] for item in users),
+        "command_count": sum(item["command_count"] for item in users),
+        "feedback_count": sum(item["feedback_count"] for item in users),
+    }
+    return {"users": users, "totals": totals}
+
+
+def _safe_session_messages(session: dict) -> list[dict]:
+    try:
+        return session_store.list_messages(session["session_id"])
+    except Exception as exc:
+        logger.warning("Failed to read session messages for %s: %s", session.get("session_id"), exc)
+        return []
+
+
+def _extract_command(prompt: str) -> str | None:
+    match = re.match(r"^\s*/([A-Za-z0-9_-]+)", prompt or "")
+    return match.group(1) if match else None
+
+
+def _set_last_active(bucket: dict, timestamp: str | None) -> None:
+    if timestamp and (not bucket["last_active"] or timestamp > bucket["last_active"]):
+        bucket["last_active"] = timestamp
+
+
+def _feedback_counts_by_user() -> dict[str, int]:
+    if not FEEDBACK_PATH.exists():
+        return {}
+    counts: dict[str, int] = {}
+    current_user: str | None = None
+    for line in FEEDBACK_PATH.read_text(encoding="utf-8").splitlines():
+        heading = re.match(r"^##\s+(.+?)\s*$", line)
+        if heading:
+            current_user = heading.group(1)
+            counts.setdefault(current_user, 0)
+            continue
+        if current_user and line.startswith("### "):
+            counts[current_user] = counts.get(current_user, 0) + 1
+    return counts
 
 
 # ═══════════════════════ Health ═══════════════════════
@@ -63,6 +247,16 @@ async def capabilities():
 
 # ═══════════════════════ Registered repositories ═══════════════════════
 
+@router.get("/users", response_model=UserListResponse)
+async def list_users():
+    return UserListResponse(users=settings.enabled_users, default_user_id=settings.default_user_id)
+
+
+@router.get("/usage-stats", response_model=UsageStatsResponse)
+async def usage_stats():
+    return UsageStatsResponse(**_usage_stats())
+
+
 @router.get("/repositories", response_model=RepositoryListResponse)
 async def list_repositories():
     return RepositoryListResponse(repositories=settings.enabled_repositories)
@@ -81,10 +275,10 @@ async def repository_branches(repo_key: str):
 # ═══════════════════════ Sessions ═══════════════════════
 
 @router.post("/sessions", response_model=SessionCreateResponse, status_code=201)
-async def create_session(body: SessionCreateRequest):
+async def create_session(body: SessionCreateRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     ws_rec = workspace_store.get(body.workspace_id)
-    if not ws_rec:
-        raise HTTPException(status_code=404, detail="Workspace not found")
+    _ensure_owned(ws_rec, user_id, "Workspace not found")
     if not ws_rec.get("repos"):
         raise HTTPException(status_code=400, detail="Workspace has no bound repos")
 
@@ -111,12 +305,14 @@ async def create_session(body: SessionCreateRequest):
         sid = session_store.create(
             workspace_dir=str(session_workspace),
             metadata={
+                "user_id": user_id,
                 "workspace_id": body.workspace_id,
                 "repo_name": repo["name"],
                 "branch": branch,
                 "session_repo_path": str(session_repo.local_path),
             },
             session_id=sid,
+            user_id=user_id,
         )
     except Exception:
         if session_repo.local_path:
@@ -139,8 +335,13 @@ def _select_repo(workspace: dict, repo_name: str | None) -> dict:
 
 
 @router.get("/sessions", response_model=SessionListResponse)
-async def list_sessions():
-    records = [record for record in session_store.list_all() if _is_bound_session(record)]
+async def list_sessions(x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    records = [
+        record
+        for record in session_store.list_all()
+        if _is_bound_session(record) and _record_user_id(record) == user_id
+    ]
     sessions = [SessionInfo(**r) for r in records]
     return SessionListResponse(sessions=sessions)
 
@@ -150,15 +351,17 @@ def _is_bound_session(record: dict) -> bool:
 
 
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
-async def get_session(session_id: str):
+async def get_session(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     rec = session_store.get(session_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_owned(rec, user_id, "Session not found")
     return SessionInfo(**rec)
 
 
 @router.patch("/sessions/{session_id}", response_model=SessionInfo)
-async def rename_session(session_id: str, body: RenameRequest):
+async def rename_session(session_id: str, body: RenameRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(session_store.get(session_id), user_id, "Session not found")
     try:
         rec = session_store.rename(session_id, body.name)
     except ValueError as e:
@@ -167,21 +370,29 @@ async def rename_session(session_id: str, body: RenameRequest):
 
 
 @router.get("/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str):
+async def get_session_messages(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     rec = session_store.get(session_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_owned(rec, user_id, "Session not found")
     return {
         "session_id": session_id,
         "messages": session_store.list_messages(session_id),
     }
 
 
+@router.post("/sessions/{session_id}/feedback", response_model=FeedbackResponse)
+async def submit_feedback(session_id: str, body: FeedbackRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(session_store.get(session_id), user_id, "Session not found")
+    path = _append_feedback(user_id, session_id, body)
+    return FeedbackResponse(status="ok", path=str(path))
+
+
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     rec = session_store.get(session_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_owned(rec, user_id, "Session not found")
     session_repo_path = rec.get("metadata", {}).get("session_repo_path")
     if session_repo_path:
         workspace_store.remove_session_worktree(session_repo_path)
@@ -192,10 +403,10 @@ async def delete_session(session_id: str):
 # ═══════════════════════ Query (SSE streaming) ═══════════════════════
 
 @router.post("/sessions/{session_id}/query")
-async def query_session(session_id: str, body: QueryRequest):
+async def query_session(session_id: str, body: QueryRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     rec = session_store.get(session_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_owned(rec, user_id, "Session not found")
     if not _is_bound_session(rec):
         raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
     _checkout_session_branch(rec)
@@ -217,10 +428,10 @@ async def query_session(session_id: str, body: QueryRequest):
 
 
 @router.post("/sessions/{session_id}/answer", response_model=AnswerResponse)
-async def answer_question(session_id: str, body: AnswerRequest):
+async def answer_question(session_id: str, body: AnswerRequest, x_user_id: UserHeader = None):
     """Accept answers to an AskUserQuestion and feed them back to the running SDK session."""
-    if not session_store.get(session_id):
-        raise HTTPException(status_code=404, detail="Session not found")
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(session_store.get(session_id), user_id, "Session not found")
     try:
         await provide_answers(session_id, [entry.model_dump() for entry in body.answers])
     except RuntimeError as e:
@@ -252,9 +463,8 @@ def _checkout_session_branch(session: dict) -> None:
 
 # ═══════════════════════ Session files ═══════════════════════
 
-def _resolve_workspace(session_id: str) -> Path:
-    if not session_store.get(session_id):
-        raise HTTPException(status_code=404, detail="Session not found")
+def _resolve_workspace(session_id: str, user_id: str) -> Path:
+    _ensure_owned(session_store.get(session_id), user_id, "Session not found")
     try:
         return resolve_session_repo_path(session_id).resolve()
     except RuntimeError as e:
@@ -262,8 +472,8 @@ def _resolve_workspace(session_id: str) -> Path:
 
 
 @router.get("/sessions/{session_id}/files")
-async def list_session_files(session_id: str):
-    ws = _resolve_workspace(session_id)
+async def list_session_files(session_id: str, x_user_id: UserHeader = None):
+    ws = _resolve_workspace(session_id, _current_user_id(x_user_id))
     files = []
     for p in ws.rglob("*"):
         if p.is_file() and ".git/" not in str(p):
@@ -272,8 +482,8 @@ async def list_session_files(session_id: str):
 
 
 @router.get("/sessions/{session_id}/files/{file_path:path}")
-async def get_session_file(session_id: str, file_path: str):
-    ws = _resolve_workspace(session_id)
+async def get_session_file(session_id: str, file_path: str, x_user_id: UserHeader = None):
+    ws = _resolve_workspace(session_id, _current_user_id(x_user_id))
     target = (ws / file_path).resolve()
     if not str(target).startswith(str(ws)):
         raise HTTPException(status_code=403, detail="Path traversal denied")
@@ -285,12 +495,14 @@ async def get_session_file(session_id: str, file_path: str):
 # ═══════════════════════ Workspaces ═══════════════════════
 
 @router.post("/workspaces", response_model=WorkspaceResponse, status_code=201)
-async def create_workspace(body: WorkspaceCreateRequest):
+async def create_workspace(body: WorkspaceCreateRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     legacy_repo = body.repos[0] if body.repos else None
     repositories = _workspace_repositories_from_request(body, legacy_repo)
     rec = workspace_store.create(
         body.name,
         repositories=repositories,
+        user_id=user_id,
     )
     return WorkspaceResponse(**rec)
 
@@ -332,21 +544,28 @@ def _repo_spec_from_config(repo_key: str, branch: str | None = None) -> dict:
 
 
 @router.get("/workspaces", response_model=WorkspaceListResponse)
-async def list_workspaces():
-    records = workspace_store.list_all()
+async def list_workspaces(x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    records = [
+        record
+        for record in workspace_store.list_all()
+        if _record_user_id(record) == user_id
+    ]
     return WorkspaceListResponse(workspaces=[WorkspaceResponse(**r) for r in records])
 
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
-async def get_workspace(workspace_id: str):
+async def get_workspace(workspace_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     rec = workspace_store.get(workspace_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Workspace not found")
+    _ensure_owned(rec, user_id, "Workspace not found")
     return WorkspaceResponse(**rec)
 
 
 @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
-async def rename_workspace(workspace_id: str, body: RenameRequest):
+async def rename_workspace(workspace_id: str, body: RenameRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(workspace_store.get(workspace_id), user_id, "Workspace not found")
     try:
         rec = workspace_store.rename(workspace_id, body.name)
     except ValueError as e:
@@ -355,11 +574,11 @@ async def rename_workspace(workspace_id: str, body: RenameRequest):
 
 
 @router.delete("/workspaces/{workspace_id}")
-async def delete_workspace(workspace_id: str):
-    if not workspace_store.get(workspace_id):
-        raise HTTPException(status_code=404, detail="Workspace not found")
+async def delete_workspace(workspace_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(workspace_store.get(workspace_id), user_id, "Workspace not found")
     for session in session_store.list_all():
-        if session.get("metadata", {}).get("workspace_id") == workspace_id:
+        if session.get("metadata", {}).get("workspace_id") == workspace_id and _record_user_id(session) == user_id:
             session_repo_path = session.get("metadata", {}).get("session_repo_path")
             if session_repo_path:
                 workspace_store.remove_session_worktree(session_repo_path)
@@ -378,9 +597,9 @@ async def default_repo_branches():
 
 
 @router.post("/workspaces/{workspace_id}/repos", response_model=WorkspaceResponse)
-async def add_workspace_repo(workspace_id: str, body: WorkspaceRepoAddRequest):
-    if not workspace_store.get(workspace_id):
-        raise HTTPException(status_code=404, detail="Workspace not found")
+async def add_workspace_repo(workspace_id: str, body: WorkspaceRepoAddRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(workspace_store.get(workspace_id), user_id, "Workspace not found")
     repo = _repo_spec_from_config(body.repo_key, body.branch)
     try:
         workspace_store.add_repo(
@@ -397,7 +616,9 @@ async def add_workspace_repo(workspace_id: str, body: WorkspaceRepoAddRequest):
 
 
 @router.post("/workspaces/{workspace_id}/pull")
-async def pull_workspace(workspace_id: str):
+async def pull_workspace(workspace_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(workspace_store.get(workspace_id), user_id, "Workspace not found")
     try:
         results = workspace_store.pull_all(workspace_id)
         return {"repos": results}
@@ -406,7 +627,9 @@ async def pull_workspace(workspace_id: str):
 
 
 @router.get("/workspaces/{workspace_id}/repos/{repo_name}/status", response_model=RepoStatusResponse)
-async def repo_status(workspace_id: str, repo_name: str):
+async def repo_status(workspace_id: str, repo_name: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(workspace_store.get(workspace_id), user_id, "Workspace not found")
     try:
         s = workspace_store.repo_status(workspace_id, repo_name)
         return RepoStatusResponse(**s)
@@ -417,7 +640,9 @@ async def repo_status(workspace_id: str, repo_name: str):
 # ═══════════════════════ Branches ═══════════════════════
 
 @router.get("/workspaces/{workspace_id}/repos/{repo_name}/branches")
-async def list_branches(workspace_id: str, repo_name: str):
+async def list_branches(workspace_id: str, repo_name: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(workspace_store.get(workspace_id), user_id, "Workspace not found")
     try:
         branches = workspace_store.list_branches(workspace_id, repo_name)
         return {"branches": branches}
@@ -426,7 +651,14 @@ async def list_branches(workspace_id: str, repo_name: str):
 
 
 @router.post("/workspaces/{workspace_id}/repos/{repo_name}/checkout")
-async def checkout_branch(workspace_id: str, repo_name: str, branch: str = "main"):
+async def checkout_branch(
+    workspace_id: str,
+    repo_name: str,
+    branch: str = "main",
+    x_user_id: UserHeader = None,
+):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(workspace_store.get(workspace_id), user_id, "Workspace not found")
     try:
         result = workspace_store.checkout_branch(workspace_id, repo_name, branch)
         return result

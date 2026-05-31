@@ -39,6 +39,12 @@ def test_runtime_config_defaults_when_yaml_is_missing(monkeypatch, tmp_path):
     config._load_runtime_config.cache_clear()
 
 
+def test_settings_env_file_is_runtime_local():
+    env_file = Path(settings.model_config["env_file"])
+
+    assert env_file == Path(__file__).resolve().parents[1] / ".env"
+
+
 def test_runtime_config_reads_repository_registry_from_yaml(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -75,6 +81,33 @@ repositories:
         }
     ]
     assert settings.get_repository("app")["name"] == "app-service"
+
+    config._load_runtime_config.cache_clear()
+
+
+def test_runtime_config_reads_enabled_users(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+users:
+  - id: zhaojindong
+    name: zhaojindong
+    enabled: true
+  - id: disabled
+    name: Disabled
+    enabled: false
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config, "_runtime_config_path", lambda: config_path)
+    config._load_runtime_config.cache_clear()
+
+    assert settings.enabled_users == [
+        {"id": "zhaojindong", "name": "zhaojindong", "enabled": True}
+    ]
+    assert settings.default_user_id == "zhaojindong"
+    assert settings.get_user("zhaojindong")["name"] == "zhaojindong"
 
     config._load_runtime_config.cache_clear()
 

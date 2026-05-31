@@ -17,6 +17,23 @@ repositories:
     default_branch: main
     enabled: true
 
+users:
+  - id: zhaojindong
+    name: zhaojindong
+    enabled: true
+  - id: user01
+    name: Bob
+    enabled: true
+  - id: user02
+    name: Carol
+    enabled: true
+  - id: user03
+    name: Dave
+    enabled: true
+  - id: user04
+    name: Erin
+    enabled: true
+
 # UI/stream display configuration for fast-harness runtime.
 stream:
   # Empty list hides SDK tool process cards such as Bash, Grep, and Read.

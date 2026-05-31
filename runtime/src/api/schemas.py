@@ -17,6 +17,11 @@ class RenameRequest(BaseModel):
     name: str = Field(..., min_length=1, description="New display name")
 
 
+class FeedbackRequest(BaseModel):
+    feedback: str = Field(..., min_length=1, max_length=5000)
+    message_excerpt: str | None = Field(default=None, max_length=2000)
+
+
 class SessionCreateRequest(BaseModel):
     workspace_id: str = Field(..., description="Workspace this session belongs to")
     repo_name: str | None = Field(default=None, description="Repo to checkout before the session starts")
@@ -42,6 +47,40 @@ class WorkspaceCreateRequest(BaseModel):
 class WorkspaceRepoAddRequest(BaseModel):
     repo_key: str = Field(..., description="Registered repository key to add")
     branch: str | None = Field(default=None)
+
+
+class UserInfo(BaseModel):
+    id: str
+    name: str
+    enabled: bool
+
+
+class UserListResponse(BaseModel):
+    users: list[UserInfo]
+    default_user_id: str
+
+
+class UsageCommandStat(BaseModel):
+    command: str
+    count: int
+
+
+class UsageUserStat(BaseModel):
+    user_id: str
+    name: str
+    workspace_count: int
+    session_count: int
+    conversation_count: int
+    result_count: int
+    command_count: int
+    feedback_count: int
+    last_active: str | None = None
+    commands: list[UsageCommandStat] = Field(default_factory=list)
+
+
+class UsageStatsResponse(BaseModel):
+    users: list[UsageUserStat]
+    totals: dict[str, int]
 
 
 # ── Responses ──
@@ -71,6 +110,7 @@ class WorkspaceResponse(BaseModel):
     repos: list[dict]
     created_at: str
     updated_at: str
+    user_id: str | None = Field(default=None)
 
 
 class WorkspaceListResponse(BaseModel):
@@ -118,6 +158,11 @@ class AnswerRequest(BaseModel):
 class AnswerResponse(BaseModel):
     status: str
     answered: int
+
+
+class FeedbackResponse(BaseModel):
+    status: str
+    path: str
 
 
 class AnswerEntry(BaseModel):

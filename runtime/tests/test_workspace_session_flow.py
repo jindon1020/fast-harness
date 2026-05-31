@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from src.api import router
 from src.api.schemas import (
+    FeedbackRequest,
     RenameRequest,
     SessionCreateRequest,
     WorkspaceCreateRequest,
@@ -34,12 +35,13 @@ async def test_workspace_creation_uses_selected_registered_repositories(monkeypa
         def __init__(self):
             self.created = None
 
-        def create(self, name, repositories):
-            self.created = (name, repositories)
+        def create(self, name, repositories, user_id=None):
+            self.created = (name, repositories, user_id)
             return {
                 "workspace_id": "ws-1",
                 "name": name,
                 "cwd": "/tmp/ws-1",
+                "user_id": user_id,
                 "repos": [
                     {"name": repo["name"], "branch": repo["branch"]}
                     for repo in repositories
@@ -77,6 +79,7 @@ async def test_workspace_creation_uses_selected_registered_repositories(monkeypa
         )
     )
 
+    assert fake_store.created[2] == "zhaojindong"
     assert [repo["name"] for repo in fake_store.created[1]] == [
         "app-service",
         "api-service",
@@ -143,6 +146,16 @@ async def test_workspace_can_be_renamed(monkeypatch):
         def __init__(self):
             self.renamed = None
 
+        def get(self, workspace_id):
+            return {
+                "workspace_id": workspace_id,
+                "name": "old",
+                "cwd": "/tmp/ws-1",
+                "repos": [],
+                "created_at": "now",
+                "updated_at": "now",
+            }
+
         def rename(self, workspace_id, name):
             self.renamed = (workspace_id, name)
             return {
@@ -168,6 +181,15 @@ async def test_session_can_be_renamed(monkeypatch):
     class FakeSessionStore:
         def __init__(self):
             self.renamed = None
+
+        def get(self, session_id):
+            return {
+                "session_id": session_id,
+                "workspace": "/tmp/ws-1",
+                "created_at": "now",
+                "last_access": "now",
+                "metadata": {"workspace_id": "ws-1"},
+            }
 
         def rename(self, session_id, name):
             self.renamed = (session_id, name)
@@ -216,10 +238,11 @@ async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
             self.workspace_dir = None
             self.session_id = None
 
-        def create(self, *, workspace_dir, metadata, session_id=None):
+        def create(self, *, workspace_dir, metadata, session_id=None, user_id=None):
             self.workspace_dir = workspace_dir
             self.metadata = metadata
             self.session_id = session_id
+            self.user_id = user_id
             return session_id
 
         def get(self, session_id):
@@ -252,6 +275,7 @@ async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
         tmp_path / ".session-worktrees" / fake_session_store.session_id
     )
     assert fake_session_store.metadata == {
+        "user_id": "zhaojindong",
         "workspace_id": "ws-1",
         "repo_name": "app",
         "branch": "feature/x",
@@ -259,6 +283,7 @@ async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
             tmp_path / ".session-worktrees" / fake_session_store.session_id / "app"
         ),
     }
+    assert fake_session_store.user_id == "zhaojindong"
 
 
 @pytest.mark.asyncio
@@ -298,6 +323,39 @@ async def test_workspace_deletion_removes_bound_sessions(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_workspaces_are_scoped_to_current_user(monkeypatch):
+    monkeypatch.setattr(
+        router.workspace_store,
+        "list_all",
+        lambda: [
+            {
+                "workspace_id": "legacy",
+                "name": "legacy",
+                "cwd": "/tmp/legacy",
+                "repos": [],
+                "created_at": "now",
+                "updated_at": "now",
+            },
+            {
+                "workspace_id": "ws-user01",
+                "name": "user01",
+                "cwd": "/tmp/ws-user01",
+                "repos": [],
+                "user_id": "user01",
+                "created_at": "now",
+                "updated_at": "now",
+            },
+        ],
+    )
+
+    default_response = await router.list_workspaces()
+    user_response = await router.list_workspaces(x_user_id="user01")
+
+    assert [workspace.workspace_id for workspace in default_response.workspaces] == ["legacy"]
+    assert [workspace.workspace_id for workspace in user_response.workspaces] == ["ws-user01"]
+
+
+@pytest.mark.asyncio
 async def test_legacy_sessions_are_hidden_from_list(monkeypatch, tmp_path):
     monkeypatch.setattr(
         router.session_store,
@@ -322,6 +380,37 @@ async def test_legacy_sessions_are_hidden_from_list(monkeypatch, tmp_path):
 
     response = await router.list_sessions()
     assert [session.session_id for session in response.sessions] == ["bound"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_sessions_belong_to_default_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        router.session_store,
+        "list_all",
+        lambda: [
+            {
+                "session_id": "legacy-default",
+                "workspace": str(tmp_path / "legacy-default"),
+                "created_at": "now",
+                "last_access": "now",
+                "metadata": {"workspace_id": "ws-1", "repo_name": "app", "branch": "main"},
+            },
+            {
+                "session_id": "other-user",
+                "workspace": str(tmp_path / "other-user"),
+                "created_at": "now",
+                "last_access": "now",
+                "user_id": "user01",
+                "metadata": {"workspace_id": "ws-2", "repo_name": "app", "branch": "main"},
+            },
+        ],
+    )
+
+    default_response = await router.list_sessions()
+    other_response = await router.list_sessions(x_user_id="user01")
+
+    assert [session.session_id for session in default_response.sessions] == ["legacy-default"]
+    assert [session.session_id for session in other_response.sessions] == ["other-user"]
 
 
 @pytest.mark.asyncio
@@ -386,6 +475,156 @@ async def test_query_checks_out_session_branch_before_streaming(monkeypatch, tmp
         {"type": "user", "prompt": "hi"},
         {"type": "result", "result": "ok"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_session_access_is_scoped_to_current_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(tmp_path),
+            "created_at": "now",
+            "last_access": "now",
+            "user_id": "user01",
+            "metadata": {"workspace_id": "ws-1", "repo_name": "app", "branch": "main", "user_id": "user01"},
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router.get_session("sess-1", x_user_id="user02")
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_feedback_is_saved_by_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(router, "FEEDBACK_PATH", tmp_path / "feedback.md")
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(tmp_path),
+            "created_at": "now",
+            "last_access": "now",
+            "user_id": "zhaojindong",
+            "metadata": {"workspace_id": "ws-1", "user_id": "zhaojindong"},
+        },
+    )
+
+    response = await router.submit_feedback(
+        "sess-1",
+        FeedbackRequest(feedback="回复不够准确", message_excerpt="AI answer"),
+    )
+
+    content = (tmp_path / "feedback.md").read_text(encoding="utf-8")
+    assert response.status == "ok"
+    assert "## zhaojindong" in content
+    assert "session_id: `sess-1`" in content
+    assert "> 回复不够准确" in content
+    assert "> AI answer" in content
+
+
+@pytest.mark.asyncio
+async def test_feedback_rejects_cross_user_session(monkeypatch, tmp_path):
+    monkeypatch.setattr(router, "FEEDBACK_PATH", tmp_path / "feedback.md")
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(tmp_path),
+            "created_at": "now",
+            "last_access": "now",
+            "user_id": "user01",
+            "metadata": {"workspace_id": "ws-1", "user_id": "user01"},
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router.submit_feedback(
+            "sess-1",
+            FeedbackRequest(feedback="test"),
+            x_user_id="zhaojindong",
+        )
+
+    assert exc_info.value.status_code == 404
+    assert not (tmp_path / "feedback.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_usage_stats_aggregates_by_user(monkeypatch, tmp_path):
+    feedback_path = tmp_path / "feedback.md"
+    feedback_path.write_text(
+        """
+# Feedback
+
+## zhaojindong
+
+### 2026-05-31T01:00:00+00:00
+
+## user01
+
+### 2026-05-31T02:00:00+00:00
+### 2026-05-31T03:00:00+00:00
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(router, "FEEDBACK_PATH", feedback_path)
+
+    class FakeWorkspaceStore:
+        def list_all(self):
+            return [
+                {"workspace_id": "ws-1", "user_id": "zhaojindong"},
+                {"workspace_id": "ws-2", "user_id": "user01"},
+            ]
+
+    class FakeSessionStore:
+        def list_all(self):
+            return [
+                {
+                    "session_id": "s1",
+                    "user_id": "zhaojindong",
+                    "last_access": "2026-05-31T04:00:00+00:00",
+                    "metadata": {"workspace_id": "ws-1"},
+                },
+                {
+                    "session_id": "s2",
+                    "user_id": "user01",
+                    "last_access": "2026-05-31T05:00:00+00:00",
+                    "metadata": {"workspace_id": "ws-2"},
+                },
+            ]
+
+        def list_messages(self, session_id):
+            if session_id == "s1":
+                return [
+                    {"timestamp": "2026-05-31T04:01:00+00:00", "message": {"type": "user", "prompt": "/implement build api"}},
+                    {"timestamp": "2026-05-31T04:02:00+00:00", "message": {"type": "result", "result": "ok"}},
+                    {"timestamp": "2026-05-31T04:03:00+00:00", "message": {"type": "user", "prompt": "plain chat"}},
+                ]
+            return [
+                {"timestamp": "2026-05-31T05:01:00+00:00", "message": {"type": "user", "prompt": "/fix bug"}},
+                {"timestamp": "2026-05-31T05:02:00+00:00", "message": {"type": "user", "prompt": "/fix retry"}},
+            ]
+
+    monkeypatch.setattr(router, "workspace_store", FakeWorkspaceStore())
+    monkeypatch.setattr(router, "session_store", FakeSessionStore())
+
+    response = await router.usage_stats()
+    by_user = {item.user_id: item for item in response.users}
+
+    assert by_user["zhaojindong"].conversation_count == 2
+    assert by_user["zhaojindong"].result_count == 1
+    assert by_user["zhaojindong"].command_count == 1
+    assert by_user["zhaojindong"].commands[0].command == "implement"
+    assert by_user["zhaojindong"].feedback_count == 1
+    assert by_user["user01"].command_count == 2
+    assert by_user["user01"].commands[0].command == "fix"
+    assert by_user["user01"].feedback_count == 2
+    assert response.totals["conversation_count"] == 4
 
 
 @pytest.mark.asyncio
@@ -568,6 +807,30 @@ def test_workspace_creates_session_specific_worktree(monkeypatch, tmp_path):
     ]
 
 
+def test_workspace_store_backfills_legacy_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(workspace.settings, "workspace_root", str(tmp_path))
+    store_dir = tmp_path / ".workspaces"
+    store_dir.mkdir()
+    record_path = store_dir / "ws-1.json"
+    record_path.write_text(
+        json.dumps(
+            {
+                "workspace_id": "ws-1",
+                "name": "legacy",
+                "cwd": str(tmp_path / "ws-1"),
+                "repos": [],
+                "created_at": "now",
+                "updated_at": "now",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    workspace.WorkspaceStore()
+
+    assert json.loads(record_path.read_text())["user_id"] == "zhaojindong"
+
+
 def test_session_history_is_persisted_under_workspace_and_deleted(monkeypatch, tmp_path):
     monkeypatch.setattr(session.settings, "workspace_root", str(tmp_path / "runtime-workspaces"))
     store = session.SessionStore()
@@ -591,3 +854,28 @@ def test_session_history_is_persisted_under_workspace_and_deleted(monkeypatch, t
 
     assert not history_path.exists()
     assert not store._path(session_id).exists()
+
+
+def test_session_store_backfills_legacy_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(session.settings, "workspace_root", str(tmp_path))
+    store_dir = tmp_path / ".sessions"
+    store_dir.mkdir()
+    record_path = store_dir / "sess-1.json"
+    record_path.write_text(
+        json.dumps(
+            {
+                "session_id": "sess-1",
+                "workspace": str(tmp_path / "ws-1"),
+                "created_at": "now",
+                "last_access": "now",
+                "metadata": {"workspace_id": "ws-1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    session.SessionStore()
+
+    record = json.loads(record_path.read_text())
+    assert record["user_id"] == "zhaojindong"
+    assert record["metadata"]["user_id"] == "zhaojindong"

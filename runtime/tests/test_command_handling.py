@@ -101,6 +101,14 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn('const API = "/api";', html)
         self.assertNotIn('const API = "http://localhost:8002/api";', html)
 
+    def test_ui_defaults_to_light_theme_and_persists_choice(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('<html lang="en" data-theme="light">', html)
+        self.assertIn('function initTheme()', html)
+        self.assertIn('localStorage.setItem("theme", next)', html)
+        self.assertIn('savedTheme || "light"', html)
+
     def test_ui_supports_registered_repo_selection(self):
         html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
 
@@ -128,8 +136,26 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn("localStorage.setItem(\"sidebarWidth\"", html)
         self.assertIn("workspace-action--session", html)
         self.assertIn("workspace-action--repo", html)
+
+    def test_ui_supports_ai_message_feedback(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn("function addFeedbackButton", html)
+        self.assertIn("function showFeedbackDialog", html)
+        self.assertIn("/feedback", html)
+        self.assertIn(".feedback-btn", html)
         self.assertIn("workspace-action--delete", html)
         self.assertIn("sidebar-action", html)
+
+    def test_ui_supports_usage_stats_panel(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('id="btnUsage"', html)
+        self.assertNotIn('data-tab="usage"', html)
+        self.assertIn('panelTabs.style.display = state.panelTab === "usage" ? "none" : "flex"', html)
+        self.assertIn("function loadUsageStats", html)
+        self.assertIn('api("GET", "/usage-stats")', html)
+        self.assertIn(".usage-summary", html)
 
     def test_ui_supports_workspace_and_session_rename(self):
         html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()

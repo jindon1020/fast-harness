@@ -8,6 +8,7 @@ import subprocess
 import re
 import shlex
 import shutil
+from urllib.parse import quote
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -61,13 +62,26 @@ def detect_provider(url: str) -> GitProvider:
 
 def _build_auth_url(url: str, provider: GitProvider) -> str:
     """Inject token into HTTPS URL for authentication."""
+    if not url.startswith("https://"):
+        return url
     if provider == GitProvider.github and settings.git_github_token:
-        return re.sub(r"https://", f"https://{settings.git_github_token}@", url)
+        token = quote(settings.git_github_token, safe="")
+        return re.sub(r"https://", f"https://{token}@", url, count=1)
     if provider == GitProvider.codeup and settings.git_codeup_token:
+        token = quote(settings.git_codeup_token, safe="")
         if settings.git_codeup_user:
-            return re.sub(r"https://", f"https://{settings.git_codeup_user}:{settings.git_codeup_token}@", url)
-        return re.sub(r"https://", f"https://{settings.git_codeup_token}@", url)
+            user = quote(settings.git_codeup_user, safe="")
+            return re.sub(r"https://", f"https://{user}:{token}@", url, count=1)
+        return re.sub(r"https://", f"https://{token}@", url, count=1)
     return url
+
+
+def _strip_auth_from_url(url: str) -> str:
+    return re.sub(r"https://[^@/\s]+@", "https://", url)
+
+
+def _sanitize_git_output(output: str) -> str:
+    return _strip_auth_from_url(output)
 
 
 @dataclass
@@ -148,6 +162,18 @@ def remote_branches(url: str) -> list[str]:
     return sorted(set(branches_list))
 
 
+def _fetch_remote_heads(repo_path: Path, url: Optional[str] = None, timeout: int = 60) -> tuple[int, str, str]:
+    """Fetch remote heads using freshly configured credentials, not cached origin auth."""
+    remote_url = url or _get_remote_url(repo_path)
+    provider = detect_provider(remote_url)
+    auth_url = _build_auth_url(remote_url, provider)
+    return _run(
+        ["git", "fetch", "--prune", auth_url, "+refs/heads/*:refs/remotes/origin/*"],
+        repo_path,
+        timeout=timeout,
+    )
+
+
 def _install_fast_harness_suite(repo_path: Path) -> None:
     """Install or refresh fast-harness project files inside a workspace worktree."""
     logger.info("Installing fast-harness suite in %s", repo_path)
@@ -217,15 +243,14 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
     if not source_repo.exists():
         rc, _stdout, stderr = _run(["git", "clone", auth_url, repo_name], source_dir)
         if rc != 0:
-            raise RuntimeError(f"Source clone failed: {stderr}")
+            raise RuntimeError(f"Source clone failed: {_sanitize_git_output(stderr)}")
+        _run(["git", "remote", "set-url", "origin", url], source_repo)
+    else:
+        _run(["git", "remote", "set-url", "origin", url], source_repo)
 
-    rc, _stdout, stderr = _run(
-        ["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"],
-        source_repo,
-        timeout=60,
-    )
+    rc, _stdout, stderr = _fetch_remote_heads(source_repo, url=url, timeout=60)
     if rc != 0:
-        raise RuntimeError(f"Source fetch failed: {stderr}")
+        raise RuntimeError(f"Source fetch failed: {_sanitize_git_output(stderr)}")
 
     if branch is None:
         branch = _detect_default_branch(auth_url)
@@ -236,7 +261,7 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
         timeout=120,
     )
     if rc != 0:
-        raise RuntimeError(f"Worktree creation failed: {stderr}")
+        raise RuntimeError(f"Worktree creation failed: {_sanitize_git_output(stderr)}")
 
     try:
         _install_fast_harness_suite(worktree_path)
@@ -255,13 +280,15 @@ def pull(repo_path: Path, branch: Optional[str] = None) -> RepoInfo:
     if branch:
         _run(["git", "checkout", branch], repo_path)
 
-    rc, stdout, stderr = _run(["git", "pull", "--ff-only"], repo_path)
+    current_branch = _get_current_branch(repo_path)
+    rc, stdout, stderr = _fetch_remote_heads(repo_path)
+    if rc == 0:
+        rc, stdout, stderr = _run(["git", "merge", "--ff-only", f"origin/{current_branch}"], repo_path)
     if rc != 0:
-        logger.warning("Pull may have conflicts: %s", stderr)
+        logger.warning("Pull may have conflicts: %s", _sanitize_git_output(stderr))
 
     # Read remote info
     remote_url = _get_remote_url(repo_path)
-    current_branch = _get_current_branch(repo_path)
     return RepoInfo(
         name=repo_path.name, url=remote_url,
         provider=detect_provider(remote_url),
@@ -274,7 +301,7 @@ def checkout(repo_path: Path, branch: str) -> RepoInfo:
     if not (repo_path / ".git").exists():
         raise RuntimeError(f"Not a git repository: {repo_path}")
 
-    _run(["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"], repo_path, timeout=60)
+    _fetch_remote_heads(repo_path, timeout=60)
     _reset_fast_harness_managed_paths(repo_path)
     rc, _stdout, stderr = _run(["git", "checkout", branch], repo_path)
     if rc != 0:
@@ -284,9 +311,9 @@ def checkout(repo_path: Path, branch: str) -> RepoInfo:
     if rc != 0:
         raise RuntimeError(f"Checkout failed: {stderr}")
 
-    rc, _stdout, stderr = _run(["git", "pull", "--ff-only"], repo_path)
+    rc, _stdout, stderr = _run(["git", "merge", "--ff-only", f"origin/{branch}"], repo_path)
     if rc != 0:
-        logger.warning("Pull may have conflicts: %s", stderr)
+        logger.warning("Pull may have conflicts: %s", _sanitize_git_output(stderr))
 
     _install_fast_harness_suite(repo_path)
 
@@ -308,7 +335,7 @@ def status(repo_path: Path) -> GitStatus:
     branch = _get_current_branch(repo_path)
 
     # Fetch to get ahead/behind
-    _run(["git", "fetch"], repo_path, timeout=30)
+    _fetch_remote_heads(repo_path, timeout=30)
 
     # Ahead/behind
     ahead = behind = 0
@@ -337,7 +364,7 @@ def branches(repo_path: Path) -> list[str]:
     """List branches in a repo."""
     if not (repo_path / ".git").exists():
         return []
-    _run(["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"], repo_path, timeout=60)
+    _fetch_remote_heads(repo_path, timeout=60)
     rc, stdout, _ = _run(["git", "branch", "-a"], repo_path)
     if rc != 0:
         return []
@@ -355,7 +382,7 @@ def _get_remote_url(repo_path: Path) -> str:
     rc, stdout, _ = _run(["git", "remote", "get-url", "origin"], repo_path)
     # Strip embedded tokens from URL for safe display
     url = stdout if rc == 0 else ""
-    return re.sub(r"https://[^@]+@", "https://", url)
+    return _strip_auth_from_url(url)
 
 
 def _get_current_branch(repo_path: Path) -> str:

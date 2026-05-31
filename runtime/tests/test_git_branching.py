@@ -59,7 +59,44 @@ def test_create_worktree_uses_source_repo_and_branch(monkeypatch, tmp_path):
     assert repo.name == "app"
     assert repo.branch == "feature/x"
     assert any(cmd[:2] == ["git", "clone"] for cmd, _cwd in commands)
+    assert any(cmd == ["git", "remote", "set-url", "origin", "https://example.com/app.git"] for cmd, _cwd in commands)
+    assert any(cmd == ["git", "fetch", "--prune", "https://example.com/app.git", "+refs/heads/*:refs/remotes/origin/*"] for cmd, _cwd in commands)
     assert any(cmd == ["git", "worktree", "add", str(tmp_path / "ws-1" / "app"), "origin/feature/x"] for cmd, _cwd in commands)
+
+
+def test_create_worktree_fetches_existing_source_with_fresh_codeup_token(monkeypatch, tmp_path):
+    source_repo = tmp_path / ".sources" / "app"
+    (source_repo / ".git").mkdir(parents=True)
+    commands = []
+
+    monkeypatch.setattr(git.settings, "git_codeup_user", "alice")
+    monkeypatch.setattr(git.settings, "git_codeup_token", "new token")
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    repo_url = "https://codeup.aliyun.com/group/app.git"
+    git.create_worktree(
+        url=repo_url,
+        source_dir=tmp_path / ".sources",
+        worktree_path=tmp_path / "ws-1" / "app",
+        branch="feature/x",
+    )
+
+    assert (["git", "remote", "set-url", "origin", repo_url], source_repo) in commands
+    assert (
+        [
+            "git",
+            "fetch",
+            "--prune",
+            "https://alice:new%20token@codeup.aliyun.com/group/app.git",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+        source_repo,
+    ) in commands
 
 
 def test_create_worktree_installs_fast_harness_suite_after_worktree_add(monkeypatch, tmp_path):
@@ -174,6 +211,8 @@ def test_branches_fetches_remote_branches(monkeypatch, tmp_path):
 
     def fake_run(cmd, cwd, timeout=120):
         commands.append(cmd)
+        if cmd == ["git", "remote", "get-url", "origin"]:
+            return 0, "https://example.com/app.git", ""
         if cmd == ["git", "branch", "-a"]:
             return 0, "* main\n  remotes/origin/main\n  remotes/origin/feature/x", ""
         return 0, "", ""
@@ -181,7 +220,7 @@ def test_branches_fetches_remote_branches(monkeypatch, tmp_path):
     monkeypatch.setattr(git, "_run", fake_run)
 
     assert git.branches(repo_path) == ["feature/x", "main"]
-    assert ["git", "fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--prune"] in commands
+    assert ["git", "fetch", "--prune", "https://example.com/app.git", "+refs/heads/*:refs/remotes/origin/*"] in commands
 
 
 def test_checkout_branch_creates_tracking_branch_from_origin(monkeypatch, tmp_path):

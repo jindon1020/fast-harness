@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -214,6 +214,19 @@ body::before {
   padding: 12px 20px; border-top: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
 }
+
+.user-select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-v);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 0 8px;
+}
+.user-select:focus { outline: none; border-color: var(--accent); color: var(--text); }
 
 .theme-toggle {
   width: 34px; height: 20px; border-radius: 10px;
@@ -595,6 +608,38 @@ body::before {
   font-size: 10px; color: var(--text-muted); font-family: var(--font-mono);
   margin-top: 4px; text-align: right;
 }
+.feedback-action {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+.feedback-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-v);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+.feedback-btn:hover { border-color: var(--accent); color: var(--text); background: var(--bg-hover); }
+.feedback-btn:disabled { opacity: 0.45; cursor: default; }
+.feedback-textarea {
+  min-height: 130px;
+  resize: vertical;
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px;
+}
+.feedback-textarea:focus { outline: none; border-color: var(--accent); }
 
 /* ═══════════════════════ INPUT ═══════════════════════ */
 
@@ -723,6 +768,61 @@ body::before {
   max-height: 400px; overflow: auto; color: var(--text-dim);
   line-height: 1.5;
 }
+.usage-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.usage-metric {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--bg-elevated);
+}
+.usage-metric__value { font-size: 20px; font-weight: 650; color: var(--text); }
+.usage-metric__label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.usage-user {
+  border-top: 1px solid var(--border);
+  padding: 12px 2px;
+}
+.usage-user__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.usage-user__name { font-size: 13px; font-weight: 650; color: var(--text); }
+.usage-user__active { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); text-align: right; }
+.usage-user__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.usage-user__stat {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px;
+}
+.usage-user__stat strong { display: block; font-size: 15px; color: var(--text); }
+.usage-user__stat span { font-size: 10px; color: var(--text-muted); }
+.usage-commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.usage-command {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid var(--border-v);
+  border-radius: 999px;
+  padding: 3px 7px;
+}
 
 /* ═══════════════════════ TOOLBAR ═══════════════════════ */
 
@@ -796,6 +896,7 @@ body::before {
       <div id="workspaceList"></div>
     </div>
     <div class="sidebar__foot">
+      <select class="user-select" id="userSelect" title="Current user"></select>
       <button class="theme-toggle" id="themeToggle" title="Toggle theme"></button>
       <span class="version">v0.1</span>
     </div>
@@ -805,6 +906,7 @@ body::before {
   <main class="main">
     <div class="toolbar">
       <span class="toolbar__title" id="toolbarTitle">Select or create a session</span>
+      <button class="btn-tool" id="btnUsage" title="Usage">Usage</button>
       <button class="btn-tool" id="btnCapabilities" title="Capabilities">⚙ Capabilities</button>
       <button class="btn-tool" id="btnFiles" title="Session files">📁 Files</button>
     </div>
@@ -848,8 +950,12 @@ body::before {
 
 const API = "/api";
 
+function authHeaders() {
+  return state.currentUserId ? { "X-User-Id": state.currentUserId } : {};
+}
+
 async function api(method, path, body) {
-  const opts = { method, headers: { "Content-Type": "application/json" } };
+  const opts = { method, headers: { "Content-Type": "application/json", ...authHeaders() } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
   if (!res.ok) throw new Error(await res.text());
@@ -866,6 +972,8 @@ let state = {
   workspaceBranches: {},
   repositoryBranches: {},
   repositories: [],
+  users: [],
+  currentUserId: localStorage.getItem("currentUserId") || "",
   defaultBranches: [],
   capabilities: null,
   sessionStreams: {},
@@ -894,8 +1002,50 @@ const panel = $("#panel");
 const panelBody = $("#panelBody");
 const panelTabs = $("#panelTabs");
 const panelTitle = $("#panelTitle");
+const btnUsage = $("#btnUsage");
 const btnCapabilities = $("#btnCapabilities");
 const btnFiles = $("#btnFiles");
+const userSelect = $("#userSelect");
+
+/* ═══════════════════════ USERS ═══════════════════════ */
+
+async function loadUsers() {
+  const data = await api("GET", "/users");
+  state.users = data.users || [];
+  const validSavedUser = state.users.some(user => user.id === state.currentUserId);
+  state.currentUserId = validSavedUser
+    ? state.currentUserId
+    : (data.default_user_id || state.users[0]?.id || "");
+  if (state.currentUserId) localStorage.setItem("currentUserId", state.currentUserId);
+  renderUsers();
+}
+
+function renderUsers() {
+  userSelect.innerHTML = state.users.map(user =>
+    `<option value="${escapeHtml(user.id)}" ${user.id === state.currentUserId ? "selected" : ""}>${escapeHtml(user.name)}</option>`
+  ).join("");
+}
+
+async function switchUser(userId) {
+  if (!userId || userId === state.currentUserId) return;
+  state.currentUserId = userId;
+  localStorage.setItem("currentUserId", userId);
+  state.activeSession = null;
+  state.activeWorkspace = null;
+  state.sessions = [];
+  state.workspaces = [];
+  state.workspaceBranches = {};
+  chatEmpty.style.display = "flex";
+  chatInner.style.display = "none";
+  chatInner.innerHTML = "";
+  promptInput.disabled = true;
+  updateSendButton();
+  inputHint.textContent = "No session selected";
+  toolbarTitle.textContent = "Select or create a session";
+  await loadWorkspaces();
+  await loadSessions();
+  if (state.panelOpen && state.panelTab === "usage") loadUsageStats();
+}
 
 /* ═══════════════════════ SESSIONS ═══════════════════════ */
 
@@ -1521,6 +1671,7 @@ function addMessage(type, data) {
       <div class="msg__text">${renderMarkdown(data.result || "")}</div>
       ${data.total_cost_usd ? `<div class="msg__cost">$${data.total_cost_usd.toFixed(4)}</div>` : ""}
     `;
+    addFeedbackButton(div, data);
     chatInner.appendChild(div);
     scrollToBottom();
     return;
@@ -1709,6 +1860,82 @@ async function submitAskAnswers(block) {
     }
     alert("Failed to submit answers: " + e.message);
   }
+}
+
+function addFeedbackButton(container, msg = {}) {
+  if (!container || container.dataset.feedbackAdded === "true") return;
+  container.dataset.feedbackAdded = "true";
+  const wrap = document.createElement("div");
+  wrap.className = "feedback-action";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "feedback-btn";
+  btn.textContent = "Feedback";
+  btn.addEventListener("click", () => openFeedbackDialog(container, btn, msg));
+  wrap.appendChild(btn);
+  container.appendChild(wrap);
+}
+
+async function openFeedbackDialog(messageEl, button, msg = {}) {
+  if (!state.activeSession) return;
+  const feedback = await showFeedbackDialog();
+  if (!feedback || !feedback.trim()) return;
+
+  button.disabled = true;
+  const idleText = button.textContent;
+  button.textContent = "Submitting...";
+  try {
+    await api("POST", `/sessions/${state.activeSession}/feedback`, {
+      feedback: feedback.trim(),
+      message_excerpt: collectFeedbackExcerpt(messageEl, msg),
+    });
+    button.textContent = "Submitted";
+  } catch (e) {
+    button.disabled = false;
+    button.textContent = idleText;
+    alert("Failed to submit feedback: " + e.message);
+  }
+}
+
+function collectFeedbackExcerpt(messageEl, msg = {}) {
+  if (msg.result) return String(msg.result).slice(0, 2000);
+  const clone = messageEl.cloneNode(true);
+  clone.querySelectorAll(".feedback-action").forEach(el => el.remove());
+  return clone.innerText.trim().slice(0, 2000);
+}
+
+function showFeedbackDialog() {
+  return new Promise(resolve => {
+    let overlay = document.getElementById("feedbackDialogOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "feedbackDialogOverlay";
+      overlay.className = "dialog-overlay";
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="dialog">
+      <h3>Submit Feedback</h3>
+      <label>Feedback</label>
+      <textarea id="feedbackInput" class="feedback-textarea" placeholder="What should be improved?"></textarea>
+      <div class="btn-row">
+        <button class="btn-cancel" id="btnCancelFeedback">Cancel</button>
+        <button class="btn-confirm" id="btnConfirmFeedback">Submit</button>
+      </div>
+    </div>`;
+    overlay.style.display = "flex";
+    const input = document.getElementById("feedbackInput");
+    const close = value => {
+      overlay.style.display = "none";
+      resolve(value);
+    };
+    document.getElementById("btnCancelFeedback").onclick = () => close(null);
+    document.getElementById("btnConfirmFeedback").onclick = () => close(input.value);
+    input.addEventListener("keydown", event => {
+      if (event.key === "Escape") close(null);
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") close(input.value);
+    });
+    requestAnimationFrame(() => input.focus());
+  });
 }
 
 function addSystemMessage(text) { addMessage("system", { text }); }
@@ -1948,7 +2175,7 @@ async function sendPrompt() {
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ prompt }),
       signal: stream.abortController.signal,
     });
@@ -2052,6 +2279,7 @@ function handleStreamMessage(msg, container, textEl) {
         container.appendChild(cost);
       }
     }
+    addFeedbackButton(container, msg);
   } else if (msg.type === "error") {
     const div = document.createElement("div");
     div.className = "msg__text";
@@ -2088,24 +2316,31 @@ function togglePanel(btn) {
   state.panelOpen = true;
   app.classList.add("app--panel-open");
   panel.style.display = "flex";
+  btnUsage.classList.remove("btn-tool--active");
   btnCapabilities.classList.remove("btn-tool--active");
   btnFiles.classList.remove("btn-tool--active");
   btn.classList.add("btn-tool--active");
-  state.panelTab = btn === btnCapabilities ? "capabilities" : btn === btnFiles ? "files" : "repos";
-  panelTitle.textContent = state.panelTab === "capabilities" ? "Capabilities" : state.panelTab === "files" ? "Session Files" : "Repos";
-  panelTabs.style.display = "flex";
+  state.panelTab = btn === btnUsage ? "usage" : btn === btnCapabilities ? "capabilities" : btn === btnFiles ? "files" : "repos";
+  panelTitle.textContent = panelTitleForTab(state.panelTab);
+  panelTabs.style.display = state.panelTab === "usage" ? "none" : "flex";
   $$(".panel__tab").forEach(t => t.classList.remove("panel__tab--active"));
   const tab = $(`.panel__tab[data-tab="${state.panelTab}"]`);
   if (tab) tab.classList.add("panel__tab--active");
-  if (state.panelTab === "capabilities") loadCapabilities();
+  if (state.panelTab === "usage") loadUsageStats();
+  else if (state.panelTab === "capabilities") loadCapabilities();
   else if (state.panelTab === "files") loadFiles();
   else renderRepoPanel();
+}
+
+function panelTitleForTab(tab) {
+  return tab === "usage" ? "Usage" : tab === "capabilities" ? "Capabilities" : tab === "files" ? "Session Files" : "Repos";
 }
 
 function closePanel() {
   state.panelOpen = false;
   app.classList.remove("app--panel-open");
   panel.style.display = "none";
+  btnUsage.classList.remove("btn-tool--active");
   btnCapabilities.classList.remove("btn-tool--active");
   btnFiles.classList.remove("btn-tool--active");
 }
@@ -2146,6 +2381,64 @@ function renderCapabilities(caps) {
   }
   if (!html) html = '<div style="color:var(--text-muted);font-size:12px;padding:12px">No capabilities discovered.</div>';
   panelBody.innerHTML = html;
+}
+
+async function loadUsageStats() {
+  panelBody.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+  try {
+    const data = await api("GET", "/usage-stats");
+    renderUsageStats(data);
+  } catch (e) {
+    panelBody.innerHTML = `<div class="msg--error">Failed to load usage: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderUsageStats(data) {
+  const totals = data.totals || {};
+  let html = `<div class="usage-summary">
+    ${usageMetric(totals.conversation_count || 0, "Conversations")}
+    ${usageMetric(totals.command_count || 0, "Commands")}
+    ${usageMetric(totals.session_count || 0, "Sessions")}
+    ${usageMetric(totals.feedback_count || 0, "Feedback")}
+  </div>`;
+
+  for (const user of (data.users || [])) {
+    const active = user.last_active ? formatDateTime(user.last_active) : "No activity";
+    const commands = (user.commands || []).length
+      ? user.commands.map(c => `<span class="usage-command">/${escapeHtml(c.command)} × ${c.count}</span>`).join("")
+      : '<span class="usage-command">No commands</span>';
+    html += `<div class="usage-user">
+      <div class="usage-user__head">
+        <div class="usage-user__name">${escapeHtml(user.name || user.user_id)}</div>
+        <div class="usage-user__active">${escapeHtml(active)}</div>
+      </div>
+      <div class="usage-user__grid">
+        ${usageUserStat(user.conversation_count || 0, "talks")}
+        ${usageUserStat(user.command_count || 0, "commands")}
+        ${usageUserStat(user.result_count || 0, "results")}
+        ${usageUserStat(user.session_count || 0, "sessions")}
+        ${usageUserStat(user.workspace_count || 0, "workspaces")}
+        ${usageUserStat(user.feedback_count || 0, "feedback")}
+      </div>
+      <div class="usage-commands">${commands}</div>
+    </div>`;
+  }
+
+  panelBody.innerHTML = html;
+}
+
+function usageMetric(value, label) {
+  return `<div class="usage-metric"><div class="usage-metric__value">${Number(value || 0)}</div><div class="usage-metric__label">${escapeHtml(label)}</div></div>`;
+}
+
+function usageUserStat(value, label) {
+  return `<div class="usage-user__stat"><strong>${Number(value || 0)}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
 }
 
 async function loadFiles() {
@@ -2272,7 +2565,14 @@ function applyCommandSuggestion(index) {
 function toggleTheme() {
   const html = document.documentElement;
   const current = html.getAttribute("data-theme");
-  html.setAttribute("data-theme", current === "dark" ? "light" : "dark");
+  const next = current === "dark" ? "light" : "dark";
+  html.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+}
+
+function initTheme() {
+  const savedTheme = localStorage.getItem("theme");
+  document.documentElement.setAttribute("data-theme", savedTheme || "light");
 }
 
 function initSidebarResize() {
@@ -2340,6 +2640,7 @@ btnSend.addEventListener("click", () => {
   }
 });
 btnCapabilities.addEventListener("click", () => togglePanel(btnCapabilities));
+btnUsage.addEventListener("click", () => togglePanel(btnUsage));
 btnFiles.addEventListener("click", () => togglePanel(btnFiles));
 commandMenu.addEventListener("mousedown", (e) => {
   const item = e.target.closest(".command-menu__item");
@@ -2349,24 +2650,32 @@ commandMenu.addEventListener("mousedown", (e) => {
 });
 $("#btnClosePanel").addEventListener("click", closePanel);
 $("#themeToggle").addEventListener("click", toggleTheme);
+userSelect.addEventListener("change", () => switchUser(userSelect.value));
 panelTabs.addEventListener("click", (e) => {
   if (!e.target.classList.contains("panel__tab")) return;
   state.panelTab = e.target.dataset.tab;
-  panelTitle.textContent = state.panelTab === "capabilities" ? "Capabilities" : state.panelTab === "files" ? "Session Files" : "Repos";
+  panelTitle.textContent = panelTitleForTab(state.panelTab);
   $$(".panel__tab").forEach(t => t.classList.remove("panel__tab--active"));
   e.target.classList.add("panel__tab--active");
+  btnUsage.classList.toggle("btn-tool--active", state.panelTab === "usage");
   btnCapabilities.classList.toggle("btn-tool--active", state.panelTab === "capabilities");
   btnFiles.classList.toggle("btn-tool--active", state.panelTab === "files");
-  if (state.panelTab === "capabilities") loadCapabilities();
+  if (state.panelTab === "usage") loadUsageStats();
+  else if (state.panelTab === "capabilities") loadCapabilities();
   else if (state.panelTab === "files") loadFiles();
   else renderRepoPanel();
 });
 
 /* ═══════════════════════ INIT ═══════════════════════ */
 
-loadWorkspaces();
-loadSessions();
+loadUsers()
+  .then(() => Promise.all([loadWorkspaces(), loadSessions()]))
+  .catch(e => {
+    console.error("Failed to initialize users:", e);
+    addErrorMessage("Failed to initialize users: " + e.message);
+  });
 initSidebarResize();
+initTheme();
 </script>
 </body>
 </html>
