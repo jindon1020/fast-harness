@@ -92,6 +92,32 @@ async def test_workspace_creation_uses_selected_registered_repositories(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_workspace_creation_returns_bad_request_for_git_errors(monkeypatch):
+    class FakeWorkspaceStore:
+        def create(self, name, repositories, user_id=None):
+            raise RuntimeError("Worktree creation failed: fatal: invalid reference: origin/main")
+
+    repo = {
+        "key": "app",
+        "name": "app-service",
+        "url": "https://example.com/app.git",
+        "default_branch": "main",
+        "enabled": True,
+    }
+
+    monkeypatch.setattr(router, "workspace_store", FakeWorkspaceStore())
+    monkeypatch.setattr(type(router.settings), "get_repository", lambda self, key: repo)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router.create_workspace(
+            WorkspaceCreateRequest(name="repo-ws", repo_keys=["app"])
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "invalid reference" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
 async def test_workspace_can_add_registered_repo_after_creation(monkeypatch):
     class FakeWorkspaceStore:
         def __init__(self):

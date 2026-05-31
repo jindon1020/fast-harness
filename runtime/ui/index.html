@@ -446,6 +446,7 @@ body::before {
   max-width: 500px; box-shadow: var(--shadow);
 }
 .dialog h3 { font-size: 16px; font-weight: 500; margin-bottom: 16px; }
+.dialog__message { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 16px; }
 .dialog label { font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 4px; }
 .dialog input, .dialog select {
   width: 100%; background: var(--bg); border: 1px solid var(--border-v);
@@ -459,6 +460,7 @@ body::before {
 }
 .btn-cancel { background: transparent; border: 1px solid var(--border-v); color: var(--text-dim); }
 .btn-confirm { background: var(--accent); border: none; color: #fff; }
+.btn-confirm--danger { background: var(--error); }
 
 .reg-repo-item {
   display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -1063,7 +1065,7 @@ function renderSessions() {
 }
 
 async function createSession() {
-  if (!state.activeWorkspace) return alert("Select a workspace first");
+  if (!state.activeWorkspace) return showAlertDialog("Select a workspace first");
   showSessionDialog(state.activeWorkspace);
 }
 
@@ -1073,8 +1075,8 @@ async function confirmCreateSession() {
   const branch = document.getElementById("sessionBranchSelect").value;
   const ws = state.workspaces.find(w => w.workspace_id === workspaceId);
   const repo = ws?.repos?.find(r => r.name === repoName);
-  if (!repo) return alert("Selected workspace has no bound repo");
-  if (!branch) return alert("Select a branch first");
+  if (!repo) return showAlertDialog("Selected workspace has no bound repo");
+  if (!branch) return showAlertDialog("Select a branch first");
 
   setDialogSubmitting("btnConfirmSession", true, "Creating");
   try {
@@ -1085,7 +1087,7 @@ async function confirmCreateSession() {
     await selectSession(data.session_id);
   } catch (e) {
     setDialogSubmitting("btnConfirmSession", false);
-    alert("Failed to create session: " + e.message);
+    await showAlertDialog("Failed to create session: " + e.message, { title: "Create Session Failed" });
   }
 }
 
@@ -1093,7 +1095,7 @@ async function showSessionDialog(workspaceId) {
   state.activeWorkspace = workspaceId;
   renderWorkspaces();
   const ws = getActiveWorkspace();
-  if (!ws || !ws.repos?.length) return alert("Selected workspace has no bound repo");
+  if (!ws || !ws.repos?.length) return showAlertDialog("Selected workspace has no bound repo");
 
   let overlay = document.getElementById("sessionDialogOverlay");
   if (!overlay) {
@@ -1182,7 +1184,12 @@ function renderHistoryMessage(msg) {
 
 async function deleteSession(e, id) {
   e.stopPropagation();
-  if (!confirm("Delete session " + id + "?")) return;
+  const confirmed = await showConfirmDialog("Delete session " + id + "?", {
+    title: "Delete Session",
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
   const stream = getSessionStream(id);
   if (stream?.abortController) stream.abortController.abort();
   stopStreaming(id);
@@ -1329,7 +1336,12 @@ async function getDefaultBranches() {
 async function deleteWorkspace(e, id) {
   e.stopPropagation();
   const ws = state.workspaces.find(w => w.workspace_id === id);
-  if (!confirm(`Delete workspace "${ws?.name || id}" and its sessions?`)) return;
+  const confirmed = await showConfirmDialog(`Delete workspace "${ws?.name || id}" and its sessions?`, {
+    title: "Delete Workspace",
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
   for (const session of state.sessions.filter(s => s.metadata?.workspace_id === id)) {
     const stream = getSessionStream(session.session_id);
     if (stream?.abortController) stream.abortController.abort();
@@ -1358,6 +1370,75 @@ async function renameWorkspace(e, id) {
   if (state.activeWorkspace === id) {
     inputHint.textContent = `Workspace selected: ${nextName.trim()}`;
   }
+}
+
+function showAlertDialog(message, options = {}) {
+  return new Promise(resolve => {
+    const title = options.title || "Notice";
+    const buttonLabel = options.buttonLabel || "OK";
+    let overlay = document.getElementById("alertDialogOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "alertDialogOverlay";
+      overlay.className = "dialog-overlay";
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="dialog" role="alertdialog" aria-modal="true">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="dialog__message">${escapeHtml(message)}</div>
+      <div class="btn-row">
+        <button class="btn-confirm" id="btnConfirmAlert">${escapeHtml(buttonLabel)}</button>
+      </div>
+    </div>`;
+    overlay.style.display = "flex";
+    const close = () => {
+      overlay.style.display = "none";
+      document.removeEventListener("keydown", onKeydown);
+      resolve();
+    };
+    const onKeydown = event => {
+      if (event.key === "Enter" || event.key === "Escape") close();
+    };
+    document.getElementById("btnConfirmAlert").onclick = close;
+    document.addEventListener("keydown", onKeydown);
+    requestAnimationFrame(() => document.getElementById("btnConfirmAlert")?.focus());
+  });
+}
+
+function showConfirmDialog(message, options = {}) {
+  return new Promise(resolve => {
+    const title = options.title || "Confirm";
+    const confirmLabel = options.confirmLabel || "Confirm";
+    let overlay = document.getElementById("confirmDialogOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "confirmDialogOverlay";
+      overlay.className = "dialog-overlay";
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="dialog" role="alertdialog" aria-modal="true">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="dialog__message">${escapeHtml(message)}</div>
+      <div class="btn-row">
+        <button class="btn-cancel" id="btnCancelConfirm">Cancel</button>
+        <button class="btn-confirm ${options.danger ? "btn-confirm--danger" : ""}" id="btnConfirmConfirm">${escapeHtml(confirmLabel)}</button>
+      </div>
+    </div>`;
+    overlay.style.display = "flex";
+    const close = value => {
+      overlay.style.display = "none";
+      document.removeEventListener("keydown", onKeydown);
+      resolve(value);
+    };
+    const onKeydown = event => {
+      if (event.key === "Escape") close(false);
+      if (event.key === "Enter") close(true);
+    };
+    document.getElementById("btnCancelConfirm").onclick = () => close(false);
+    document.getElementById("btnConfirmConfirm").onclick = () => close(true);
+    document.addEventListener("keydown", onKeydown);
+    requestAnimationFrame(() => document.getElementById("btnCancelConfirm")?.focus());
+  });
 }
 
 function showRenameDialog(title, currentName) {
@@ -1432,11 +1513,11 @@ function closeWorkspaceDialog() {
 
 async function confirmCreateWorkspace() {
   const name = document.getElementById("wsNameInput").value.trim();
-  if (!name) return alert("Enter a workspace name");
+  if (!name) return showAlertDialog("Enter a workspace name");
   const selectedRows = Array.from(document.querySelectorAll(".workspace-repo-choice"))
     .filter(row => row.querySelector(".workspace-repo-choice__check")?.checked);
   const repoKeys = selectedRows.map(row => row.dataset.repoKey);
-  if (!repoKeys.length) return alert("Select at least one repository");
+  if (!repoKeys.length) return showAlertDialog("Select at least one repository");
 
   setDialogSubmitting("btnConfirmWorkspace", true, "Creating");
   try {
@@ -1446,7 +1527,7 @@ async function confirmCreateWorkspace() {
     selectWorkspace(ws.workspace_id);
   } catch (e) {
     setDialogSubmitting("btnConfirmWorkspace", false);
-    alert("Failed: " + e.message);
+    await showAlertDialog("Failed: " + e.message, { title: "Create Workspace Failed" });
   }
 }
 
@@ -1507,7 +1588,7 @@ function setDialogSubmitting(buttonId, submitting, actionLabel) {
 async function showAddRepoDialog(workspaceId) {
   state.activeWorkspace = workspaceId;
   const ws = state.workspaces.find(w => w.workspace_id === workspaceId);
-  if (!ws) return alert("Workspace not found");
+  if (!ws) return showAlertDialog("Workspace not found");
   let overlay = document.getElementById("addRepoDialogOverlay");
   if (!overlay) {
     overlay = document.createElement("div");
@@ -1560,7 +1641,7 @@ async function confirmAddRepo() {
   const workspaceId = document.getElementById("addRepoWorkspaceInput").value;
   const repoKey = document.getElementById("addRepoKeySelect").value;
   const branch = document.getElementById("addRepoBranchSelect").value;
-  if (!repoKey || !branch) return alert("Select repository and branch");
+  if (!repoKey || !branch) return showAlertDialog("Select repository and branch");
   setDialogSubmitting("btnConfirmAddRepo", true, "Adding");
   try {
     await api("POST", "/workspaces/" + workspaceId + "/repos", { repo_key: repoKey, branch });
@@ -1570,7 +1651,7 @@ async function confirmAddRepo() {
     renderWorkspaces();
   } catch (e) {
     setDialogSubmitting("btnConfirmAddRepo", false);
-    alert("Failed to add repo: " + e.message);
+    await showAlertDialog("Failed to add repo: " + e.message, { title: "Add Repository Failed" });
   }
 }
 
@@ -1630,7 +1711,7 @@ async function switchBranch(repoName, branch) {
     await api("POST", `/workspaces/${state.activeWorkspace}/repos/${repoName}/checkout?branch=${encodeURIComponent(branch)}`);
     await loadWorkspaces();
   } catch (e) {
-    alert(`Branch switch failed: ${e.message}`);
+    await showAlertDialog(`Branch switch failed: ${e.message}`, { title: "Branch Switch Failed" });
   }
 }
 
@@ -1852,7 +1933,7 @@ async function submitAskAnswers(block) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Submit Answers";
     }
-    alert("Failed to submit answers: " + e.message);
+    await showAlertDialog("Failed to submit answers: " + e.message, { title: "Submit Failed" });
   }
 }
 
@@ -1887,7 +1968,7 @@ async function openFeedbackDialog(messageEl, button, msg = {}) {
   } catch (e) {
     button.disabled = false;
     button.textContent = idleText;
-    alert("Failed to submit feedback: " + e.message);
+    await showAlertDialog("Failed to submit feedback: " + e.message, { title: "Feedback Failed" });
   }
 }
 

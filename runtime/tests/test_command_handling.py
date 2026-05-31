@@ -190,6 +190,16 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertNotIn('id="userSelect"', app_html)
         self.assertNotIn("switchUser", app_html)
 
+    def test_ui_uses_custom_dialogs_instead_of_browser_dialogs(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn("function showAlertDialog", html)
+        self.assertIn("function showConfirmDialog", html)
+        self.assertIn("dialog__message", html)
+        self.assertNotIn("alert(", html)
+        self.assertNotIn("confirm(", html)
+        self.assertNotIn("prompt(", html)
+
 
 if __name__ == "__main__":
     unittest.main()

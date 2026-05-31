@@ -553,11 +553,14 @@ async def create_workspace(body: WorkspaceCreateRequest, x_user_id: UserHeader =
     user_id = _current_user_id(x_user_id)
     legacy_repo = body.repos[0] if body.repos else None
     repositories = _workspace_repositories_from_request(body, legacy_repo)
-    rec = workspace_store.create(
-        body.name,
-        repositories=repositories,
-        user_id=user_id,
-    )
+    try:
+        rec = workspace_store.create(
+            body.name,
+            repositories=repositories,
+            user_id=user_id,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return WorkspaceResponse(**rec)
 
 
