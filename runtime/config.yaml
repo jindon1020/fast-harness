@@ -11,9 +11,9 @@ repositories:
     default_branch: main
     enabled: true
 
-  - key: perf-sql-gen
-    name: perf-sql-gen
-    url: https://github.com/jindon1020/perf-sql-gen.git
+  - key: algo-manager
+    name: algo-manager
+    url: https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/algo-manager.git
     default_branch: main
     enabled: true
 
