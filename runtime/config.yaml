@@ -20,32 +20,32 @@ repositories:
 users:
   - id: zhaojindong
     name: zhaojindong
-    password_env: FAST_HARNESS_PASSWORD_ZHAOJINDONG
+    password: ojZjMIBcyyGSMt
     role: admin
     enabled: true
   - id: user01
     name: gaofengbin
-    password_env: FAST_HARNESS_PASSWORD_USER01
+    password: k3XRBdUX6tnGqX
     role: admin
     enabled: true
   - id: user02
     name: lijun
-    password_env: FAST_HARNESS_PASSWORD_USER02
+    password: MQcneeLng4cw0b
     role: member
     enabled: true
   - id: user03
     name: chenqingwu
-    password_env: FAST_HARNESS_PASSWORD_USER03
+    password: NoPBGIW1uKpgEw
     role: member
     enabled: true
   - id: user04
     name: wangyupeng
-    password_env: FAST_HARNESS_PASSWORD_USER04
+    password: 1eWKbwjOHQMDEF
     role: member
     enabled: true
   - id: user05
     name: zhangxiang
-    password_env: FAST_HARNESS_PASSWORD_USER05
+    password: Qg3Mt6UAu7mDXb
     role: member
     enabled: true
 

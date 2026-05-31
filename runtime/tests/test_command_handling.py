@@ -116,7 +116,8 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn("/repositories/\" + repoKey + \"/branches", html)
         self.assertIn("function renderWorkspaceRepoChoices", html)
         self.assertIn("function showAddRepoDialog", html)
-        self.assertIn("repo_keys", html)
+        self.assertIn("{ name, repo_keys: repoKeys }", html)
+        self.assertNotIn("workspace-repo-choice__branch", html)
 
     def test_ui_removes_top_create_buttons(self):
         html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()

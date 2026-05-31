@@ -1437,15 +1437,10 @@ async function confirmCreateWorkspace() {
     .filter(row => row.querySelector(".workspace-repo-choice__check")?.checked);
   const repoKeys = selectedRows.map(row => row.dataset.repoKey);
   if (!repoKeys.length) return alert("Select at least one repository");
-  const repoBranches = {};
-  selectedRows.forEach(row => {
-    const select = row.querySelector(".workspace-repo-choice__branch");
-    if (select?.value) repoBranches[row.dataset.repoKey] = select.value;
-  });
 
   setDialogSubmitting("btnConfirmWorkspace", true, "Creating");
   try {
-    const ws = await api("POST", "/workspaces", { name, repo_keys: repoKeys, repo_branches: repoBranches });
+    const ws = await api("POST", "/workspaces", { name, repo_keys: repoKeys });
     closeWorkspaceDialog();
     await loadWorkspaces();
     selectWorkspace(ws.workspace_id);
@@ -1465,18 +1460,16 @@ async function renderWorkspaceRepoChoices() {
   }
   container.innerHTML = repos.map((repo, index) => `
     <div class="workspace-repo-choice" data-repo-key="${escapeHtml(repo.key)}" style="border:1px solid var(--border);border-radius:8px;padding:8px">
-      <label style="display:flex;gap:8px;align-items:center;margin:0 0 6px 0">
+      <label style="display:flex;gap:8px;align-items:center;margin:0">
         <input class="workspace-repo-choice__check" type="checkbox" ${index === 0 ? "checked" : ""}>
         <span>${escapeHtml(repo.name)}</span>
       </label>
-      <select class="workspace-repo-choice__branch" data-repo-key="${escapeHtml(repo.key)}"><option>Loading...</option></select>
     </div>
   `).join("");
-  await Promise.all(repos.map(repo => fillRepositoryBranchSelect(repo.key)));
 }
 
 async function fillRepositoryBranchSelect(repoKey, selectOverride = null, preferredBranch = null) {
-  const select = selectOverride || document.querySelector(`.workspace-repo-choice__branch[data-repo-key="${_cssEscape(repoKey)}"]`);
+  const select = selectOverride;
   if (!select) return;
   const branches = await getRepositoryBranches(repoKey);
   const repo = state.repositories.find(r => r.key === repoKey);
