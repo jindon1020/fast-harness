@@ -1,4 +1,5 @@
 import json
+import asyncio
 
 import pytest
 from types import SimpleNamespace
@@ -501,6 +502,63 @@ async def test_query_checks_out_session_branch_before_streaming(monkeypatch, tmp
         {"type": "user", "prompt": "hi"},
         {"type": "result", "result": "ok"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_running_query_can_be_streamed_after_reconnect(monkeypatch, tmp_path):
+    class FakeWorkspaceStore:
+        def checkout_branch(self, workspace_id, repo_name, branch):
+            pass
+
+    ready = asyncio.Event()
+    release = asyncio.Event()
+    appended_messages = []
+
+    async def fake_run_query_stream(**kwargs):
+        ready.set()
+        await release.wait()
+        yield {"type": "result", "result": "ok"}
+
+    monkeypatch.setattr(router, "workspace_store", FakeWorkspaceStore())
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(tmp_path),
+            "created_at": "now",
+            "last_access": "now",
+            "metadata": {"workspace_id": "ws-1", "repo_name": "app", "branch": "main"},
+        },
+    )
+    monkeypatch.setattr(
+        router.session_store,
+        "append_message",
+        lambda session_id, message: appended_messages.append(message),
+    )
+    monkeypatch.setattr(
+        router.session_store,
+        "list_messages",
+        lambda session_id: [{"message": message} for message in appended_messages],
+    )
+    monkeypatch.setattr(router, "run_query_stream", fake_run_query_stream)
+    router._active_queries.clear()
+
+    await router.query_session("sess-1", router.QueryRequest(prompt="hi"))
+    await asyncio.wait_for(ready.wait(), timeout=1)
+    response = await router.stream_session("sess-1", since=0)
+    release.set()
+
+    events = []
+    async for event in response.body_iterator:
+        events.append(event)
+
+    assert any('"result": "ok"' in event["data"] for event in events)
+    assert appended_messages == [
+        {"type": "user", "prompt": "hi"},
+        {"type": "result", "result": "ok"},
+    ]
+    router._active_queries.clear()
 
 
 @pytest.mark.asyncio

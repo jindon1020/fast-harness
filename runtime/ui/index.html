@@ -1167,6 +1167,7 @@ async function selectSession(id) {
   chatInner.style.display = "block";
   chatInner.innerHTML = "";
   await loadSessionMessages(id);
+  reconnectSessionStream(id);
   if (state.panelOpen && state.panelTab === "files") loadFiles();
 }
 
@@ -1177,8 +1178,10 @@ async function loadSessionMessages(id) {
     for (const entry of (data.messages || [])) {
       renderHistoryMessage(entry.message || entry);
     }
+    return (data.messages || []).length;
   } catch (e) {
     addErrorMessage("Failed to load session history: " + e.message);
+    return 0;
   }
 }
 
@@ -2241,6 +2244,7 @@ async function sendPrompt() {
     abortController: new AbortController(),
     messageEl: null,
     textEl: null,
+    since: null,
   };
   state.sessionStreams[sessionId] = stream;
   updateSendButton();
@@ -2250,6 +2254,7 @@ async function sendPrompt() {
     renderUserPrompt(prompt);
     scrollToBottom();
   }
+  stream.since = await loadSessionHistoryCount(sessionId) - 1;
 
   // Create streaming message container
   if (state.activeSession === sessionId) {
@@ -2266,41 +2271,91 @@ async function sendPrompt() {
       body: JSON.stringify({ prompt }),
       signal: stream.abortController.signal,
     });
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const msg = JSON.parse(line.slice(6));
-            if (state.activeSession === sessionId) {
-              if (!stream.messageEl || !stream.messageEl.isConnected) {
-                stream.messageEl = document.createElement("div");
-                stream.messageEl.className = "msg";
-                stream.textEl = null;
-                chatInner.appendChild(stream.messageEl);
-              }
-              stream.textEl = handleStreamMessage(msg, stream.messageEl, stream.textEl);
-            }
-          } catch (e) { /* skip parse errors */ }
-        }
-      }
-    }
+    if (!res.ok) throw new Error(await responseErrorMessage(res));
+    await consumeSseResponse(res, sessionId, stream);
   } catch (e) {
     if (e.name !== "AbortError" && state.activeSession === sessionId) {
       addErrorMessage(e.message);
     }
   }
 
+  stopStreaming(sessionId);
+}
+
+async function loadSessionHistoryCount(sessionId) {
+  try {
+    const data = await api("GET", "/sessions/" + sessionId + "/messages");
+    return (data.messages || []).length;
+  } catch {
+    return 0;
+  }
+}
+
+async function reconnectSessionStream(sessionId) {
+  if (!sessionId || isSessionStreaming(sessionId)) return;
+  const since = await loadSessionHistoryCount(sessionId) - 1;
+  const stream = {
+    streaming: true,
+    abortController: new AbortController(),
+    messageEl: null,
+    textEl: null,
+    since,
+  };
+  state.sessionStreams[sessionId] = stream;
+  updateSendButton();
+  try {
+    const res = await fetch(`${API}/sessions/${sessionId}/stream?since=${encodeURIComponent(since)}`, {
+      headers: authHeaders(),
+      signal: stream.abortController.signal,
+    });
+    if (!res.ok) throw new Error(await responseErrorMessage(res));
+    await consumeSseResponse(res, sessionId, stream);
+  } catch (e) {
+    if (e.name !== "AbortError") console.warn("Session stream reconnect failed:", e);
+  }
+  stopStreaming(sessionId);
+}
+
+async function consumeSseResponse(res, sessionId, stream) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const msg = JSON.parse(line.slice(6));
+        if (msg.type === "stream_done") return;
+        if (msg.type === "status") continue;
+        if (state.activeSession === sessionId) {
+          if (!stream.messageEl || !stream.messageEl.isConnected) {
+            stream.messageEl = document.createElement("div");
+            stream.messageEl.className = "msg";
+            stream.textEl = null;
+            chatInner.appendChild(stream.messageEl);
+          }
+          stream.textEl = handleStreamMessage(msg, stream.messageEl, stream.textEl);
+        }
+      } catch (e) { /* skip parse errors */ }
+    }
+  }
+}
+
+async function cancelActiveQuery(sessionId) {
+  const stream = getSessionStream(sessionId);
+  if (stream?.abortController) stream.abortController.abort();
+  try {
+    await api("POST", `/sessions/${sessionId}/query/cancel`);
+  } catch (e) {
+    console.warn("Failed to cancel query:", e);
+  }
   stopStreaming(sessionId);
 }
 
@@ -2721,8 +2776,7 @@ $("#btnAddWs").addEventListener("click", createWorkspace);
 btnSend.addEventListener("click", () => {
   const stream = getSessionStream(state.activeSession);
   if (stream?.streaming) {
-    if (stream.abortController) stream.abortController.abort();
-    stopStreaming(state.activeSession);
+    cancelActiveQuery(state.activeSession);
   } else {
     sendPrompt();
   }

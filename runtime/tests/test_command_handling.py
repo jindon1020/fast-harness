@@ -200,6 +200,14 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertNotIn("confirm(", html)
         self.assertNotIn("prompt(", html)
 
+    def test_ui_reconnects_running_session_streams(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn("function reconnectSessionStream", html)
+        self.assertIn("/stream?since=", html)
+        self.assertIn("query/cancel", html)
+        self.assertIn("function consumeSseResponse", html)
+
 
 if __name__ == "__main__":
     unittest.main()

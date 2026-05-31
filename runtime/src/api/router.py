@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import uuid
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -456,17 +457,40 @@ async def delete_session(session_id: str, x_user_id: UserHeader = None):
 
 # ═══════════════════════ Query (SSE streaming) ═══════════════════════
 
-@router.post("/sessions/{session_id}/query")
-async def query_session(session_id: str, body: QueryRequest, x_user_id: UserHeader = None):
-    user_id = _current_user_id(x_user_id)
-    rec = session_store.get(session_id)
-    _ensure_owned(rec, user_id, "Session not found")
-    if not _is_bound_session(rec):
-        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
-    _checkout_session_branch(rec)
+class ActiveQuery:
+    def __init__(self) -> None:
+        self.events: list[tuple[int, dict]] = []
+        self.subscribers: set[asyncio.Queue] = set()
+        self.task: asyncio.Task | None = None
 
-    async def event_stream():
-        session_store.append_message(session_id, {"type": "user", "prompt": body.prompt})
+
+_active_queries: dict[str, ActiveQuery] = {}
+
+
+def _is_query_active(session_id: str) -> bool:
+    query = _active_queries.get(session_id)
+    return bool(query and query.task and not query.task.done())
+
+
+def _history_last_index(session_id: str) -> int:
+    return len(session_store.list_messages(session_id)) - 1
+
+
+async def _publish_query_event(active: ActiveQuery, index: int, message: dict) -> None:
+    active.events.append((index, message))
+    for queue in list(active.subscribers):
+        await queue.put((index, message))
+
+
+async def _run_query_background(
+    session_id: str,
+    body: QueryRequest,
+    active: ActiveQuery,
+) -> None:
+    try:
+        for msg in [{"type": "status", "status": "running"}]:
+            await _publish_query_event(active, _history_last_index(session_id), msg)
+
         async for msg in run_query_stream(
             session_id=session_id,
             prompt=body.prompt,
@@ -476,9 +500,82 @@ async def query_session(session_id: str, body: QueryRequest, x_user_id: UserHead
             permission_mode=body.permission_mode,
         ):
             session_store.append_message(session_id, msg)
-            yield {"data": json.dumps(msg, ensure_ascii=False)}
+            await _publish_query_event(active, _history_last_index(session_id), msg)
+    except asyncio.CancelledError:
+        msg = {"type": "cancelled", "message": "Request cancelled"}
+        session_store.append_message(session_id, msg)
+        await _publish_query_event(active, _history_last_index(session_id), msg)
+        raise
+    finally:
+        done = {"type": "stream_done"}
+        await _publish_query_event(active, _history_last_index(session_id), done)
+        for queue in list(active.subscribers):
+            await queue.put(None)
+        _active_queries.pop(session_id, None)
 
-    return EventSourceResponse(event_stream())
+
+def _ensure_query_started(session_id: str, body: QueryRequest) -> ActiveQuery:
+    active = _active_queries.get(session_id)
+    if _is_query_active(session_id) and active:
+        raise HTTPException(status_code=409, detail="Session already has a running query")
+
+    session_store.append_message(session_id, {"type": "user", "prompt": body.prompt})
+    active = ActiveQuery()
+    active.task = asyncio.create_task(_run_query_background(session_id, body, active))
+    _active_queries[session_id] = active
+    return active
+
+
+async def _query_event_stream(session_id: str, since: int = -1):
+    active = _active_queries.get(session_id)
+    if not active:
+        return
+
+    queue: asyncio.Queue = asyncio.Queue()
+    active.subscribers.add(queue)
+    try:
+        for index, msg in active.events:
+            if index > since:
+                yield {"data": json.dumps(msg, ensure_ascii=False)}
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            index, msg = item
+            if index > since:
+                yield {"data": json.dumps(msg, ensure_ascii=False)}
+    finally:
+        active.subscribers.discard(queue)
+
+
+@router.post("/sessions/{session_id}/query")
+async def query_session(session_id: str, body: QueryRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    rec = session_store.get(session_id)
+    _ensure_owned(rec, user_id, "Session not found")
+    if not _is_bound_session(rec):
+        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
+    _checkout_session_branch(rec)
+    _ensure_query_started(session_id, body)
+    return EventSourceResponse(_query_event_stream(session_id, since=_history_last_index(session_id)))
+
+
+@router.get("/sessions/{session_id}/stream")
+async def stream_session(session_id: str, since: int = -1, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(session_store.get(session_id), user_id, "Session not found")
+    return EventSourceResponse(_query_event_stream(session_id, since=since))
+
+
+@router.post("/sessions/{session_id}/query/cancel")
+async def cancel_query(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_owned(session_store.get(session_id), user_id, "Session not found")
+    active = _active_queries.get(session_id)
+    if not active or not active.task or active.task.done():
+        return {"status": "idle"}
+    active.task.cancel()
+    return {"status": "cancelled"}
 
 
 @router.post("/sessions/{session_id}/answer", response_model=AnswerResponse)
