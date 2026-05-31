@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login · fast-harness</title>
+<style>
+:root {
+  font-family: "DM Sans", system-ui, sans-serif;
+  color: #1a1a1a;
+  background: #fafaf8;
+}
+* { box-sizing: border-box; }
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: #fafaf8;
+}
+.login {
+  width: min(380px, calc(100vw - 32px));
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 10px;
+  background: #fff;
+  padding: 28px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(0,0,0,0.08);
+  color: #9b6b3d;
+  font-weight: 800;
+  font-size: 12px;
+}
+h1 {
+  font-size: 22px;
+  line-height: 1.2;
+  margin: 0;
+}
+label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 13px;
+  color: #707070;
+}
+select,
+input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 10px;
+  font-size: 14px;
+}
+select:focus,
+input:focus {
+  outline: none;
+  border-color: #9b6b3d;
+}
+button {
+  width: 100%;
+  height: 40px;
+  margin-top: 20px;
+  border: none;
+  border-radius: 6px;
+  background: #9b6b3d;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.error {
+  min-height: 18px;
+  margin-top: 12px;
+  color: #c84040;
+  font-size: 13px;
+}
+</style>
+</head>
+<body>
+<main class="login">
+  <div class="brand">
+    <div class="brand-mark">FH</div>
+    <h1>fast-harness</h1>
+  </div>
+  <form id="loginForm">
+    <label for="userSelect">User</label>
+    <select id="userSelect" name="user_id"></select>
+    <label for="passwordInput">Password</label>
+    <input id="passwordInput" name="password" type="password" autocomplete="current-password" autofocus>
+    <button id="loginButton" type="submit">Login</button>
+    <div class="error" id="errorText"></div>
+  </form>
+</main>
+<script>
+const userSelect = document.getElementById("userSelect");
+const passwordInput = document.getElementById("passwordInput");
+const loginButton = document.getElementById("loginButton");
+const errorText = document.getElementById("errorText");
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Request failed");
+  return res.json();
+}
+
+async function loadUsers() {
+  const data = await api("GET", "/api/users");
+  userSelect.innerHTML = (data.users || []).map(user =>
+    `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name)}</option>`
+  ).join("");
+}
+
+document.getElementById("loginForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  errorText.textContent = "";
+  loginButton.disabled = true;
+  loginButton.textContent = "Logging in...";
+  try {
+    const data = await api("POST", "/api/login", {
+      user_id: userSelect.value,
+      password: passwordInput.value,
+    });
+    localStorage.setItem("currentUserId", data.user.id);
+    window.location.href = "/";
+  } catch (error) {
+    errorText.textContent = error.message;
+    loginButton.disabled = false;
+    loginButton.textContent = "Login";
+  }
+});
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value || "";
+  return div.innerHTML;
+}
+
+loadUsers().catch(error => {
+  errorText.textContent = error.message;
+});
+</script>
+</body>
+</html>

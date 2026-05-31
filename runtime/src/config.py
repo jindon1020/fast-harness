@@ -1,5 +1,6 @@
 from pathlib import Path
 from functools import lru_cache
+import os
 from typing import Any
 
 from pydantic_settings import BaseSettings
@@ -93,18 +94,30 @@ def _user_configs() -> list[dict[str, Any]]:
             raise ValueError(f"user {user_id!r} is missing required key 'name'")
         if user_id in seen_ids:
             raise ValueError(f"Duplicate user id: {user_id}")
+        role = str(raw_user.get("role", "member")).strip().lower() or "member"
+        if role not in {"admin", "member"}:
+            raise ValueError(f"user {user_id!r} has invalid role: {role}")
         seen_ids.add(user_id)
         normalized.append(
             {
                 "id": user_id,
                 "name": name,
+                "password": _user_password(raw_user),
+                "role": role,
                 "enabled": bool(raw_user.get("enabled", True)),
             }
         )
 
     return normalized or [
-        {"id": "default", "name": "Default User", "enabled": True},
+        {"id": "default", "name": "Default User", "password": "default", "role": "admin", "enabled": True},
     ]
+
+
+def _user_password(raw_user: dict[str, Any]) -> str:
+    password_env = str(raw_user.get("password_env", "")).strip()
+    if password_env:
+        return os.getenv(password_env, "")
+    return str(raw_user.get("password", "")).strip()
 
 
 class Settings(BaseSettings):
@@ -138,6 +151,7 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
+    auth_secret: str = ""
 
     # Default agent limits
     default_max_turns: int = 30
@@ -225,6 +239,9 @@ class Settings(BaseSettings):
             if user["id"] == user_id:
                 return user
         raise ValueError(f"User not found or disabled: {user_id}")
+
+    def is_admin(self, user_id: str) -> bool:
+        return self.get_user(user_id).get("role") == "admin"
 
 
 settings = Settings()

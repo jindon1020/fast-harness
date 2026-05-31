@@ -12,10 +12,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import RedirectResponse, JSONResponse, FileResponse
 from pathlib import Path
 
 from src.api.router import router
 from src.config import settings
+from src.core.auth import SESSION_COOKIE_NAME, verify_session_token
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -55,6 +57,40 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+
+@app.middleware("http")
+async def require_login(request, call_next):
+    path = request.url.path
+    if _is_public_path(path):
+        return await call_next(request)
+
+    user_id = verify_session_token(request.cookies.get(SESSION_COOKIE_NAME))
+    if not user_id:
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        return RedirectResponse(url="/login", status_code=303)
+
+    headers = [
+        (key, value)
+        for key, value in request.scope.get("headers", [])
+        if key.lower() != b"x-user-id"
+    ]
+    headers.append((b"x-user-id", user_id.encode("utf-8")))
+    request.scope["headers"] = headers
+    return await call_next(request)
+
+
+def _is_public_path(path: str) -> bool:
+    return (
+        path in {"/login", "/login.html", "/api/login", "/api/logout", "/api/healthz"}
+        or path.startswith("/api/users")
+    )
+
+
+@app.get("/login", include_in_schema=False)
+async def login_page():
+    return FileResponse(Path(__file__).resolve().parent.parent / "ui" / "login.html")
 
 # Serve UI static files
 ui_dir = Path(__file__).resolve().parent.parent / "ui"

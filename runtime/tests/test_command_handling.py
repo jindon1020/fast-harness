@@ -173,6 +173,22 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn('api("PATCH", "/workspaces/" + id', html)
         self.assertIn('api("PATCH", "/sessions/" + id', html)
 
+    def test_ui_uses_login_page_and_current_user(self):
+        login_html = Path(__file__).resolve().parents[1].joinpath("ui", "login.html").read_text()
+        app_html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('id="loginForm"', login_html)
+        self.assertIn('api("POST", "/api/login"', login_html)
+        self.assertIn('api("GET", "/api/users")', login_html)
+        self.assertIn('api("GET", "/me")', app_html)
+        self.assertIn('id="currentUserLabel"', app_html)
+        self.assertIn("currentUserLabel.textContent", app_html)
+        self.assertIn('id="btnLogout"', app_html)
+        self.assertIn("function logout", app_html)
+        self.assertIn('api("POST", "/logout")', app_html)
+        self.assertNotIn('id="userSelect"', app_html)
+        self.assertNotIn("switchUser", app_html)
+
 
 if __name__ == "__main__":
     unittest.main()

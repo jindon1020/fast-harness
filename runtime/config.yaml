@@ -20,18 +20,33 @@ repositories:
 users:
   - id: zhaojindong
     name: zhaojindong
+    password_env: FAST_HARNESS_PASSWORD_ZHAOJINDONG
+    role: admin
     enabled: true
   - id: user01
-    name: Bob
+    name: gaofengbin
+    password_env: FAST_HARNESS_PASSWORD_USER01
+    role: admin
     enabled: true
   - id: user02
-    name: Carol
+    name: lijun
+    password_env: FAST_HARNESS_PASSWORD_USER02
+    role: member
     enabled: true
   - id: user03
-    name: Dave
+    name: chenqingwu
+    password_env: FAST_HARNESS_PASSWORD_USER03
+    role: member
     enabled: true
   - id: user04
-    name: Erin
+    name: wangyupeng
+    password_env: FAST_HARNESS_PASSWORD_USER04
+    role: member
+    enabled: true
+  - id: user05
+    name: zhangxiang
+    password_env: FAST_HARNESS_PASSWORD_USER05
+    role: member
     enabled: true
 
 # UI/stream display configuration for fast-harness runtime.

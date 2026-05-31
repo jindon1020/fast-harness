@@ -92,9 +92,13 @@ def test_runtime_config_reads_enabled_users(monkeypatch, tmp_path):
 users:
   - id: zhaojindong
     name: zhaojindong
+    password: secret-1
+    role: admin
     enabled: true
   - id: disabled
     name: Disabled
+    password: secret-2
+    role: member
     enabled: false
 """,
         encoding="utf-8",
@@ -104,10 +108,11 @@ users:
     config._load_runtime_config.cache_clear()
 
     assert settings.enabled_users == [
-        {"id": "zhaojindong", "name": "zhaojindong", "enabled": True}
+        {"id": "zhaojindong", "name": "zhaojindong", "password": "secret-1", "role": "admin", "enabled": True}
     ]
     assert settings.default_user_id == "zhaojindong"
     assert settings.get_user("zhaojindong")["name"] == "zhaojindong"
+    assert settings.is_admin("zhaojindong") is True
 
     config._load_runtime_config.cache_clear()
 

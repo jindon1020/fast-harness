@@ -215,18 +215,35 @@ body::before {
   display: flex; align-items: center; gap: 8px;
 }
 
-.user-select {
+.current-user {
   flex: 1;
   min-width: 0;
   height: 30px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-v);
-  background: var(--bg-elevated);
   color: var(--text-dim);
   font-size: 12px;
-  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.user-select:focus { outline: none; border-color: var(--accent); color: var(--text); }
+
+.logout-btn {
+  height: 28px;
+  border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.logout-btn:hover {
+  color: var(--text);
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
 
 .theme-toggle {
   width: 34px; height: 20px; border-radius: 10px;
@@ -896,7 +913,8 @@ body::before {
       <div id="workspaceList"></div>
     </div>
     <div class="sidebar__foot">
-      <select class="user-select" id="userSelect" title="Current user"></select>
+      <span class="current-user" id="currentUserLabel"></span>
+      <button class="logout-btn" id="btnLogout" title="Logout">Logout</button>
       <button class="theme-toggle" id="themeToggle" title="Toggle theme"></button>
       <span class="version">v0.1</span>
     </div>
@@ -974,6 +992,7 @@ let state = {
   repositories: [],
   users: [],
   currentUserId: localStorage.getItem("currentUserId") || "",
+  currentUser: null,
   defaultBranches: [],
   capabilities: null,
   sessionStreams: {},
@@ -1005,46 +1024,28 @@ const panelTitle = $("#panelTitle");
 const btnUsage = $("#btnUsage");
 const btnCapabilities = $("#btnCapabilities");
 const btnFiles = $("#btnFiles");
-const userSelect = $("#userSelect");
+const btnLogout = $("#btnLogout");
+const currentUserLabel = $("#currentUserLabel");
 
 /* ═══════════════════════ USERS ═══════════════════════ */
 
 async function loadUsers() {
-  const data = await api("GET", "/users");
-  state.users = data.users || [];
-  const validSavedUser = state.users.some(user => user.id === state.currentUserId);
-  state.currentUserId = validSavedUser
-    ? state.currentUserId
-    : (data.default_user_id || state.users[0]?.id || "");
-  if (state.currentUserId) localStorage.setItem("currentUserId", state.currentUserId);
-  renderUsers();
+  const data = await api("GET", "/me");
+  state.users = [data.user];
+  state.currentUser = data.user;
+  state.currentUserId = data.user.id;
+  localStorage.setItem("currentUserId", state.currentUserId);
+  currentUserLabel.textContent = data.user.name || data.user.id;
+  btnUsage.style.display = data.user.role === "admin" ? "" : "none";
 }
 
-function renderUsers() {
-  userSelect.innerHTML = state.users.map(user =>
-    `<option value="${escapeHtml(user.id)}" ${user.id === state.currentUserId ? "selected" : ""}>${escapeHtml(user.name)}</option>`
-  ).join("");
-}
-
-async function switchUser(userId) {
-  if (!userId || userId === state.currentUserId) return;
-  state.currentUserId = userId;
-  localStorage.setItem("currentUserId", userId);
-  state.activeSession = null;
-  state.activeWorkspace = null;
-  state.sessions = [];
-  state.workspaces = [];
-  state.workspaceBranches = {};
-  chatEmpty.style.display = "flex";
-  chatInner.style.display = "none";
-  chatInner.innerHTML = "";
-  promptInput.disabled = true;
-  updateSendButton();
-  inputHint.textContent = "No session selected";
-  toolbarTitle.textContent = "Select or create a session";
-  await loadWorkspaces();
-  await loadSessions();
-  if (state.panelOpen && state.panelTab === "usage") loadUsageStats();
+async function logout() {
+  try {
+    await api("POST", "/logout");
+  } finally {
+    localStorage.removeItem("currentUserId");
+    window.location.href = "/login";
+  }
 }
 
 /* ═══════════════════════ SESSIONS ═══════════════════════ */
@@ -2309,6 +2310,7 @@ function stopStreaming(sessionId = state.activeSession) {
 /* ═══════════════════════ PANEL ═══════════════════════ */
 
 function togglePanel(btn) {
+  if (btn === btnUsage && state.currentUser?.role !== "admin") return;
   if (state.panelOpen && btn.classList.contains("btn-tool--active")) {
     closePanel();
     return;
@@ -2650,7 +2652,7 @@ commandMenu.addEventListener("mousedown", (e) => {
 });
 $("#btnClosePanel").addEventListener("click", closePanel);
 $("#themeToggle").addEventListener("click", toggleTheme);
-userSelect.addEventListener("change", () => switchUser(userSelect.value));
+btnLogout.addEventListener("click", logout);
 panelTabs.addEventListener("click", (e) => {
   if (!e.target.classList.contains("panel__tab")) return;
   state.panelTab = e.target.dataset.tab;

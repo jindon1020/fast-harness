@@ -17,6 +17,11 @@ class RenameRequest(BaseModel):
     name: str = Field(..., min_length=1, description="New display name")
 
 
+class LoginRequest(BaseModel):
+    user_id: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
 class FeedbackRequest(BaseModel):
     feedback: str = Field(..., min_length=1, max_length=5000)
     message_excerpt: str | None = Field(default=None, max_length=2000)
@@ -52,12 +57,22 @@ class WorkspaceRepoAddRequest(BaseModel):
 class UserInfo(BaseModel):
     id: str
     name: str
+    role: str = "member"
     enabled: bool
 
 
 class UserListResponse(BaseModel):
     users: list[UserInfo]
     default_user_id: str
+
+
+class CurrentUserResponse(BaseModel):
+    user: UserInfo
+
+
+class LoginResponse(BaseModel):
+    status: str
+    user: UserInfo
 
 
 class UsageCommandStat(BaseModel):

@@ -9,15 +9,18 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Cookie, Header, HTTPException
 from sse_starlette.sse import EventSourceResponse
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from src.api.schemas import (
     AnswerRequest,
     AnswerResponse,
+    CurrentUserResponse,
     FeedbackRequest,
     FeedbackResponse,
+    LoginRequest,
+    LoginResponse,
     QueryRequest,
     RenameRequest,
     SessionCreateRequest,
@@ -36,6 +39,14 @@ from src.api.schemas import (
     HealthResponse,
 )
 from src.config import settings
+from src.core.auth import (
+    SESSION_COOKIE_NAME,
+    SESSION_TTL_SECONDS,
+    authenticate_user,
+    create_session_token,
+    public_user,
+    verify_session_token,
+)
 from src.core.git import checkout as git_checkout, remote_branches
 from src.core.agent import provide_answers, run_query_stream, resolve_session_repo_path
 from src.core.session import session_store
@@ -48,10 +59,15 @@ router = APIRouter(prefix="/api")
 FEEDBACK_PATH = Path(__file__).resolve().parents[2] / "feedback.md"
 
 UserHeader = Annotated[str | None, Header(alias="X-User-Id")]
+SessionCookie = Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)]
 
 
-def _current_user_id(x_user_id: str | None = None) -> str:
-    requested = x_user_id.strip() if isinstance(x_user_id, str) else ""
+def _current_user_id(
+    x_user_id: str | None = None,
+    session_token: str | None = None,
+) -> str:
+    cookie_user_id = verify_session_token(session_token)
+    requested = cookie_user_id or (x_user_id.strip() if isinstance(x_user_id, str) else "")
     user_id = requested or settings.default_user_id
     try:
         settings.get_user(user_id)
@@ -68,6 +84,11 @@ def _ensure_owned(record: dict | None, user_id: str, not_found: str):
     if not record or _record_user_id(record) != user_id:
         raise HTTPException(status_code=404, detail=not_found)
     return record
+
+
+def _ensure_admin(user_id: str) -> None:
+    if not settings.is_admin(user_id):
+        raise HTTPException(status_code=403, detail="Admin role required")
 
 
 def _append_feedback(user_id: str, session_id: str, body: FeedbackRequest) -> Path:
@@ -249,11 +270,44 @@ async def capabilities():
 
 @router.get("/users", response_model=UserListResponse)
 async def list_users():
-    return UserListResponse(users=settings.enabled_users, default_user_id=settings.default_user_id)
+    return UserListResponse(
+        users=[public_user(user) for user in settings.enabled_users],
+        default_user_id=settings.default_user_id,
+    )
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(body: LoginRequest, response: Response):
+    user = authenticate_user(body.user_id, body.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        create_session_token(user["id"]),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+    )
+    return LoginResponse(status="ok", user=public_user(user))
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    return {"status": "ok"}
+
+
+@router.get("/me", response_model=CurrentUserResponse)
+async def me(session_token: SessionCookie = None):
+    user_id = verify_session_token(session_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return CurrentUserResponse(user=public_user(settings.get_user(user_id)))
 
 
 @router.get("/usage-stats", response_model=UsageStatsResponse)
-async def usage_stats():
+async def usage_stats(x_user_id: UserHeader = None):
+    _ensure_admin(_current_user_id(x_user_id))
     return UsageStatsResponse(**_usage_stats())
 
 
