@@ -225,6 +225,31 @@ copy_file() {
     fi
 }
 
+OBSOLETE_PLUGIN_PATHS=(
+    ".codex-plugin"
+    "agents/full-coverage-test-gen-agent"
+    "commands/common-pre-split-command.md"
+)
+
+OBSOLETE_PLATFORM_AGENT_FILES=(
+    "full-coverage-test-gen-agent.md"
+)
+
+OBSOLETE_PLATFORM_COMMAND_FILES=(
+    "common-pre-split.md"
+)
+
+is_obsolete_plugin_path() {
+    local rel="$1"
+    local obsolete
+    for obsolete in "${OBSOLETE_PLUGIN_PATHS[@]}"; do
+        if [[ "$rel" == "$obsolete" || "$rel" == "$obsolete/"* ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 safe_copy_dir() {
     local src="$1"
     local dst="$2"
@@ -235,6 +260,9 @@ safe_copy_dir() {
 
     find "$src" -type f | while read -r file; do
         local rel="${file#$src/}"
+        if is_obsolete_plugin_path "$rel"; then
+            continue
+        fi
         # --force 时跳过 project-context.md（用户已自定义的配置）
         if $FORCE && [[ "$rel" == "project-context.md" ]]; then
             skip "$dst/$rel (用户自定义配置，跳过)"
@@ -263,6 +291,38 @@ remove_obsolete_skill_dirs() {
     done
 }
 
+remove_obsolete_plugin_paths() {
+    local base="$1"
+    [[ -d "$base" ]] || return 0
+    local obsolete
+    for obsolete in "${OBSOLETE_PLUGIN_PATHS[@]}"; do
+        if [[ -e "$base/$obsolete" ]]; then
+            rm -rf "$base/$obsolete"
+            ok "已移除弃用插件文件: $base/$obsolete"
+        fi
+    done
+}
+
+remove_obsolete_platform_files() {
+    local platform_dir="$1"
+    [[ -d "$platform_dir" ]] || return 0
+
+    local file
+    for file in "${OBSOLETE_PLATFORM_AGENT_FILES[@]}"; do
+        if [[ -e "$platform_dir/agents/$file" ]]; then
+            rm -f "$platform_dir/agents/$file"
+            ok "已移除弃用 Agent: $platform_dir/agents/$file"
+        fi
+    done
+
+    for file in "${OBSOLETE_PLATFORM_COMMAND_FILES[@]}"; do
+        if [[ -e "$platform_dir/commands/$file" ]]; then
+            rm -f "$platform_dir/commands/$file"
+            ok "已移除弃用 Command: $platform_dir/commands/$file"
+        fi
+    done
+}
+
 # 追加内容到文件（不重复）
 safe_append() {
     local file="$1"
@@ -285,6 +345,7 @@ info "安装插件文件到 $PLUGIN_DIR/ ..."
 
 # 复制插件核心文件
 safe_copy_dir "$TEMP_DIR/fast-harness/plugin" "$PROJECT_DIR/$PLUGIN_DIR"
+remove_obsolete_plugin_paths "$PROJECT_DIR/$PLUGIN_DIR"
 if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/skills" ]]; then
     remove_obsolete_skill_dirs "$PROJECT_DIR/$PLUGIN_DIR/skills"
 fi
@@ -538,6 +599,7 @@ install_cursor() {
             copy_file "$cmd_file" "$PROJECT_DIR/.cursor/commands/$base"
         done
     fi
+    remove_obsolete_platform_files "$PROJECT_DIR/.cursor"
 
     # 复制 Hooks → .cursor/hooks/
     if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/hooks" ]]; then
@@ -706,6 +768,7 @@ install_qoder() {
             copy_file "$cmd_file" "$PROJECT_DIR/.qoder/commands/$base"
         done
     fi
+    remove_obsolete_platform_files "$PROJECT_DIR/.qoder"
 
     # 创建/更新 .qoder/rules 规则文件
     local rule_file="$PROJECT_DIR/.qoder/rules/ether.mdc"
@@ -800,40 +863,6 @@ PREHOOK
 install_codex() {
     info "配置 Codex 环境..."
 
-    if [[ -f "$PROJECT_DIR/$PLUGIN_DIR/.codex-plugin/plugin.json" ]]; then
-        ok "Codex 插件清单已就绪: $PLUGIN_DIR/.codex-plugin/plugin.json"
-    else
-        mkdir -p "$PROJECT_DIR/$PLUGIN_DIR/.codex-plugin"
-        cat > "$PROJECT_DIR/$PLUGIN_DIR/.codex-plugin/plugin.json" << CODEXPLUGIN
-{
-  "name": "fast-harness",
-  "version": "2.0.0",
-  "description": "Generator-Evaluator multi-agent development harness for Codex.",
-  "author": {
-    "name": "jindong"
-  },
-  "mcpServers": "./.mcp.json",
-  "skills": "./skills/",
-  "interface": {
-    "displayName": "fast-harness",
-    "shortDescription": "Multi-agent development harness for Codex",
-    "longDescription": "fast-harness installs project-local commands, agents, skills, hooks, and AGENTS.md guidance for Generator-Evaluator development workflows in Codex.",
-    "developerName": "jindong",
-    "category": "Engineering",
-    "capabilities": [
-      "Read",
-      "Write"
-    ],
-    "defaultPrompt": [
-      "/implement 我需要实现一个新功能",
-      "/fix 线上报错 request_id=abc-123"
-    ]
-  }
-}
-CODEXPLUGIN
-        ok "创建: $PLUGIN_DIR/.codex-plugin/plugin.json"
-    fi
-
     # 复制 Agents → .codex/agents/（从目录化结构中提取 .md 文件）
     if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/agents" ]]; then
         mkdir -p "$PROJECT_DIR/.codex/agents"
@@ -864,6 +893,7 @@ CODEXPLUGIN
             copy_file "$cmd_file" "$PROJECT_DIR/.codex/commands/$base"
         done
     fi
+    remove_obsolete_platform_files "$PROJECT_DIR/.codex"
 
     # 复制 Hooks → .codex/hooks/
     if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/hooks" ]]; then

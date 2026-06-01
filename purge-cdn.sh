@@ -37,14 +37,14 @@ purge_file() {
             break
         fi
         if [[ "$attempt" -lt "$max" ]]; then
-            echo -e "${YELLOW}[RETRY]${NC} $path（${attempt}/${max}，purge.jsdelivr 瞬时错误，${wait_sec}s 后重试）"
+            echo -e "${YELLOW}[RETRY]${NC} ${path}（${attempt}/${max}，purge.jsdelivr 瞬时错误，${wait_sec}s 后重试）"
             sleep "$wait_sec"
             wait_sec=$((wait_sec + 2))
         fi
     done
 
     if [[ -z "$result" ]]; then
-        fail "$path（curl 失败，常见为 HTTP 520/522；属 jsDelivr 侧短暂故障，请数分钟后重试本脚本）"
+        fail "${path}（curl 失败，常见为 HTTP 520/522；属 jsDelivr 侧短暂故障，请数分钟后重试本脚本）"
         PURGE_FAIL=$((PURGE_FAIL + 1))
         return 0
     fi
@@ -58,7 +58,7 @@ purge_file() {
     elif [[ "$throttled" == "True" || "$throttled" == "true" ]]; then
         echo -e "${YELLOW}[SKIP]${NC} $path (被限流，稍后重试)"
     else
-        fail "$path (status=$status，响应非预期 JSON 时请稍后重试)"
+        fail "${path} (status=${status}，响应非预期 JSON 时请稍后重试)"
         PURGE_FAIL=$((PURGE_FAIL + 1))
     fi
     return 0
