@@ -673,6 +673,32 @@ body::before {
   position: relative;
 }
 
+.quick-commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.quick-command {
+  height: 28px;
+  border: 1px solid var(--border-v);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 10px;
+  box-shadow: var(--shadow);
+  transition: all var(--transition);
+}
+.quick-command:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .input-wrap {
   display: flex; align-items: flex-end; gap: 10px;
   background: var(--bg-elevated); border: 1px solid var(--border-v);
@@ -848,11 +874,16 @@ body::before {
 .toolbar {
   display: flex; align-items: center; gap: 6px;
   padding: 10px 32px; border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .toolbar__title {
   font-size: 13px; font-weight: 500; color: var(--text-dim);
   margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .btn-tool {
@@ -864,6 +895,18 @@ body::before {
 }
 .btn-tool:hover { background: var(--bg-hover); color: var(--text); }
 .btn-tool--active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.btn-tool__icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.btn-mobile-menu {
+  display: none;
+}
+
+.mobile-sidebar-backdrop {
+  display: none;
+}
 
 /* ═══════════════════════ SCROLLBAR ═══════════════════════ */
 
@@ -897,6 +940,304 @@ body::before {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
   30% { transform: translateY(-6px); opacity: 1; }
 }
+
+@media (max-width: 860px) {
+  html,
+  body {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  body.mobile-nav-open {
+    overflow: hidden;
+  }
+
+  .app,
+  .app--panel-open {
+    grid-template-columns: 1fr;
+    height: 100dvh;
+    min-width: 0;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(86vw, 340px);
+    max-width: calc(100vw - 44px);
+    z-index: 80;
+    transform: translateX(-102%);
+    transition: transform var(--transition), box-shadow var(--transition);
+    box-shadow: none;
+  }
+
+  body.mobile-nav-open .sidebar {
+    transform: translateX(0);
+    box-shadow: 18px 0 48px rgba(0,0,0,0.22);
+  }
+
+  .sidebar-resize {
+    display: none;
+  }
+
+  .mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.42);
+    z-index: 70;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition);
+    display: block;
+  }
+
+  body.mobile-nav-open .mobile-sidebar-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .main {
+    min-width: 0;
+    height: 100dvh;
+  }
+
+  .toolbar {
+    padding: 8px 10px;
+    gap: 6px;
+    min-height: 48px;
+  }
+
+  .btn-mobile-menu {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .btn-tool {
+    width: 34px;
+    height: 34px;
+    justify-content: center;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .btn-tool__icon {
+    font-size: 14px;
+  }
+
+  .btn-tool__label {
+    display: none;
+  }
+
+  .chat {
+    padding: 18px 0;
+  }
+
+  .chat__inner {
+    max-width: none;
+    padding: 0 14px;
+  }
+
+  .chat__empty {
+    padding: 0 20px;
+  }
+
+  .chat__empty-title {
+    font-size: 24px;
+  }
+
+  .msg {
+    margin-bottom: 18px;
+  }
+
+  .msg__text {
+    font-size: 14px;
+    line-height: 1.66;
+    overflow-wrap: anywhere;
+  }
+
+  .msg__text pre {
+    padding: 12px;
+    border-radius: var(--radius-sm);
+  }
+
+  .tool-block__head {
+    align-items: flex-start;
+  }
+
+  .tool-block__args {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .input-area {
+    padding: 10px 10px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .quick-commands {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .quick-command {
+    flex: 0 0 auto;
+  }
+
+  .input-wrap {
+    border-radius: var(--radius-md);
+    padding: 9px 10px;
+  }
+
+  .input-wrap textarea {
+    max-height: 35dvh;
+    font-size: 16px;
+  }
+
+  .input-hint {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 4px;
+  }
+
+  .command-menu {
+    max-height: 44dvh;
+    overflow-y: auto;
+  }
+
+  .command-menu__item {
+    display: block;
+  }
+
+  .command-menu__name {
+    min-width: 0;
+    margin-bottom: 3px;
+  }
+
+  .command-menu__desc {
+    white-space: normal;
+  }
+
+  .panel {
+    position: fixed;
+    inset: 48px 0 0;
+    z-index: 60;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -16px 40px rgba(0,0,0,0.14);
+  }
+
+  .panel__head {
+    padding: 12px 14px;
+  }
+
+  .panel__tabs {
+    overflow-x: auto;
+    padding: 8px 10px;
+  }
+
+  .panel__tab {
+    flex: 0 0 auto;
+  }
+
+  .panel__body {
+    padding: 10px;
+  }
+
+  .usage-user__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dialog-overlay {
+    align-items: flex-end;
+    justify-content: center;
+    padding: 12px;
+  }
+
+  .dialog {
+    width: 100%;
+    min-width: 0;
+    max-width: 520px;
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    border-radius: var(--radius-md);
+    padding: 18px;
+  }
+
+  .dialog .btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dialog .btn-row button {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 520px) {
+  .toolbar__title {
+    font-size: 12px;
+  }
+
+  .brand-name,
+  .version {
+    display: none;
+  }
+
+  .workspace-item {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr);
+    align-items: start;
+    column-gap: 8px;
+    row-gap: 3px;
+  }
+
+  .workspace-item__actions,
+  .session-item__actions {
+    opacity: 1;
+  }
+
+  .workspace-item__dot {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 7px;
+  }
+
+  .workspace-item__name {
+    grid-column: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .workspace-item > span[style] {
+    grid-column: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-item__actions {
+    grid-column: 2;
+    justify-self: start;
+    flex-wrap: wrap;
+    margin-top: 3px;
+  }
+
+  .workspace-sessions {
+    margin-left: 8px;
+  }
+
+  .ask-question-opts {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .ask-question-opt {
+    width: 100%;
+    border-radius: var(--radius-sm);
+    text-align: left;
+  }
+}
 </style>
 </head>
 <body>
@@ -925,10 +1266,11 @@ body::before {
   <!-- ── MAIN ── -->
   <main class="main">
     <div class="toolbar">
+      <button class="btn-icon btn-mobile-menu" id="btnMobileMenu" title="Workspaces" aria-label="Open workspaces">☰</button>
       <span class="toolbar__title" id="toolbarTitle">Select or create a session</span>
-      <button class="btn-tool" id="btnUsage" title="Usage">Usage</button>
-      <button class="btn-tool" id="btnCapabilities" title="Capabilities">⚙ Capabilities</button>
-      <button class="btn-tool" id="btnFiles" title="Session files">📁 Files</button>
+      <button class="btn-tool" id="btnUsage" title="Usage" aria-label="Usage"><span class="btn-tool__icon" aria-hidden="true">U</span><span class="btn-tool__label">Usage</span></button>
+      <button class="btn-tool" id="btnCapabilities" title="Capabilities" aria-label="Capabilities"><span class="btn-tool__icon" aria-hidden="true">⚙</span><span class="btn-tool__label">Capabilities</span></button>
+      <button class="btn-tool" id="btnFiles" title="Session files" aria-label="Session files"><span class="btn-tool__icon" aria-hidden="true">📁</span><span class="btn-tool__label">Files</span></button>
     </div>
     <div class="chat" id="chat">
       <div class="chat__empty" id="chatEmpty">
@@ -941,6 +1283,7 @@ body::before {
     <div class="input-area">
       <div class="input-area__inner">
         <div class="command-menu" id="commandMenu" role="listbox" style="display:none"></div>
+        <div class="quick-commands" id="quickCommands" aria-label="Quick commands"></div>
         <div class="input-wrap">
           <textarea id="promptInput" rows="1" placeholder="Send a prompt, or use /implement, /fix..." disabled></textarea>
           <button class="btn-send" id="btnSend" disabled title="Send">↑</button>
@@ -964,6 +1307,7 @@ body::before {
     <div class="panel__body" id="panelBody"></div>
   </aside>
 </div>
+<div class="mobile-sidebar-backdrop" id="mobileSidebarBackdrop" aria-hidden="true"></div>
 
 <script>
 /* ═══════════════════════ API ═══════════════════════ */
@@ -1030,6 +1374,7 @@ const promptInput = $("#promptInput");
 const btnSend = $("#btnSend");
 const inputHint = $("#inputHint");
 const commandMenu = $("#commandMenu");
+const quickCommands = $("#quickCommands");
 const toolbarTitle = $("#toolbarTitle");
 const panel = $("#panel");
 const panelBody = $("#panelBody");
@@ -1040,6 +1385,8 @@ const btnCapabilities = $("#btnCapabilities");
 const btnFiles = $("#btnFiles");
 const btnLogout = $("#btnLogout");
 const currentUserLabel = $("#currentUserLabel");
+const btnMobileMenu = $("#btnMobileMenu");
+const mobileSidebarBackdrop = $("#mobileSidebarBackdrop");
 
 /* ═══════════════════════ USERS ═══════════════════════ */
 
@@ -1169,6 +1516,7 @@ async function selectSession(id) {
   await loadSessionMessages(id);
   reconnectSessionStream(id);
   if (state.panelOpen && state.panelTab === "files") loadFiles();
+  closeMobileSidebar();
 }
 
 async function loadSessionMessages(id) {
@@ -2231,6 +2579,57 @@ function updateSendButton() {
   }
 }
 
+function preferredQuickCommands(commands) {
+  const preferred = [
+    "implement",
+    "fix",
+    "refactor",
+    "modify",
+    "deploy-creation-tool-dev",
+  ];
+  const byName = new Map((commands || []).map(command => [command.name, command]));
+  const picked = preferred.map(name => byName.get(name)).filter(Boolean);
+  const extras = (commands || []).filter(command => !preferred.includes(command.name)).slice(0, Math.max(0, 6 - picked.length));
+  return [...picked, ...extras];
+}
+
+function renderQuickCommands(commands) {
+  if (!quickCommands) return;
+  const items = preferredQuickCommands(commands);
+  if (!items.length) {
+    quickCommands.innerHTML = "";
+    return;
+  }
+  quickCommands.innerHTML = items.map(command => `
+    <button class="quick-command" type="button" data-command="${escapeHtml(command.name)}" title="${escapeHtml(command.description || "/" + command.name)}">/${escapeHtml(command.name)}</button>
+  `).join("");
+}
+
+async function initQuickCommands() {
+  try {
+    const caps = await ensureCapabilities();
+    renderQuickCommands(caps.commands || []);
+  } catch (e) {
+    renderQuickCommands([
+      { name: "implement" },
+      { name: "fix" },
+      { name: "refactor" },
+      { name: "modify" },
+    ]);
+  }
+}
+
+function applyQuickCommand(commandName) {
+  if (!state.activeSession) {
+    showAlertDialog("Select or create a session first");
+    return;
+  }
+  promptInput.value = `/${commandName} `;
+  resizePromptInput();
+  hideCommandSuggestions();
+  promptInput.focus();
+}
+
 async function sendPrompt() {
   const sessionId = state.activeSession;
   const prompt = promptInput.value.trim();
@@ -2744,6 +3143,38 @@ function initSidebarResize() {
   });
 }
 
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 860px)").matches;
+}
+
+function openMobileSidebar() {
+  document.body.classList.add("mobile-nav-open");
+  btnMobileMenu?.setAttribute("aria-expanded", "true");
+}
+
+function closeMobileSidebar() {
+  document.body.classList.remove("mobile-nav-open");
+  btnMobileMenu?.setAttribute("aria-expanded", "false");
+}
+
+function toggleMobileSidebar() {
+  if (!isMobileViewport()) return;
+  if (document.body.classList.contains("mobile-nav-open")) closeMobileSidebar();
+  else openMobileSidebar();
+}
+
+function initMobileNav() {
+  btnMobileMenu?.setAttribute("aria-expanded", "false");
+  btnMobileMenu?.addEventListener("click", toggleMobileSidebar);
+  mobileSidebarBackdrop?.addEventListener("click", closeMobileSidebar);
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeMobileSidebar();
+  });
+  window.addEventListener("resize", () => {
+    if (!isMobileViewport()) closeMobileSidebar();
+  });
+}
+
 /* ═══════════════════════ INPUT AUTO-RESIZE ═══════════════════════ */
 
 function resizePromptInput() {
@@ -2790,6 +3221,11 @@ commandMenu.addEventListener("mousedown", (e) => {
   e.preventDefault();
   applyCommandSuggestion(Number(item.dataset.index));
 });
+quickCommands.addEventListener("click", (e) => {
+  const item = e.target.closest(".quick-command");
+  if (!item) return;
+  applyQuickCommand(item.dataset.command || "");
+});
 $("#btnClosePanel").addEventListener("click", closePanel);
 $("#themeToggle").addEventListener("click", toggleTheme);
 btnLogout.addEventListener("click", logout);
@@ -2817,6 +3253,8 @@ loadUsers()
     addErrorMessage("Failed to initialize users: " + e.message);
   });
 initSidebarResize();
+initMobileNav();
+initQuickCommands();
 initTheme();
 </script>
 </body>
