@@ -60,7 +60,7 @@ skill: ahe-observer
 
 | 参数 | 默认值 | 取值 | 说明 |
 |------|--------|------|------|
-| `mode` | `full` | `full` / `fast` | `fast` 跳过 Phase 2 GAN 审查（省 30-40% Token）。不建议在核心业务/安全鉴权使用 |
+| `mode` | `full` | `full` / `fast` | `fast` 仅跳过 `security-reviewer-agent`；`code-reviewer-agent` 始终强制执行。核心业务/安全鉴权建议使用 `full` |
 | `unit_test` | `on` | `on` / `off` / `<router>` | `off` 跳过 Phase 3；传 **router 目录名**（与 `tests/<router>/` 一致，如 `project`）时 Phase 3 仅 `pytest tests/<router>/` |
 
 > `branch` 自动检测：`git rev-parse --abbrev-ref HEAD | tr '/' '_'`
@@ -71,13 +71,13 @@ skill: ahe-observer
 2. `BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')`，`module` 未传入时从需求描述或分支名推断
 3. 传入 `task_card=...` 且文件存在 → 跳过 Phase 0
 4. **交互收集流水线控制参数**：若用户未在命令中指定以下参数，通过 `AskUserQuestion` 依次询问：
-   - **mode**：「请选择运行模式。(A) 完整模式 — 需求设计 → 代码生成 → GAN 审查 → 单元测试 (B) 快速模式 — 跳过 GAN 审查，省 30-40% Token」
+   - **mode**：「请选择运行模式。(A) 完整模式 — 需求设计 → 代码生成 → 代码审查 + 安全审查 → 单元测试 (B) 快速模式 — 保留代码审查，仅跳过安全审查」
      - 默认 `full`，用户选 B 时 `mode=fast`
    - **unit_test**：「是否执行单元测试？(A) 是，全部 (B) 否，跳过 (C) 仅指定 router」
      - 默认 `on`，选 B 时 `unit_test=off`，选 C 时追问 router 名
 5. 向用户确认并展示流水线路径：
    - 完整模式（默认）：「需求设计 → 代码生成 → GAN 审查 → 单元测试。关键节点暂停确认」
-   - 快速模式（mode=fast）：「需求设计 → 代码生成 → 单元测试」
+   - 快速模式（mode=fast）：「需求设计 → 代码生成 → 强制代码审查 → 单元测试」
    - 根据 unit_test 开关动态裁剪路径展示
 6. **AHE 轨迹初始化**：记录本次 Command 执行的元数据到临时文件（供 Observer Skill 读取）：
    ```bash
@@ -162,32 +162,33 @@ skill: ahe-observer
 
 ### Phase 2: GAN 对抗审查（Discriminator Round 1）
 
-**Skip if**: `mode=fast`（报告中标注「⚡ 快速模式 — GAN 审查已跳过」）
+**Never skip**: `code-reviewer-agent` 必须执行。`mode=fast` 仅跳过 `security-reviewer-agent`（报告中标注「⚡ 快速模式 — 安全审查已跳过，代码审查已执行」）。
 
-**🔴 动态范围判断（AI 不可替用户做主 — 红线）**:
+**🔴 动态范围判断（只允许裁剪安全审查 — 红线）**:
 若 `mode=full`，进入审查前先检查改动范围：
 1. 读取 `changed_files.txt`，统计改动文件数和改动行数（`git diff --stat`）
 2. 若改动范围较小（如 ≤ 2 个文件且改动行数较少），必须通过 `AskUserQuestion` 主动询问用户：
-   > 「本次改动范围较小（仅 N 个文件，约 M 行变更）。GAN 审查环节将耗费较多 Token（约 30-40%），是否跳过审查直接进入单元测试？
-   > (A) 跳过审查，进入单元测试
-   > (B) 继续完整审查流程」
-3. 用户选 A → 按 `mode=fast` 处理，跳过 Phase 2，报告中标注「⚡ 用户确认跳过 — 改动范围较小」
+   > 「本次改动范围较小（仅 N 个文件，约 M 行变更）。是否跳过安全审查，仅执行强制代码审查后进入单元测试？
+   > (A) 跳过安全审查，保留代码审查
+   > (B) 继续完整审查流程（代码审查 + 安全审查）」
+3. 用户选 A → 按 `mode=fast` 处理，仅跳过 `security-reviewer-agent`，报告中标注「⚡ 用户确认跳过安全审查 — 改动范围较小；代码审查已执行」
 4. 用户选 B → 正常执行 Phase 2
-5. **严禁 AI 自行判断并跳过审查，必须等待用户明确选择。这是红线。**
+5. **严禁 AI 自行判断并跳过安全审查，必须等待用户明确选择；严禁跳过 `code-reviewer-agent`。这是红线。**
 
-**Agents**: `code-reviewer-agent` + `security-reviewer-agent` (并行 Sub-agent)
-> ⛔ **MANDATORY DELEGATION**: 本步骤必须同时委托两个 Sub-agent 并行执行审查。
-> Planner 禁止自行执行审查、直接输出 VERDICT 或跳过任意一个 Agent。
-> 未同时收到两个 Agent 的 VERDICT 响应前，禁止进入下一阶段。
+**Agents**: `code-reviewer-agent` (强制) + `security-reviewer-agent` (`mode=full` 时并行)
+> ⛔ **MANDATORY DELEGATION**: 本步骤必须委托 `code-reviewer-agent` 执行代码审查；不存在跳过代码审查的路径。
+> `mode=full` 时必须同时委托 `code-reviewer-agent` 与 `security-reviewer-agent` 并行执行审查；`mode=fast` 时仅可跳过 `security-reviewer-agent`。
+> Planner 禁止自行执行审查、直接输出 VERDICT 或替代 `code-reviewer-agent`。
+> 未收到 `code-reviewer-agent` 的 VERDICT 响应前，禁止进入下一阶段；`mode=full` 时还必须等待 `security-reviewer-agent` 的 VERDICT。
 
-**Prompt** (both):
+**Prompt** (`code-reviewer-agent`; `mode=full` 时同上下文传给 `security-reviewer-agent`):
 > 请审查以下改动文件，task_card 位于 .ai/implement/{module}/{branch}/task_card.json。
 > 改动文件列表：$(cat .ai/implement/{module}/{branch}/changed_files.txt)
 > 请严格按六维度/安全维度审查，输出 VERDICT: PASS 或 FAIL。
 > 将审查结果同时写入 .ai/implement/{module}/{branch}/review_feedback.md。
 
-**Verdict**: 两者都 PASS → Phase 3 | 任一 FAIL → Retry Loop
-**Retry Loop** (MAX=3): 提取 review_feedback.md 中 Critical → `debugger-agent` 最小化修复（只改 Critical，不重构不改风格，更新 changed_files.txt）→ 重新并行审查。超限 → AskQuestion「已循环 3 轮仍有 Critical：[列出]。(A) 人工修复后继续 (B) 忽略继续测试 (C) 终止」
+**Verdict**: `code-reviewer-agent` PASS 且（`mode=fast` 或 `security-reviewer-agent` PASS）→ Phase 3 | 任一已执行审查 FAIL → Retry Loop
+**Retry Loop** (MAX=3): 提取 review_feedback.md 中 Critical → `debugger-agent` 最小化修复（只改 Critical，不重构不改风格，更新 changed_files.txt）→ 重新执行强制代码审查；`mode=full` 时重新并行执行安全审查。超限 → AskQuestion「已循环 3 轮仍有 Critical：[列出]。(A) 人工修复后继续 (B) 忽略继续测试 (C) 终止」
 
 > **AHE**: 每次 Retry Loop 触发时，记录 `{"phase": "Phase 2", "event": "retry", "retry_count": N, "reason": "Critical/N"}` 到 `.ai/harness-trace/.preflight_meta.json` 的 `phase_events` 数组中。
 
@@ -235,7 +236,7 @@ skill: ahe-observer
 ## 🏁 implement 流水线执行报告
 
 ### 模式
-{mode=fast：⚡ 快速模式（已跳过 GAN 审查）}
+{mode=fast：⚡ 快速模式（已跳过安全审查；代码审查已执行）}
 {unit_test=off：⏭️ 单元测试已跳过}
 {unit_test 为 router 名：🎯 测试范围已限定}
 
@@ -244,7 +245,7 @@ skill: ahe-observer
 |------|-------|---------|------|
 | Phase 0: 需求设计 | requirement-design-agent | ✅ | - |
 | Phase 1: 代码生成 | generator-agent | ✅ | - |
-| Phase 2: 代码审查 | code-reviewer + security-reviewer | PASS/FAIL/⚡SKIP | 0-3 |
+| Phase 2: 代码审查 | code-reviewer（强制）+ security-reviewer（full 模式） | PASS/FAIL/⚡SECURITY_SKIP | 0-3 |
 | Phase 3: 单元测试 | unit-test-gen-agent + test-runner | PASS/FAIL/⏭️SKIP | 0-3 |
 
 ### 改动文件
@@ -281,6 +282,7 @@ feat: {task_card.feature}
 
 - **Context Reset**: Sub-agent 从文件契约获取上下文，不继承对话历史
 - **GAN 分离**: Generator 不自评，Reviewer/Tester 独立评判；Debugger 只修复已报告问题，不做额外重构
+- **代码审查强制执行**: 所有代码生成结果必须经过 `code-reviewer-agent`，`mode=fast` 也不得跳过
 - **渐进式鉴别**: Round 1 静态审查 → Round 2 单元测试
 - **测试持久化**: 单元测试保存到 `tests/{router}/`（按路由文件分目录）
 - **人类卡点**: Phase 0 后、GAN/测试超限时、最终报告后
@@ -288,7 +290,8 @@ feat: {task_card.feature}
 - **歧义必须停下**: Agent 遇到缺失/歧义必须暂停确认，禁止猜测
 
 ### 禁止行为（无论任务复杂度如何，一律适用）
-- 🔴 **红线**：禁止 AI 自行判断「改动范围小」而跳过 GAN 审查——即便改动仅 1 行也必须通过 `AskUserQuestion` 由用户决定是否跳过。AI 不可替用户做主
+- 🔴 **红线**：禁止任何路径跳过 `code-reviewer-agent`；即便改动仅 1 行也必须委托该 Agent 并等待 VERDICT
+- 🔴 **红线**：禁止 AI 自行判断「改动范围小」而跳过安全审查——即便仅跳过 `security-reviewer-agent` 也必须通过 `AskUserQuestion` 由用户决定。AI 不可替用户做主
 - 禁止以「任务简单」「改动很小」为由跳过标注 (Sub-agent) 的步骤
 - 禁止 Planner 自行执行代码生成、审查或测试（即便能力上可行）
 - 禁止自动通过 HARD STOP 卡点，必须等待用户明确响应
