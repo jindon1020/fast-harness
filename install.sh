@@ -3,13 +3,14 @@
 # fast-harness 一键安装脚本
 #
 # 基于 Anthropic Harness Design 的 Generator-Evaluator 多 Agent 协作开发套件
-# 支持 Cursor、Claude Code 和 Qoder 三种 AI IDE
+# 支持 Cursor、Claude Code、Qoder 和 Codex
 #
 # 用法:
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform cursor
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform claude
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform qoder
+#   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform codex
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform all
 #   curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --dir my-plugin
 #
@@ -73,7 +74,7 @@ while [[ $# -gt 0 ]]; do
             echo "用法: install.sh [选项]"
             echo ""
             echo "选项:"
-            echo "  --platform <cursor|claude|qoder|all>  指定 IDE 平台（默认: 自动检测）"
+            echo "  --platform <cursor|claude|qoder|codex|all>  指定 IDE 平台（默认: 自动检测）"
             echo "  --dir <name>                     插件目录名（默认: .ether）"
             echo "  --project <path>                 项目根目录（默认: 当前目录）"
             echo "  --skip-agents                    跳过 AGENTS.md 生成"
@@ -92,6 +93,7 @@ detect_platform() {
     local has_cursor=false
     local has_claude=false
     local has_qoder=false
+    local has_codex=false
 
     # 检测 Cursor
     if [[ -d "$PROJECT_DIR/.cursor" ]] || command -v cursor &>/dev/null; then
@@ -108,10 +110,16 @@ detect_platform() {
         has_qoder=true
     fi
 
+    # 检测 Codex
+    if [[ -d "$PROJECT_DIR/.codex" ]] || command -v codex &>/dev/null; then
+        has_codex=true
+    fi
+
     local detected_count=0
     $has_cursor && ((detected_count++))
     $has_claude && ((detected_count++))
     $has_qoder && ((detected_count++))
+    $has_codex && ((detected_count++))
 
     if [[ $detected_count -ge 2 ]]; then
         echo "all"
@@ -121,6 +129,8 @@ detect_platform() {
         echo "claude"
     elif $has_qoder; then
         echo "qoder"
+    elif $has_codex; then
+        echo "codex"
     else
         echo "all"
     fi
@@ -786,6 +796,150 @@ PREHOOK
     fi
 }
 
+# ---------- Codex 配置 ----------
+install_codex() {
+    info "配置 Codex 环境..."
+
+    if [[ -f "$PROJECT_DIR/$PLUGIN_DIR/.codex-plugin/plugin.json" ]]; then
+        ok "Codex 插件清单已就绪: $PLUGIN_DIR/.codex-plugin/plugin.json"
+    else
+        mkdir -p "$PROJECT_DIR/$PLUGIN_DIR/.codex-plugin"
+        cat > "$PROJECT_DIR/$PLUGIN_DIR/.codex-plugin/plugin.json" << CODEXPLUGIN
+{
+  "name": "fast-harness",
+  "version": "2.0.0",
+  "description": "Generator-Evaluator multi-agent development harness for Codex.",
+  "author": {
+    "name": "jindong"
+  },
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "fast-harness",
+    "shortDescription": "Multi-agent development harness for Codex",
+    "longDescription": "fast-harness installs project-local commands, agents, skills, hooks, and AGENTS.md guidance for Generator-Evaluator development workflows in Codex.",
+    "developerName": "jindong",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "/implement 我需要实现一个新功能",
+      "/fix 线上报错 request_id=abc-123"
+    ]
+  }
+}
+CODEXPLUGIN
+        ok "创建: $PLUGIN_DIR/.codex-plugin/plugin.json"
+    fi
+
+    # 复制 Agents → .codex/agents/（从目录化结构中提取 .md 文件）
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/agents" ]]; then
+        mkdir -p "$PROJECT_DIR/.codex/agents"
+        for agent_dir in "$PROJECT_DIR/$PLUGIN_DIR/agents/"*/; do
+            [[ -d "$agent_dir" ]] || continue
+            local agent_name
+            agent_name="$(basename "$agent_dir")"
+            local agent_md="$agent_dir/${agent_name}.md"
+            if [[ -f "$agent_md" ]]; then
+                copy_file "$agent_md" "$PROJECT_DIR/.codex/agents/${agent_name}.md"
+            fi
+        done
+    fi
+
+    # 复制 Skills → .codex/skills/
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/skills" ]]; then
+        safe_copy_dir "$PROJECT_DIR/$PLUGIN_DIR/skills" "$PROJECT_DIR/.codex/skills"
+        remove_obsolete_skill_dirs "$PROJECT_DIR/.codex/skills"
+    fi
+
+    # 复制 Commands → .codex/commands/（去掉 -command 后缀使 /implement 生效）
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/commands" ]]; then
+        mkdir -p "$PROJECT_DIR/.codex/commands"
+        for cmd_file in "$PROJECT_DIR/$PLUGIN_DIR/commands/"*-command.md; do
+            [[ -f "$cmd_file" ]] || continue
+            local base
+            base="$(basename "$cmd_file" | sed 's/-command\.md$/.md/')"
+            copy_file "$cmd_file" "$PROJECT_DIR/.codex/commands/$base"
+        done
+    fi
+
+    # 复制 Hooks → .codex/hooks/
+    if [[ -d "$PROJECT_DIR/$PLUGIN_DIR/hooks" ]]; then
+        mkdir -p "$PROJECT_DIR/.codex/hooks"
+        for hook_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.sh; do
+            [[ -f "$hook_file" ]] && copy_file "$hook_file" "$PROJECT_DIR/.codex/hooks/$(basename "$hook_file")"
+        done
+        for py_file in "$PROJECT_DIR/$PLUGIN_DIR/hooks/"*.py; do
+            [[ -f "$py_file" ]] && copy_file "$py_file" "$PROJECT_DIR/.codex/hooks/$(basename "$py_file")"
+        done
+        chmod +x "$PROJECT_DIR/.codex/hooks/"*.sh 2>/dev/null || true
+    fi
+
+    # Codex 以 AGENTS.md 作为主要项目指令入口；这里保留一份轻量说明，方便人工定位。
+    local readme_file="$PROJECT_DIR/.codex/README.md"
+    if $FORCE || [[ ! -f "$readme_file" ]]; then
+        mkdir -p "$PROJECT_DIR/.codex"
+        cat > "$readme_file" << CODEXREADME
+# fast-harness for Codex
+
+fast-harness 组件已安装到本项目：
+
+- Commands: \`.codex/commands/\`
+- Agents: \`.codex/agents/\`
+- Skills: \`.codex/skills/\`
+- Source plugin: \`$PLUGIN_DIR/\`
+
+Codex 的项目级行为入口仍是仓库根目录的 \`AGENTS.md\`。执行 \`/implement\`、\`/fix\`、\`/refactor\`、\`/modify\`、\`/init\`、\`/test\` 时，按 \`AGENTS.md\` 中的 fast-harness 章节读取对应规范。
+CODEXREADME
+        ok "创建: $readme_file"
+    else
+        skip "$readme_file"
+    fi
+
+    # 创建 git pre-commit hook（wiki 自动更新）
+    if [[ -d "$PROJECT_DIR/.git" ]]; then
+        local pre_commit_hook="$PROJECT_DIR/.git/hooks/pre-commit"
+        if [[ -f "$pre_commit_hook" ]]; then
+            if grep -qF "fast-harness" "$pre_commit_hook" 2>/dev/null; then
+                local backup="$pre_commit_hook.backup.fast-harness.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                ok "已备份原有 pre-commit → $(basename "$backup")"
+            else
+                local backup="$pre_commit_hook.backup.$(date +%Y%m%d%H%M%S)"
+                cp "$pre_commit_hook" "$backup"
+                warn "已有 pre-commit hook 已备份到 $(basename "$backup")，将被覆盖"
+            fi
+        fi
+        cat > "$pre_commit_hook" << 'PREHOOK'
+#!/bin/bash
+# fast-harness wiki auto-update hook (pre-commit)
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+if [[ -f "$PROJECT_ROOT/.codex/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.codex/hooks/wiki-update-on-commit.sh" --staged
+elif [[ -f "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.cursor/hooks/wiki-update-on-commit.sh" --staged
+elif [[ -f "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.claude/hooks/wiki-update-on-commit.sh" --staged
+elif [[ -f "$PROJECT_ROOT/.qoder/hooks/wiki-update-on-commit.sh" ]]; then
+    bash "$PROJECT_ROOT/.qoder/hooks/wiki-update-on-commit.sh" --staged
+fi
+
+# 标记过期的 MANIFEST.json 变更一并纳入本次 commit
+if [[ -f "$PROJECT_ROOT/.wiki/MANIFEST.json" ]]; then
+    git -C "$PROJECT_ROOT" add .wiki/MANIFEST.json 2>/dev/null || true
+fi
+
+exit 0
+PREHOOK
+        chmod +x "$pre_commit_hook"
+        ok "创建: .git/hooks/pre-commit (wiki 自动更新)"
+    fi
+}
+
 case "$PLATFORM" in
     cursor)
         install_cursor ;;
@@ -793,14 +947,18 @@ case "$PLATFORM" in
         install_claude ;;
     qoder)
         install_qoder ;;
+    codex)
+        install_codex ;;
     all)
         install_cursor
         echo ""
         install_claude
         echo ""
-        install_qoder ;;
+        install_qoder
+        echo ""
+        install_codex ;;
     *)
-        err "无效平台: $PLATFORM（cursor/claude/qoder/all）"
+        err "无效平台: $PLATFORM（cursor/claude/qoder/codex/all）"
         exit 1 ;;
 esac
 
@@ -980,6 +1138,12 @@ case "$PLATFORM" in
         echo "  📁 .qoder/skills/               # Qoder 可识别的 Skill"
         echo "  📁 .qoder/commands/             # Qoder 可识别的命令（/implement 等）"
         echo "  📄 .qoder/rules/ether.mdc" ;;
+    codex)
+        echo "  📁 .codex/agents/               # Codex 可引用的 Agent"
+        echo "  📁 .codex/skills/               # Codex 可引用的 Skill"
+        echo "  📁 .codex/commands/             # Codex 可引用的命令（/implement 等）"
+        echo "  📁 .codex/hooks/                # Codex Hook 脚本"
+        echo "  📄 .codex/README.md              # Codex 组件索引" ;;
     all)
         echo "  📁 .cursor/agents/              # Cursor 可识别的 Agent"
         echo "  📁 .cursor/skills/              # Cursor 可识别的 Skill"
@@ -993,7 +1157,12 @@ case "$PLATFORM" in
         echo "  📁 .qoder/agents/               # Qoder 可识别的 Agent"
         echo "  📁 .qoder/skills/               # Qoder 可识别的 Skill"
         echo "  📁 .qoder/commands/             # Qoder 可识别的命令（/implement 等）"
-        echo "  📄 .qoder/rules/ether.mdc" ;;
+        echo "  📄 .qoder/rules/ether.mdc"
+        echo "  📁 .codex/agents/               # Codex 可引用的 Agent"
+        echo "  📁 .codex/skills/               # Codex 可引用的 Skill"
+        echo "  📁 .codex/commands/             # Codex 可引用的命令（/implement 等）"
+        echo "  📁 .codex/hooks/                # Codex Hook 脚本"
+        echo "  📄 .codex/README.md              # Codex 组件索引" ;;
 esac
 
 echo ""

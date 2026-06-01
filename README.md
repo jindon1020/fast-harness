@@ -49,6 +49,8 @@ Generator (生成)          Discriminator (鉴别)
 |------|---------|------|
 | **Cursor** | Agent Mode | ✅ 完全支持 |
 | **Claude Code** | Claude Code with Plugin | ✅ 完全支持 |
+| **Qoder** | Qoder Agent Mode | ✅ 完全支持 |
+| **Codex** | Codex with AGENTS.md / Skills | ✅ 支持 |
 
 ## 一键安装
 
@@ -64,6 +66,8 @@ curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh |
 # 指定平台
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform cursor
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform claude
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform qoder
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --platform codex
 
 # 启用 wiki 自动 LLM 更新（git commit 后自动调用 claude 更新 wiki）
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --wiki-llm
@@ -113,13 +117,16 @@ curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh |
 # 指定平台更新
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --force --platform cursor
 curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --force --platform claude
+curl -fsSL https://cdn.jsdelivr.net/gh/jindon1020/fast-harness@main/install.sh | bash -s -- --force --platform codex
 ```
 
 `--force` 模式会**覆盖更新**以下内容：
 
 - `.ether/` 目录下所有 commands、agents、skills 规范文件及文档
-- `.cursor/rules/ether.mdc` / `.claude/rules/ether.mdc`
+- `.cursor/rules/ether.mdc` / `.claude/rules/ether.mdc` / `.qoder/rules/ether.mdc`
 - `.cursor/agents/`、`.cursor/skills/`、`.cursor/commands/` 下的插件文件
+- `.qoder/agents/`、`.qoder/skills/`、`.qoder/commands/` 下的插件文件
+- `.codex/agents/`、`.codex/skills/`、`.codex/commands/` 下的插件文件
 
 **始终保留，不会被覆盖**：
 
@@ -153,9 +160,17 @@ your-project/
 │   ├── skills/                        # Cursor 自动识别的 Skill
 │   └── commands/                      # Cursor 斜杠命令（/init /implement /modify /fix /refactor）
 ├── .claude/rules/ether.mdc            # Claude 规则（仅 Claude 平台）
+├── .codex/
+│   ├── agents/                        # Codex 可引用的 Agent
+│   ├── skills/                        # Codex 可引用的 Skill
+│   ├── commands/                      # Codex 可引用的命令规范
+│   ├── hooks/                         # Codex Hook 脚本
+│   └── README.md                      # Codex 组件索引
 └── .ether/                            # 插件原文目录（规范详细版）
     ├── .claude-plugin/
     │   └── plugin.json                # Claude Code 插件清单
+    ├── .codex-plugin/
+    │   └── plugin.json                # Codex 插件清单
     ├── commands/
     │   ├── init-command.md            # Code Wiki 初始化
     │   ├── implement-command.md       # 需求实现流水线规范
@@ -474,6 +489,7 @@ rm -rf .ether/
 # 删除 IDE 规则文件
 rm -f .cursor/rules/ether.mdc
 rm -f .claude/rules/ether.mdc
+rm -rf .codex/
 
 # 删除 Code Wiki（可选保留，作为文档）
 rm -rf .wiki/

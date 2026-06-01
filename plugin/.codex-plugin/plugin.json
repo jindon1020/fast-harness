@@ -1,0 +1,25 @@
+{
+  "name": "fast-harness",
+  "version": "2.0.0",
+  "description": "基于 Harness 三体架构的 Generator-Evaluator 分离多 Agent 协作开发套件。提供 implement/fix/refactor/modify 流水线命令、专职 Agent、Connector Skills 和 harness-meta-skill 扩展管理。",
+  "author": {
+    "name": "jindong"
+  },
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "fast-harness",
+    "shortDescription": "Multi-agent development harness for Codex",
+    "longDescription": "fast-harness installs project-local commands, agents, skills, hooks, and AGENTS.md guidance for Generator-Evaluator development workflows in Codex.",
+    "developerName": "jindong",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "/implement 我需要实现一个新功能",
+      "/fix 线上报错 request_id=abc-123"
+    ]
+  }
+}

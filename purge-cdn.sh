@@ -84,8 +84,16 @@ purge_file "plugin/commands/fix-command.md"
 purge_file "plugin/commands/refactor-command.md"
 purge_file "plugin/commands/modify-command.md"
 purge_file "plugin/commands/init-command.md"
-purge_file "plugin/commands/test-command.md"
+purge_file "plugin/commands/unit-test-command.md"
+purge_file "plugin/commands/integration-test-command.md"
 purge_file "plugin/commands/wiki-update-command.md"
+echo ""
+
+# Plugin manifests
+info "[ Plugin Manifests ]"
+purge_file "plugin/.claude-plugin/plugin.json"
+purge_file "plugin/.codex-plugin/plugin.json"
+purge_file "plugin/.mcp.json"
 echo ""
 
 # Hooks

@@ -1,6 +1,14 @@
 ---
 name: code-wiki-gen
-description: Generate a comprehensive, AI-optimized code knowledge base (.wiki/) for any local codebase. Use this skill whenever the user wants to: generate a code wiki, create a project knowledge base for AI coding, document an existing codebase, set up long-term AI memory for a project, update or refresh an existing wiki, or says things like "生成代码知识库", "给项目建wiki", "让AI理解我的代码", "更新wiki", "代码知识库腐坏了". Also trigger when the user mentions "harness + wiki", "AI context files", "CLAUDE.md + wiki", or wants to improve AI code generation accuracy on an existing project.
+description: >
+  Generate a comprehensive, AI-optimized code knowledge base (.wiki/) for any
+  local codebase. Use this skill whenever the user wants to generate a code wiki,
+  create a project knowledge base for AI coding, document an existing codebase,
+  set up long-term AI memory for a project, update or refresh an existing wiki,
+  or says things like "生成代码知识库", "给项目建wiki", "让AI理解我的代码", "更新wiki",
+  "代码知识库腐坏了". Also trigger when the user mentions "harness + wiki",
+  "AI context files", "CLAUDE.md + wiki", or wants to improve AI code generation
+  accuracy on an existing project.
 ---
 
 # Code Wiki Generator
