@@ -505,6 +505,56 @@ async def test_query_checks_out_session_branch_before_streaming(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_query_passes_image_attachments_to_agent_without_storing_base64(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeWorkspaceStore:
+        def checkout_branch(self, workspace_id, repo_name, branch):
+            pass
+
+    async def fake_run_query_stream(**kwargs):
+        captured.update(kwargs)
+        yield {"type": "result", "result": "ok"}
+
+    appended_messages = []
+    monkeypatch.setattr(router, "workspace_store", FakeWorkspaceStore())
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(tmp_path),
+            "created_at": "now",
+            "last_access": "now",
+            "metadata": {"workspace_id": "ws-1", "repo_name": "app", "branch": "main"},
+        },
+    )
+    monkeypatch.setattr(
+        router.session_store,
+        "append_message",
+        lambda session_id, message: appended_messages.append(message),
+    )
+    monkeypatch.setattr(router, "run_query_stream", fake_run_query_stream)
+
+    request = router.QueryRequest(
+        prompt="look",
+        images=[{"name": "paste.png", "mime_type": "image/png", "data": "aGVsbG8=", "size": 5}],
+    )
+    response = await router.query_session("sess-1", request)
+    async for _event in response.body_iterator:
+        break
+
+    assert captured["images"] == [
+        {"name": "paste.png", "mime_type": "image/png", "data": "aGVsbG8=", "size": 5}
+    ]
+    assert appended_messages[0] == {
+        "type": "user",
+        "prompt": "look",
+        "images": [{"name": "paste.png", "mime_type": "image/png", "size": 5}],
+    }
+
+
+@pytest.mark.asyncio
 async def test_running_query_can_be_streamed_after_reconnect(monkeypatch, tmp_path):
     class FakeWorkspaceStore:
         def checkout_branch(self, workspace_id, repo_name, branch):

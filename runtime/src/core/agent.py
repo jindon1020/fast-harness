@@ -8,7 +8,7 @@ import os
 import uuid
 from contextlib import suppress
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 from claude_agent_sdk import (
     ProcessError,
@@ -47,6 +47,9 @@ KUBE_OBSERVABILITY_ALLOWED_TOOLS = [
     "mcp__kube-observability__prometheus_pod_resources",
     "mcp__kube-observability__diagnose_service",
 ]
+
+IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+MAX_DISCOVERED_IMAGE_FILES = 50
 
 
 def _apply_api_config() -> None:
@@ -183,6 +186,7 @@ async def provide_answers(session_id: str, answers: list[dict]) -> None:
 async def run_query_stream(
     session_id: str,
     prompt: str,
+    images: Optional[list[dict[str, Any]]] = None,
     allowed_tools: Optional[list[str]] = None,
     max_turns: Optional[int] = None,
     max_budget_usd: Optional[float] = None,
@@ -204,7 +208,7 @@ async def run_query_stream(
     _apply_api_config()
 
     try:
-        async for message in _run_sdk_query(prompt, options, session_id):
+        async for message in _run_sdk_query(prompt, options, session_id, images=images):
             sdk_session_id = _extract_session_id(message, sdk_session_id)
             serialized = (
                 message
@@ -227,7 +231,7 @@ async def run_query_stream(
             )
             options.resume = None
             try:
-                async for message in _run_sdk_query(prompt, options, session_id):
+                async for message in _run_sdk_query(prompt, options, session_id, images=images):
                     sdk_session_id = _extract_session_id(message, sdk_session_id)
                     serialized = (
                         message
@@ -263,7 +267,12 @@ async def run_query_stream(
             )
 
 
-async def _run_sdk_query(prompt: str, options: ClaudeAgentOptions, session_id: str = ""):
+async def _run_sdk_query(
+    prompt: str,
+    options: ClaudeAgentOptions,
+    session_id: str = "",
+    images: Optional[list[dict[str, Any]]] = None,
+):
     """Run SDK query in streaming mode so answers can be fed back via the queue."""
     _get_answer_queue(session_id)
     output_queue: asyncio.Queue = asyncio.Queue()
@@ -274,7 +283,7 @@ async def _run_sdk_query(prompt: str, options: ClaudeAgentOptions, session_id: s
         yield {
             "type": "user",
             "session_id": "",
-            "message": {"role": "user", "content": prompt},
+            "message": {"role": "user", "content": _build_user_content(prompt, images, options)},
             "parent_tool_use_id": None,
         }
 
@@ -303,6 +312,71 @@ async def _run_sdk_query(prompt: str, options: ClaudeAgentOptions, session_id: s
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+
+
+def _build_user_content(
+    prompt: str,
+    images: Optional[list[dict[str, Any]]],
+    options: ClaudeAgentOptions,
+) -> str | list[dict[str, Any]]:
+    image_blocks = [_image_attachment_to_content_block(image) for image in images or []]
+    text = _build_user_text(prompt, image_blocks, options)
+    if not image_blocks:
+        return text
+    return [{"type": "text", "text": text}, *image_blocks]
+
+
+def _image_attachment_to_content_block(image: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": image["mime_type"],
+            "data": image["data"],
+        },
+    }
+
+
+def _build_user_text(
+    prompt: str,
+    image_blocks: list[dict[str, Any]],
+    options: ClaudeAgentOptions,
+) -> str:
+    parts = [prompt]
+    if image_blocks:
+        parts.append(
+            f"\n\n[fast-harness attached {len(image_blocks)} image(s) to this message. "
+            "Use the visual content directly when answering.]"
+        )
+
+    discovered_images = _discover_workspace_images(Path(str(options.cwd)))
+    if discovered_images:
+        listing = "\n".join(f"- {path}" for path in discovered_images)
+        parts.append(
+            "\n\n[fast-harness detected image files in the current repository. "
+            "When the task refers to local screenshots, diagrams, or other images, "
+            "use the Read tool on the relevant path without asking the user to paste it again.]\n"
+            f"{listing}"
+        )
+    return "".join(parts)
+
+
+def _discover_workspace_images(cwd: Path) -> list[str]:
+    if not cwd.exists():
+        return []
+    images: list[str] = []
+    skipped_dirs = {".git", "node_modules", ".venv", "venv", "__pycache__"}
+    try:
+        for path in cwd.rglob("*"):
+            if len(images) >= MAX_DISCOVERED_IMAGE_FILES:
+                break
+            if any(part in skipped_dirs for part in path.parts):
+                continue
+            if path.is_file() and path.suffix.lower() in IMAGE_FILE_EXTENSIONS:
+                images.append(str(path.relative_to(cwd)))
+    except OSError:
+        return images
+    return sorted(images)
 
 
 def _build_can_use_tool(session_id: str, output_queue: asyncio.Queue | None = None):

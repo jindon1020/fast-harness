@@ -704,10 +704,80 @@ body::before {
   background: var(--bg-elevated); border: 1px solid var(--border-v);
   border-radius: var(--radius-lg); padding: 10px 14px;
   transition: border-color var(--transition), box-shadow var(--transition);
+  flex-wrap: wrap;
 }
 .input-wrap:focus-within {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px var(--accent-dim);
+}
+.input-wrap--drag {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.image-tray {
+  flex-basis: 100%;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.image-chip {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.image-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.image-chip__fallback {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.image-chip__remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  line-height: 20px;
+  padding: 0;
+}
+.image-chip__meta {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .input-wrap textarea {
@@ -1285,6 +1355,7 @@ body::before {
         <div class="command-menu" id="commandMenu" role="listbox" style="display:none"></div>
         <div class="quick-commands" id="quickCommands" aria-label="Quick commands"></div>
         <div class="input-wrap">
+          <div class="image-tray" id="imageTray" style="display:none"></div>
           <textarea id="promptInput" rows="1" placeholder="Send a prompt, or use /implement, /fix..." disabled></textarea>
           <button class="btn-send" id="btnSend" disabled title="Send">↑</button>
         </div>
@@ -1313,6 +1384,9 @@ body::before {
 /* ═══════════════════════ API ═══════════════════════ */
 
 const API = "/api";
+const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const MAX_IMAGE_ATTACHMENTS = 5;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 function authHeaders() {
   return state.currentUserId ? { "X-User-Id": state.currentUserId } : {};
@@ -1358,6 +1432,7 @@ let state = {
   panelTab: "capabilities",
   commandSuggestions: [],
   selectedCommandIndex: 0,
+  pendingImages: [],
 };
 
 /* ═══════════════════════ DOM REFS ═══════════════════════ */
@@ -1370,6 +1445,8 @@ const workspaceList = $("#workspaceList");
 const chat = $("#chat");
 const chatInner = $("#chatInner");
 const chatEmpty = $("#chatEmpty");
+const inputWrap = $(".input-wrap");
+const imageTray = $("#imageTray");
 const promptInput = $("#promptInput");
 const btnSend = $("#btnSend");
 const inputHint = $("#inputHint");
@@ -1536,7 +1613,7 @@ async function loadSessionMessages(id) {
 function renderHistoryMessage(msg) {
   if (!msg || msg.type === "cancelled") return;
   if (msg.type === "user") {
-    renderUserPrompt(msg.prompt || "");
+    renderUserPrompt(msg.prompt || "", msg.images || []);
     return;
   }
   const el = document.createElement("div");
@@ -2121,12 +2198,57 @@ function addMessage(type, data) {
   scrollToBottom();
 }
 
-function renderUserPrompt(prompt) {
+function renderUserPrompt(prompt, images = []) {
   const userEl = document.createElement("div");
   userEl.className = "msg";
-  userEl.innerHTML = `<div class="msg__text" style="color:var(--text-dim);font-style:italic">${escapeHtml(prompt)}</div>`;
+  const text = document.createElement("div");
+  text.className = "msg__text";
+  text.style.color = "var(--text-dim)";
+  text.style.fontStyle = "italic";
+  text.textContent = prompt;
+  userEl.appendChild(text);
+  if (images.length) {
+    userEl.appendChild(createImagePreviewStrip(images, { readonly: true }));
+  }
   chatInner.appendChild(userEl);
   scrollToBottom();
+}
+
+function createImagePreviewStrip(images, { readonly = false } = {}) {
+  const strip = document.createElement("div");
+  strip.className = "image-tray";
+  strip.style.display = "flex";
+  for (const image of images) {
+    const chip = document.createElement("div");
+    chip.className = "image-chip";
+    chip.title = image.name || image.mime_type || "image";
+    if (image.previewUrl) {
+      const img = document.createElement("img");
+      img.src = image.previewUrl;
+      img.alt = image.name || "attached image";
+      chip.appendChild(img);
+    } else {
+      const fallback = document.createElement("div");
+      fallback.className = "image-chip__fallback";
+      fallback.textContent = "image";
+      chip.appendChild(fallback);
+    }
+    if (!readonly) {
+      const remove = document.createElement("button");
+      remove.className = "image-chip__remove";
+      remove.type = "button";
+      remove.textContent = "x";
+      remove.title = "Remove image";
+      remove.onclick = () => removePendingImage(image.id);
+      chip.appendChild(remove);
+    }
+    const meta = document.createElement("div");
+    meta.className = "image-chip__meta";
+    meta.textContent = image.name || image.mime_type || "image";
+    chip.appendChild(meta);
+    strip.appendChild(chip);
+  }
+  return strip;
 }
 
 function createThinkBlock(text) {
@@ -2563,20 +2685,98 @@ function isSessionStreaming(sessionId) {
 
 function updateSendButton() {
   const hasSession = !!state.activeSession;
+  const streaming = isSessionStreaming(state.activeSession);
+  const canSend = hasSession && (!!promptInput.value.trim() || state.pendingImages.length > 0);
   promptInput.disabled = !hasSession;
-  btnSend.disabled = !hasSession;
+  btnSend.disabled = streaming ? false : !canSend;
   if (!hasSession) {
     btnSend.textContent = "↑";
     btnSend.classList.remove("btn-send--stop");
     return;
   }
-  if (isSessionStreaming(state.activeSession)) {
+  if (streaming) {
     btnSend.textContent = "■";
     btnSend.classList.add("btn-send--stop");
   } else {
     btnSend.textContent = "↑";
     btnSend.classList.remove("btn-send--stop");
   }
+}
+
+async function addImageFiles(files) {
+  const imageFiles = [...files].filter(file => file && file.type?.startsWith("image/"));
+  if (!imageFiles.length) return;
+  const accepted = [];
+  for (const file of imageFiles) {
+    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+      addErrorMessage(`Unsupported image type: ${file.type || file.name}`);
+      continue;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      addErrorMessage(`Image is larger than 10MB: ${file.name}`);
+      continue;
+    }
+    if (state.pendingImages.length + accepted.length >= MAX_IMAGE_ATTACHMENTS) {
+      addErrorMessage(`Attach up to ${MAX_IMAGE_ATTACHMENTS} images per message.`);
+      break;
+    }
+    accepted.push(file);
+  }
+  const attachments = await Promise.all(accepted.map(fileToImageAttachment));
+  state.pendingImages.push(...attachments);
+  renderImageTray();
+  updateSendButton();
+}
+
+function fileToImageAttachment(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      const comma = dataUrl.indexOf(",");
+      resolve({
+        id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+        name: file.name || "pasted-image",
+        mime_type: file.type,
+        size: file.size,
+        data: comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl,
+        previewUrl: dataUrl,
+      });
+    };
+    reader.onerror = () => reject(reader.error || new Error("Failed to read image"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderImageTray() {
+  imageTray.innerHTML = "";
+  if (!state.pendingImages.length) {
+    imageTray.style.display = "none";
+    return;
+  }
+  imageTray.style.display = "flex";
+  imageTray.appendChild(createImagePreviewStrip(state.pendingImages));
+}
+
+function removePendingImage(id) {
+  state.pendingImages = state.pendingImages.filter(image => image.id !== id);
+  renderImageTray();
+  updateSendButton();
+}
+
+function clearPendingImages() {
+  state.pendingImages = [];
+  renderImageTray();
+  updateSendButton();
+}
+
+function queryImagesPayload() {
+  return state.pendingImages.map(({ name, mime_type, data, size }) => ({
+    name,
+    mime_type,
+    data,
+    size,
+  }));
 }
 
 function preferredQuickCommands(commands) {
@@ -2632,12 +2832,15 @@ function applyQuickCommand(commandName) {
 
 async function sendPrompt() {
   const sessionId = state.activeSession;
-  const prompt = promptInput.value.trim();
-  if (!prompt || !sessionId || isSessionStreaming(sessionId)) return;
+  const images = queryImagesPayload();
+  const previews = state.pendingImages.map(({ data, ...image }) => image);
+  const prompt = promptInput.value.trim() || (images.length ? "请分析这些图片。" : "");
+  if ((!prompt && !images.length) || !sessionId || isSessionStreaming(sessionId)) return;
   hideCommandSuggestions();
 
   promptInput.value = "";
   promptInput.style.height = "auto";
+  clearPendingImages();
   const stream = {
     streaming: true,
     abortController: new AbortController(),
@@ -2650,7 +2853,7 @@ async function sendPrompt() {
 
   // Show user message
   if (state.activeSession === sessionId) {
-    renderUserPrompt(prompt);
+    renderUserPrompt(prompt, previews);
     scrollToBottom();
   }
   stream.since = await loadSessionHistoryCount(sessionId) - 1;
@@ -2667,7 +2870,7 @@ async function sendPrompt() {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, images }),
       signal: stream.abortController.signal,
     });
     if (!res.ok) throw new Error(await responseErrorMessage(res));
@@ -3184,6 +3387,43 @@ function resizePromptInput() {
 
 promptInput.addEventListener("input", resizePromptInput);
 promptInput.addEventListener("input", updateCommandSuggestions);
+promptInput.addEventListener("input", updateSendButton);
+promptInput.addEventListener("paste", event => {
+  const files = [...(event.clipboardData?.items || [])]
+    .filter(item => item.kind === "file" && item.type.startsWith("image/"))
+    .map(item => item.getAsFile())
+    .filter(Boolean);
+  if (files.length) {
+    event.preventDefault();
+    addImageFiles(files);
+  }
+});
+
+inputWrap.addEventListener("dragenter", event => {
+  if ([...(event.dataTransfer?.items || [])].some(item => item.kind === "file")) {
+    event.preventDefault();
+    inputWrap.classList.add("input-wrap--drag");
+  }
+});
+inputWrap.addEventListener("dragover", event => {
+  if ([...(event.dataTransfer?.items || [])].some(item => item.kind === "file")) {
+    event.preventDefault();
+    inputWrap.classList.add("input-wrap--drag");
+  }
+});
+inputWrap.addEventListener("dragleave", event => {
+  if (!inputWrap.contains(event.relatedTarget)) {
+    inputWrap.classList.remove("input-wrap--drag");
+  }
+});
+inputWrap.addEventListener("drop", event => {
+  inputWrap.classList.remove("input-wrap--drag");
+  const files = [...(event.dataTransfer?.files || [])];
+  if (files.some(file => file.type?.startsWith("image/"))) {
+    event.preventDefault();
+    addImageFiles(files);
+  }
+});
 
 /* ═══════════════════════ KEYBOARD SHORTCUTS ═══════════════════════ */
 

@@ -39,6 +39,38 @@ def test_build_options_loads_plugin_mcp_config_and_allows_kube_tools(monkeypatch
     assert "mcp__kube-observability__k8s_get_pod_logs" in options.allowed_tools
 
 
+def test_build_user_content_includes_image_blocks_and_workspace_images(tmp_path):
+    (tmp_path / "diagram.png").write_bytes(b"png")
+
+    content = agent._build_user_content(
+        "review this",
+        [{"name": "paste.png", "mime_type": "image/png", "data": "aGVsbG8=", "size": 5}],
+        SimpleNamespace(cwd=str(tmp_path)),
+    )
+
+    assert content[0]["type"] == "text"
+    assert "review this" in content[0]["text"]
+    assert "diagram.png" in content[0]["text"]
+    assert content[1] == {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "aGVsbG8=",
+        },
+    }
+
+
+def test_build_user_content_lists_workspace_images_without_attachments(tmp_path):
+    (tmp_path / "screens").mkdir()
+    (tmp_path / "screens" / "shot.webp").write_bytes(b"webp")
+
+    content = agent._build_user_content("use local images", [], SimpleNamespace(cwd=str(tmp_path)))
+
+    assert isinstance(content, str)
+    assert "screens/shot.webp" in content
+
+
 @pytest.mark.asyncio
 async def test_ask_user_question_answers_return_sdk_updated_input():
     session_id = "ask-session"

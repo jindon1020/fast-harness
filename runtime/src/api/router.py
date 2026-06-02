@@ -494,6 +494,7 @@ async def _run_query_background(
         async for msg in run_query_stream(
             session_id=session_id,
             prompt=body.prompt,
+            images=[image.model_dump() for image in body.images],
             allowed_tools=body.allowed_tools,
             max_turns=body.max_turns,
             max_budget_usd=body.max_budget_usd,
@@ -519,7 +520,17 @@ def _ensure_query_started(session_id: str, body: QueryRequest) -> ActiveQuery:
     if _is_query_active(session_id) and active:
         raise HTTPException(status_code=409, detail="Session already has a running query")
 
-    session_store.append_message(session_id, {"type": "user", "prompt": body.prompt})
+    user_message = {"type": "user", "prompt": body.prompt}
+    if body.images:
+        user_message["images"] = [
+            {
+                "name": image.name,
+                "mime_type": image.mime_type,
+                "size": image.size,
+            }
+            for image in body.images
+        ]
+    session_store.append_message(session_id, user_message)
     active = ActiveQuery()
     active.task = asyncio.create_task(_run_query_background(session_id, body, active))
     _active_queries[session_id] = active

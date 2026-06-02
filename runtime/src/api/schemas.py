@@ -1,12 +1,47 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import base64
+import binascii
+
+from pydantic import BaseModel, Field, field_validator
+
+
+ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+MAX_QUERY_IMAGES = 5
+MAX_QUERY_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 # ── Requests ──
 
+class QueryImageAttachment(BaseModel):
+    name: str = Field(default="image", min_length=1, max_length=255)
+    mime_type: str = Field(..., description="Image MIME type")
+    data: str = Field(..., description="Base64 encoded image bytes")
+    size: int | None = Field(default=None, ge=1, le=MAX_QUERY_IMAGE_BYTES)
+
+    @field_validator("mime_type")
+    @classmethod
+    def validate_mime_type(cls, value: str) -> str:
+        if value not in ALLOWED_IMAGE_MIME_TYPES:
+            raise ValueError(f"Unsupported image type: {value}")
+        return value
+
+    @field_validator("data")
+    @classmethod
+    def validate_base64_data(cls, value: str) -> str:
+        data = value.split(",", 1)[1] if value.startswith("data:") and "," in value else value
+        try:
+            decoded = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("Image data must be valid base64") from exc
+        if len(decoded) > MAX_QUERY_IMAGE_BYTES:
+            raise ValueError("Image exceeds the 10MB limit")
+        return data
+
+
 class QueryRequest(BaseModel):
     prompt: str = Field(..., description="User prompt / task description")
+    images: list[QueryImageAttachment] = Field(default_factory=list, max_length=MAX_QUERY_IMAGES)
     allowed_tools: list[str] | None = Field(default=None)
     max_turns: int | None = Field(default=None, ge=1, le=100)
     max_budget_usd: float | None = Field(default=None, ge=0.01)
