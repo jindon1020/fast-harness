@@ -252,8 +252,8 @@ async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
                 "repos": [{"name": "app", "branch": "main", "url": "https://example.com/app.git"}],
             }
 
-        def create_session_worktree(self, workspace_id, repo_name, session_id, branch):
-            self.session_worktree = (workspace_id, repo_name, session_id, branch)
+        def create_session_worktree(self, workspace_id, repo_name, session_id, branch, user_id=None):
+            self.session_worktree = (workspace_id, repo_name, session_id, branch, user_id)
             return SimpleNamespace(local_path=tmp_path / ".session-worktrees" / session_id / repo_name)
 
         def remove_session_worktree(self, repo_path):
@@ -297,6 +297,7 @@ async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
         "app",
         fake_session_store.session_id,
         "feature/x",
+        "zhaojindong",
     )
     assert fake_session_store.workspace_dir == str(
         tmp_path / ".session-worktrees" / fake_session_store.session_id
@@ -323,8 +324,9 @@ async def test_session_creation_records_normalized_worktree_branch(monkeypatch, 
                 "repos": [{"name": "app", "branch": "+ feature/sp11_01", "url": "https://example.com/app.git"}],
             }
 
-        def create_session_worktree(self, workspace_id, repo_name, session_id, branch):
+        def create_session_worktree(self, workspace_id, repo_name, session_id, branch, user_id=None):
             assert branch == "+ feature/sp11_01"
+            assert user_id == "zhaojindong"
             return SimpleNamespace(
                 branch="feature/sp11_01",
                 local_path=tmp_path / ".session-worktrees" / session_id / repo_name,
@@ -816,7 +818,7 @@ async def test_query_checks_out_session_specific_repo(monkeypatch, tmp_path):
     async def fake_run_query_stream(**kwargs):
         yield {"type": "result", "result": "ok"}
 
-    monkeypatch.setattr(router, "git_checkout", lambda path, branch: checked_out.append((path, branch)))
+    monkeypatch.setattr(router, "git_checkout", lambda path, branch, user_id=None: checked_out.append((path, branch, user_id)))
     monkeypatch.setattr(
         router.workspace_store,
         "checkout_branch",
@@ -837,6 +839,7 @@ async def test_query_checks_out_session_specific_repo(monkeypatch, tmp_path):
                 "repo_name": "app",
                 "branch": "main",
                 "session_repo_path": str(repo_path),
+                "user_id": "zhaojindong",
             },
         },
     )
@@ -847,7 +850,7 @@ async def test_query_checks_out_session_specific_repo(monkeypatch, tmp_path):
     async for _event in response.body_iterator:
         break
 
-    assert checked_out == [(repo_path, "main")]
+    assert checked_out == [(repo_path, "main", "zhaojindong")]
 
 
 def test_agent_rejects_unbound_session(monkeypatch, tmp_path):
@@ -968,8 +971,8 @@ def test_workspace_creates_session_specific_worktree(monkeypatch, tmp_path):
     )
     calls = []
 
-    def fake_create_worktree(url, source_dir, worktree_path, branch=None):
-        calls.append((url, source_dir, worktree_path, branch))
+    def fake_create_worktree(url, source_dir, worktree_path, branch=None, user_id=None):
+        calls.append((url, source_dir, worktree_path, branch, user_id))
         return SimpleNamespace(local_path=worktree_path)
 
     monkeypatch.setattr(workspace, "create_worktree", fake_create_worktree)
@@ -983,6 +986,7 @@ def test_workspace_creates_session_specific_worktree(monkeypatch, tmp_path):
             tmp_path / ".sources",
             ws_dir / ".session-worktrees" / "sess-1" / "app",
             "feature/x",
+            "zhaojindong",
         )
     ]
 

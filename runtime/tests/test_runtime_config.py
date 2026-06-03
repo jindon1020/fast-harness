@@ -108,11 +108,63 @@ users:
     config._load_runtime_config.cache_clear()
 
     assert settings.enabled_users == [
-        {"id": "zhaojindong", "name": "zhaojindong", "password": "secret-1", "role": "admin", "enabled": True}
+        {
+            "id": "zhaojindong",
+            "name": "zhaojindong",
+            "password": "secret-1",
+            "role": "admin",
+            "enabled": True,
+            "git": {
+                "name": "zhaojindong",
+                "email": "",
+                "codeup_user": "zhaojindong",
+                "codeup_token_env": "",
+                "codeup_token": "",
+                "github_token_env": "",
+                "github_token": "",
+            },
+        }
     ]
     assert settings.default_user_id == "zhaojindong"
     assert settings.get_user("zhaojindong")["name"] == "zhaojindong"
     assert settings.is_admin("zhaojindong") is True
+
+    config._load_runtime_config.cache_clear()
+
+
+def test_runtime_config_reads_user_git_config_from_env(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+users:
+  - id: alice
+    name: Alice Zhang
+    password: secret
+    role: member
+    git:
+      name: Alice Z
+      email: alice@example.com
+      codeup_user: alice-codeup
+      codeup_token_env: ALICE_CODEUP_TOKEN
+      github_token_env: ALICE_GITHUB_TOKEN
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config, "_runtime_config_path", lambda: config_path)
+    monkeypatch.setenv("ALICE_CODEUP_TOKEN", "codeup-secret")
+    monkeypatch.setenv("ALICE_GITHUB_TOKEN", "github-secret")
+    config._load_runtime_config.cache_clear()
+
+    assert settings.get_user("alice")["git"] == {
+        "name": "Alice Z",
+        "email": "alice@example.com",
+        "codeup_user": "alice-codeup",
+        "codeup_token_env": "ALICE_CODEUP_TOKEN",
+        "codeup_token": "codeup-secret",
+        "github_token_env": "ALICE_GITHUB_TOKEN",
+        "github_token": "github-secret",
+    }
 
     config._load_runtime_config.cache_clear()
 

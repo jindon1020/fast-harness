@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from src.core import git
 
 
@@ -34,6 +36,40 @@ def test_remote_branches_uses_ls_remote_heads(monkeypatch):
         "master",
         "release/v1",
     ]
+
+
+def test_remote_branches_uses_current_user_codeup_token(monkeypatch):
+    def fake_get_user(user_id):
+        assert user_id == "alice"
+        return {
+            "id": "alice",
+            "name": "Alice",
+            "git": {
+                "codeup_user": "alice-codeup",
+                "codeup_token": "user token",
+            },
+        }
+
+    def fake_run(cmd, cwd, timeout=120):
+        assert cmd == [
+            "git",
+            "ls-remote",
+            "--heads",
+            "https://alice-codeup:user%20token@codeup.aliyun.com/group/app.git",
+        ]
+        return 0, "abc\trefs/heads/main", ""
+
+    monkeypatch.setattr(git, "settings", SimpleNamespace(
+        get_user=fake_get_user,
+        git_github_token="",
+        git_codeup_user="",
+        git_codeup_token="",
+        git_ssh_key_path="",
+        git_default_branch="main",
+    ))
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    assert git.remote_branches("https://codeup.aliyun.com/group/app.git", user_id="alice") == ["main"]
 
 
 def test_create_worktree_uses_source_repo_and_branch(monkeypatch, tmp_path):
@@ -119,6 +155,76 @@ def test_create_worktree_fetches_existing_source_with_fresh_codeup_token(monkeyp
             "+refs/heads/*:refs/remotes/origin/*",
         ],
         source_repo,
+    ) in commands
+
+
+def test_configure_worktree_identity_uses_user_git_config(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+
+    def fake_get_user(user_id):
+        assert user_id == "alice"
+        return {
+            "id": "alice",
+            "name": "Alice",
+            "git": {
+                "name": "Alice Z",
+                "email": "alice@example.com",
+                "codeup_user": "alice-codeup",
+                "codeup_token": "secret",
+            },
+        }
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "settings", SimpleNamespace(
+        get_user=fake_get_user,
+        git_github_token="",
+        git_codeup_user="",
+        git_codeup_token="",
+        git_ssh_key_path="",
+        git_default_branch="main",
+    ))
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    git.configure_worktree_identity(repo_path, user_id="alice")
+
+    assert (["git", "config", "extensions.worktreeConfig", "true"], repo_path) in commands
+    assert (["git", "config", "--worktree", "user.name", "Alice Z"], repo_path) in commands
+    assert (["git", "config", "--worktree", "user.email", "alice@example.com"], repo_path) in commands
+    helper_commands = [
+        cmd for cmd, cwd in commands
+        if cwd == repo_path and cmd[:4] == ["git", "config", "--worktree", "credential.helper"]
+    ]
+    assert len(helper_commands) == 1
+    assert "host=codeup.aliyun.com" in helper_commands[0][4]
+    assert "username='alice-codeup'" in helper_commands[0][4]
+    assert "password='secret'" in helper_commands[0][4]
+
+
+def test_configure_worktree_identity_uses_fallback_email(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+
+    monkeypatch.setattr(git, "settings", SimpleNamespace(
+        get_user=lambda user_id: {"id": user_id, "name": "Alice", "git": {"name": "Alice"}},
+        git_github_token="",
+        git_codeup_user="",
+        git_codeup_token="",
+        git_ssh_key_path="",
+        git_default_branch="main",
+    ))
+    monkeypatch.setattr(git, "_run", lambda cmd, cwd, timeout=120: (commands.append((cmd, cwd)) or (0, "", "")))
+
+    git.configure_worktree_identity(repo_path, user_id="alice@example")
+
+    assert (
+        ["git", "config", "--worktree", "user.email", "alice-example@fast-harness.local"],
+        repo_path,
     ) in commands
 
 

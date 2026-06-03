@@ -60,17 +60,29 @@ def detect_provider(url: str) -> GitProvider:
     return GitProvider.generic
 
 
-def _build_auth_url(url: str, provider: GitProvider) -> str:
+def _user_git_config(user_id: Optional[str] = None) -> dict[str, str]:
+    if not user_id:
+        return {}
+    try:
+        user = settings.get_user(user_id)
+    except ValueError:
+        return {}
+    return user.get("git", {}) or {}
+
+
+def _build_auth_url(url: str, provider: GitProvider, user_id: Optional[str] = None) -> str:
     """Inject token into HTTPS URL for authentication."""
     if not url.startswith("https://"):
         return url
-    if provider == GitProvider.github and settings.git_github_token:
-        token = quote(settings.git_github_token, safe="")
+    user_git = _user_git_config(user_id)
+    if provider == GitProvider.github and (user_git.get("github_token") or settings.git_github_token):
+        token = quote(user_git.get("github_token") or settings.git_github_token, safe="")
         return re.sub(r"https://", f"https://{token}@", url, count=1)
-    if provider == GitProvider.codeup and settings.git_codeup_token:
-        token = quote(settings.git_codeup_token, safe="")
-        if settings.git_codeup_user:
-            user = quote(settings.git_codeup_user, safe="")
+    if provider == GitProvider.codeup and (user_git.get("codeup_token") or settings.git_codeup_token):
+        token = quote(user_git.get("codeup_token") or settings.git_codeup_token, safe="")
+        codeup_user = user_git.get("codeup_user") or settings.git_codeup_user
+        if codeup_user:
+            user = quote(codeup_user, safe="")
             return re.sub(r"https://", f"https://{user}:{token}@", url, count=1)
         return re.sub(r"https://", f"https://{token}@", url, count=1)
     return url
@@ -82,6 +94,61 @@ def _strip_auth_from_url(url: str) -> str:
 
 def _sanitize_git_output(output: str) -> str:
     return _strip_auth_from_url(output)
+
+
+def _fallback_email(user_id: str) -> str:
+    safe_user = re.sub(r"[^A-Za-z0-9_.-]+", "-", user_id).strip(".-") or "user"
+    return f"{safe_user}@fast-harness.local"
+
+
+def configure_worktree_identity(repo_path: Path, user_id: Optional[str] = None) -> None:
+    """Apply per-user git author and HTTPS credentials to this worktree only."""
+    if not user_id or not (repo_path / ".git").exists():
+        return
+    try:
+        user = settings.get_user(user_id)
+    except ValueError:
+        return
+
+    user_git = user.get("git", {}) or {}
+    name = user_git.get("name") or user.get("name") or user_id
+    email = user_git.get("email") or _fallback_email(user_id)
+    _run(["git", "config", "extensions.worktreeConfig", "true"], repo_path, timeout=30)
+    _run(["git", "config", "--worktree", "user.name", name], repo_path, timeout=30)
+    _run(["git", "config", "--worktree", "user.email", email], repo_path, timeout=30)
+
+    helper = _credential_helper(user_git)
+    if helper:
+        _run(["git", "config", "--worktree", "credential.helper", helper], repo_path, timeout=30)
+
+
+def _credential_helper(user_git: dict[str, str]) -> str:
+    codeup_user = user_git.get("codeup_user", "")
+    codeup_token = user_git.get("codeup_token", "")
+    codeup_token_env = user_git.get("codeup_token_env", "")
+    if not codeup_user or not (codeup_token or codeup_token_env):
+        return ""
+    username = f"username={_shell_single_quote(codeup_user)}"
+    if codeup_token_env:
+        password = f"password=\"${{{codeup_token_env}}}\""
+    else:
+        password = f"password={_shell_single_quote(codeup_token)}"
+    return (
+        "!f() { "
+        "test \"$1\" = get || exit 0; "
+        "while IFS= read -r line; do "
+        "test \"$line\" = host=codeup.aliyun.com && match=1; "
+        "test \"$line\" = host=codeup.aliyuncs.com && match=1; "
+        "done; "
+        "test \"$match\" = 1 || exit 0; "
+        f"printf '%s\\n' {username}; "
+        f"printf '%s\\n' {password}; "
+        "}; f"
+    )
+
+
+def _shell_single_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
 @dataclass
@@ -147,10 +214,10 @@ def _detect_default_branch(auth_url: str) -> str:
     return settings.git_default_branch
 
 
-def remote_branches(url: str) -> list[str]:
+def remote_branches(url: str, user_id: Optional[str] = None) -> list[str]:
     """List branch names directly from the remote repository."""
     provider = detect_provider(url)
-    auth_url = _build_auth_url(url, provider)
+    auth_url = _build_auth_url(url, provider, user_id=user_id)
     rc, stdout, _stderr = _run(["git", "ls-remote", "--heads", auth_url], Path.cwd(), timeout=30)
     if rc != 0 or not stdout:
         return []
@@ -162,11 +229,16 @@ def remote_branches(url: str) -> list[str]:
     return sorted(set(branches_list))
 
 
-def _fetch_remote_heads(repo_path: Path, url: Optional[str] = None, timeout: int = 60) -> tuple[int, str, str]:
+def _fetch_remote_heads(
+    repo_path: Path,
+    url: Optional[str] = None,
+    timeout: int = 60,
+    user_id: Optional[str] = None,
+) -> tuple[int, str, str]:
     """Fetch remote heads using freshly configured credentials, not cached origin auth."""
     remote_url = url or _get_remote_url(repo_path)
     provider = detect_provider(remote_url)
-    auth_url = _build_auth_url(remote_url, provider)
+    auth_url = _build_auth_url(remote_url, provider, user_id=user_id)
     return _run(
         ["git", "fetch", "--prune", auth_url, "+refs/heads/*:refs/remotes/origin/*"],
         repo_path,
@@ -221,10 +293,16 @@ def _reset_fast_harness_managed_paths(repo_path: Path) -> None:
     _run(["git", "clean", "-fd", "--", *FAST_HARNESS_MANAGED_PATHS], repo_path, timeout=60)
 
 
-def clone(url: str, target_dir: Path, branch: Optional[str] = None, directory_name: Optional[str] = None) -> RepoInfo:
+def clone(
+    url: str,
+    target_dir: Path,
+    branch: Optional[str] = None,
+    directory_name: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> RepoInfo:
     """Clone a repository into target_dir. Auto-detects default branch if not specified."""
     provider = detect_provider(url)
-    auth_url = _build_auth_url(url, provider)
+    auth_url = _build_auth_url(url, provider, user_id=user_id)
 
     # Derive repo name from URL (used as directory name unless overridden)
     url_name = url.rstrip("/").split("/")[-1]
@@ -247,14 +325,21 @@ def clone(url: str, target_dir: Path, branch: Optional[str] = None, directory_na
     rc, stdout, stderr = _run(cmd, target_dir)
     if rc != 0:
         raise RuntimeError(f"Clone failed: {stderr}")
+    configure_worktree_identity(repo_path, user_id=user_id)
 
     return RepoInfo(name=dir_name, url=url, provider=provider, branch=branch, local_path=repo_path)
 
 
-def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Optional[str] = None) -> RepoInfo:
+def create_worktree(
+    url: str,
+    source_dir: Path,
+    worktree_path: Path,
+    branch: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> RepoInfo:
     """Create an isolated git worktree for a branch from a shared source clone."""
     provider = detect_provider(url)
-    auth_url = _build_auth_url(url, provider)
+    auth_url = _build_auth_url(url, provider, user_id=user_id)
     repo_name = worktree_path.name
     source_repo = source_dir / repo_name
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -272,7 +357,7 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
     else:
         _run(["git", "remote", "set-url", "origin", url], source_repo)
 
-    rc, _stdout, stderr = _fetch_remote_heads(source_repo, url=url, timeout=60)
+    rc, _stdout, stderr = _fetch_remote_heads(source_repo, url=url, timeout=60, user_id=user_id)
     if rc != 0:
         raise RuntimeError(f"Source fetch failed: {_sanitize_git_output(stderr)}")
 
@@ -290,6 +375,8 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
     if rc != 0:
         raise RuntimeError(f"Worktree creation failed: {_sanitize_git_output(stderr)}")
 
+    configure_worktree_identity(worktree_path, user_id=user_id)
+
     try:
         _install_fast_harness_suite(worktree_path)
     except RuntimeError:
@@ -299,7 +386,7 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
     return RepoInfo(name=repo_name, url=url, provider=provider, branch=branch, local_path=worktree_path)
 
 
-def pull(repo_path: Path, branch: Optional[str] = None) -> RepoInfo:
+def pull(repo_path: Path, branch: Optional[str] = None, user_id: Optional[str] = None) -> RepoInfo:
     """Pull latest changes in an existing repo."""
     if not (repo_path / ".git").exists():
         raise RuntimeError(f"Not a git repository: {repo_path}")
@@ -309,7 +396,8 @@ def pull(repo_path: Path, branch: Optional[str] = None) -> RepoInfo:
         _run(["git", "checkout", branch], repo_path)
 
     current_branch = _get_current_branch(repo_path)
-    rc, stdout, stderr = _fetch_remote_heads(repo_path)
+    configure_worktree_identity(repo_path, user_id=user_id)
+    rc, stdout, stderr = _fetch_remote_heads(repo_path, user_id=user_id)
     if rc == 0:
         rc, stdout, stderr = _run(["git", "merge", "--ff-only", f"origin/{current_branch}"], repo_path)
     if rc != 0:
@@ -324,7 +412,7 @@ def pull(repo_path: Path, branch: Optional[str] = None) -> RepoInfo:
     )
 
 
-def checkout(repo_path: Path, branch: str) -> RepoInfo:
+def checkout(repo_path: Path, branch: str, user_id: Optional[str] = None) -> RepoInfo:
     """Checkout a local or remote branch and fast-forward it when possible."""
     if not (repo_path / ".git").exists():
         raise RuntimeError(f"Not a git repository: {repo_path}")
@@ -332,7 +420,8 @@ def checkout(repo_path: Path, branch: str) -> RepoInfo:
     if not branch:
         raise RuntimeError("Branch is required")
 
-    _fetch_remote_heads(repo_path, timeout=60)
+    configure_worktree_identity(repo_path, user_id=user_id)
+    _fetch_remote_heads(repo_path, timeout=60, user_id=user_id)
     _reset_fast_harness_managed_paths(repo_path)
     rc, _stdout, stderr = _run(["git", "checkout", branch], repo_path)
     if rc != 0:
@@ -358,7 +447,7 @@ def checkout(repo_path: Path, branch: str) -> RepoInfo:
     )
 
 
-def status(repo_path: Path) -> GitStatus:
+def status(repo_path: Path, user_id: Optional[str] = None) -> GitStatus:
     """Get the working tree status of a repo."""
     if not (repo_path / ".git").exists():
         return GitStatus()
@@ -366,7 +455,7 @@ def status(repo_path: Path) -> GitStatus:
     branch = _get_current_branch(repo_path)
 
     # Fetch to get ahead/behind
-    _fetch_remote_heads(repo_path, timeout=30)
+    _fetch_remote_heads(repo_path, timeout=30, user_id=user_id)
 
     # Ahead/behind
     ahead = behind = 0
@@ -391,11 +480,11 @@ def status(repo_path: Path) -> GitStatus:
     )
 
 
-def branches(repo_path: Path) -> list[str]:
+def branches(repo_path: Path, user_id: Optional[str] = None) -> list[str]:
     """List branches in a repo."""
     if not (repo_path / ".git").exists():
         return []
-    _fetch_remote_heads(repo_path, timeout=60)
+    _fetch_remote_heads(repo_path, timeout=60, user_id=user_id)
     rc, stdout, _ = _run(["git", "branch", "-a"], repo_path)
     if rc != 0:
         return []

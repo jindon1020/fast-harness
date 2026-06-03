@@ -318,12 +318,13 @@ async def list_repositories():
 
 
 @router.get("/repositories/{repo_key}/branches")
-async def repository_branches(repo_key: str):
+async def repository_branches(repo_key: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     try:
         repo = settings.get_repository(repo_key)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    branches = remote_branches(repo["url"])
+    branches = remote_branches(repo["url"], user_id=user_id)
     return {"branches": branches or [repo["default_branch"]]}
 
 
@@ -349,6 +350,7 @@ async def create_session(body: SessionCreateRequest, x_user_id: UserHeader = Non
             repo["name"],
             sid,
             branch,
+            user_id=user_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -612,7 +614,7 @@ def _checkout_session_branch(session: dict) -> None:
     session_repo_path = metadata.get("session_repo_path")
     if session_repo_path:
         try:
-            git_checkout(Path(session_repo_path), branch)
+            git_checkout(Path(session_repo_path), branch, user_id=metadata.get("user_id"))
         except RuntimeError as e:
             raise HTTPException(status_code=500, detail=str(e))
         return
@@ -754,11 +756,12 @@ async def delete_workspace(workspace_id: str, x_user_id: UserHeader = None):
 
 
 @router.get("/default-repo/branches")
-async def default_repo_branches():
+async def default_repo_branches(x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
     repos = settings.enabled_repositories
     if not repos:
         return {"branches": []}
-    branches = remote_branches(repos[0]["url"])
+    branches = remote_branches(repos[0]["url"], user_id=user_id)
     return {"branches": branches or [repos[0]["default_branch"]]}
 
 

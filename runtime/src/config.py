@@ -105,6 +105,7 @@ def _user_configs() -> list[dict[str, Any]]:
                 "password": _user_password(raw_user),
                 "role": role,
                 "enabled": bool(raw_user.get("enabled", True)),
+                "git": _user_git_config(raw_user, user_id, name),
             }
         )
 
@@ -118,6 +119,30 @@ def _user_password(raw_user: dict[str, Any]) -> str:
     if password_env:
         return os.getenv(password_env, "")
     return str(raw_user.get("password", "")).strip()
+
+
+def _user_git_config(raw_user: dict[str, Any], user_id: str, name: str) -> dict[str, str]:
+    raw_git = raw_user.get("git", {}) or {}
+    if not isinstance(raw_git, dict):
+        raise ValueError(f"user {user_id!r} key 'git' must be a YAML mapping")
+
+    codeup_token_env = str(raw_git.get("codeup_token_env", "")).strip()
+    github_token_env = str(raw_git.get("github_token_env", "")).strip()
+    return {
+        "name": str(raw_git.get("name", name)).strip() or name,
+        "email": str(raw_git.get("email", "")).strip(),
+        "codeup_user": str(raw_git.get("codeup_user", user_id)).strip() or user_id,
+        "codeup_token_env": codeup_token_env,
+        "codeup_token": _secret_from_config(raw_git, "codeup_token", codeup_token_env),
+        "github_token_env": github_token_env,
+        "github_token": _secret_from_config(raw_git, "github_token", github_token_env),
+    }
+
+
+def _secret_from_config(raw_config: dict[str, Any], key: str, env_name: str) -> str:
+    if env_name:
+        return os.getenv(env_name, "")
+    return str(raw_config.get(key, "")).strip()
 
 
 class Settings(BaseSettings):

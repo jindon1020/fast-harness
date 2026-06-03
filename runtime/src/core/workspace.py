@@ -92,6 +92,7 @@ class WorkspaceStore:
                     repo["url"],
                     repo.get("name"),
                     repo.get("branch"),
+                    user_id=record["user_id"],
                 )
         except Exception:
             self.delete(ws_id)
@@ -171,10 +172,18 @@ class WorkspaceStore:
                     prune.stderr.strip() or prune.stdout.strip() or "unknown error",
                 )
 
-    def add_repo(self, ws_id: str, url: str, name: Optional[str] = None, branch: Optional[str] = None) -> RepoInfo:
+    def add_repo(
+        self,
+        ws_id: str,
+        url: str,
+        name: Optional[str] = None,
+        branch: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> RepoInfo:
         record = self.get(ws_id)
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
+        owner_id = user_id or record.get("user_id") or settings.default_user_id
         ws_dir = Path(record["cwd"])
         repo_name = name or settings.default_project_repo_name
         if any(repo.get("name") == repo_name for repo in record.get("repos", [])):
@@ -185,6 +194,7 @@ class WorkspaceStore:
             source_dir=Path(settings.workspace_root) / ".sources",
             worktree_path=ws_dir / repo_name,
             branch=branch,
+            user_id=owner_id,
         )
 
         # Persist to workspace record
@@ -200,10 +210,12 @@ class WorkspaceStore:
         repo_name: str,
         session_id: str,
         branch: str,
+        user_id: Optional[str] = None,
     ) -> RepoInfo:
         record = self.get(ws_id)
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
+        owner_id = user_id or record.get("user_id") or settings.default_user_id
         repo_record = next(
             (repo for repo in record.get("repos", []) if repo.get("name") == repo_name),
             None,
@@ -217,6 +229,7 @@ class WorkspaceStore:
             source_dir=Path(settings.workspace_root) / ".sources",
             worktree_path=worktree_path,
             branch=branch,
+            user_id=owner_id,
         )
 
     def remove_session_worktree(self, repo_path: str | Path) -> None:
@@ -230,7 +243,7 @@ class WorkspaceStore:
         for r in record["repos"]:
             repo_path = Path(record["cwd"]) / r["name"]
             try:
-                pull(repo_path)
+                pull(repo_path, user_id=record.get("user_id"))
                 r["status"] = "ok"
             except Exception as exc:
                 r["status"] = f"error: {exc}"
@@ -244,7 +257,7 @@ class WorkspaceStore:
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         repo_path = Path(record["cwd"]) / repo_name
-        s = git_status(repo_path)
+        s = git_status(repo_path, user_id=record.get("user_id"))
         return {
             "repo": repo_name,
             "branch": s.branch,
@@ -260,14 +273,14 @@ class WorkspaceStore:
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         repo_path = Path(record["cwd"]) / repo_name
-        return git_branches(repo_path)
+        return git_branches(repo_path, user_id=record.get("user_id"))
 
     def checkout_branch(self, ws_id: str, repo_name: str, branch: str) -> dict:
         record = self.get(ws_id)
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         repo_path = Path(record["cwd"]) / repo_name
-        repo_info = git_checkout(repo_path, branch)
+        repo_info = git_checkout(repo_path, branch, user_id=record.get("user_id"))
         normalized_branch = normalize_branch_name(repo_info.branch) or branch
         # Update branch in repo record
         for r in record["repos"]:
