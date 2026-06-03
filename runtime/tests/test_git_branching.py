@@ -64,6 +64,29 @@ def test_create_worktree_uses_source_repo_and_branch(monkeypatch, tmp_path):
     assert any(cmd == ["git", "worktree", "add", str(tmp_path / "ws-1" / "app"), "origin/feature/x"] for cmd, _cwd in commands)
 
 
+def test_create_worktree_normalizes_git_branch_marker(monkeypatch, tmp_path):
+    commands = []
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    repo = git.create_worktree(
+        url="https://example.com/app.git",
+        source_dir=tmp_path / ".sources",
+        worktree_path=tmp_path / "ws-1" / "app",
+        branch="+ feature/sp11_01",
+    )
+
+    assert repo.branch == "feature/sp11_01"
+    assert any(
+        cmd == ["git", "worktree", "add", str(tmp_path / "ws-1" / "app"), "origin/feature/sp11_01"]
+        for cmd, _cwd in commands
+    )
+
+
 def test_create_worktree_fetches_existing_source_with_fresh_codeup_token(monkeypatch, tmp_path):
     source_repo = tmp_path / ".sources" / "app"
     (source_repo / ".git").mkdir(parents=True)
@@ -222,6 +245,28 @@ def test_branches_fetches_remote_branches(monkeypatch, tmp_path):
 
     assert git.branches(repo_path) == ["feature/x", "main"]
     assert ["git", "fetch", "--prune", "https://example.com/app.git", "+refs/heads/*:refs/remotes/origin/*"] in commands
+
+
+def test_branches_strips_worktree_branch_marker(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    repo_path.mkdir()
+    (repo_path / ".git").mkdir()
+
+    def fake_run(cmd, cwd, timeout=120):
+        if cmd == ["git", "remote", "get-url", "origin"]:
+            return 0, "https://example.com/app.git", ""
+        if cmd == ["git", "branch", "-a"]:
+            return 0, (
+                "* main\n"
+                "+ feature/sp11_01\n"
+                "  remotes/origin/HEAD -> origin/main\n"
+                "  remotes/origin/feature/sp11_01"
+            ), ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    assert git.branches(repo_path) == ["feature/sp11_01", "main"]
 
 
 def test_checkout_branch_creates_tracking_branch_from_origin(monkeypatch, tmp_path):

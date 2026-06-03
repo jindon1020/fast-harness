@@ -20,6 +20,7 @@ from src.core.git import (
     RepoInfo,
     branches as git_branches,
     checkout as git_checkout,
+    normalize_branch_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -266,13 +267,14 @@ class WorkspaceStore:
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         repo_path = Path(record["cwd"]) / repo_name
-        git_checkout(repo_path, branch)
+        repo_info = git_checkout(repo_path, branch)
+        normalized_branch = normalize_branch_name(repo_info.branch) or branch
         # Update branch in repo record
         for r in record["repos"]:
             if r["name"] == repo_name:
-                r["branch"] = branch
+                r["branch"] = normalized_branch
         record["updated_at"] = datetime.now(timezone.utc).isoformat()
         self._path(ws_id).write_text(json.dumps(record, indent=2))
-        return {"repo": repo_name, "branch": branch, "status": "ok"}
+        return {"repo": repo_name, "branch": normalized_branch, "status": "ok"}
 
 workspace_store = WorkspaceStore()

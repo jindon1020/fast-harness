@@ -314,6 +314,52 @@ async def test_session_creation_binds_workspace_branch(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_session_creation_records_normalized_worktree_branch(monkeypatch, tmp_path):
+    class FakeWorkspaceStore:
+        def get(self, workspace_id):
+            return {
+                "workspace_id": workspace_id,
+                "cwd": str(tmp_path),
+                "repos": [{"name": "app", "branch": "+ feature/sp11_01", "url": "https://example.com/app.git"}],
+            }
+
+        def create_session_worktree(self, workspace_id, repo_name, session_id, branch):
+            assert branch == "+ feature/sp11_01"
+            return SimpleNamespace(
+                branch="feature/sp11_01",
+                local_path=tmp_path / ".session-worktrees" / session_id / repo_name,
+            )
+
+        def remove_session_worktree(self, repo_path):
+            raise AssertionError("session worktree should not be removed on successful creation")
+
+    class FakeSessionStore:
+        def __init__(self):
+            self.metadata = None
+
+        def create(self, *, workspace_dir, metadata, session_id=None, user_id=None):
+            self.metadata = metadata
+            return session_id
+
+        def get(self, session_id):
+            return {
+                "session_id": session_id,
+                "workspace": str(tmp_path / ".session-worktrees" / session_id),
+                "created_at": "now",
+                "last_access": "now",
+                "metadata": self.metadata,
+            }
+
+    fake_session_store = FakeSessionStore()
+    monkeypatch.setattr(router, "workspace_store", FakeWorkspaceStore())
+    monkeypatch.setattr(router, "session_store", fake_session_store)
+
+    await router.create_session(SessionCreateRequest(workspace_id="ws-1", repo_name="app"))
+
+    assert fake_session_store.metadata["branch"] == "feature/sp11_01"
+
+
+@pytest.mark.asyncio
 async def test_workspace_deletion_removes_bound_sessions(monkeypatch):
     class FakeWorkspaceStore:
         def __init__(self):

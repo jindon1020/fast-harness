@@ -1759,7 +1759,8 @@ async function fillBranchSelect(selectId, ws, preferredBranch, repoOverride = nu
       `<option value="${escapeHtml(b)}" ${b === selected ? "selected" : ""}>${escapeHtml(b)}</option>`
     ).join("");
   } catch (e) {
-    select.innerHTML = `<option>${escapeHtml(preferredBranch || "master")}</option>`;
+    const fallback = preferredBranch || "master";
+    select.innerHTML = `<option value="${escapeHtml(fallback)}">${escapeHtml(fallback)}</option>`;
   }
 }
 
@@ -2117,7 +2118,7 @@ function renderRepoPanel() {
       <span class="repo-item__icon">📦</span>
       <span class="repo-item__name">${escapeHtml(r.name)}</span>
       <select class="branch-select" onchange="switchBranch('${escapeHtml(r.name)}', this.value)" data-repo="${escapeHtml(r.name)}">
-        <option>${escapeHtml(r.branch || "main")}</option>
+        <option value="${escapeHtml(r.branch || "main")}">${escapeHtml(r.branch || "main")}</option>
         <option disabled>---</option>
       </select>
     </div>`;
@@ -2138,7 +2139,7 @@ async function loadBranchesForRepo(wsId, repoName) {
     if (!sel) return;
     const currentBranch = sel.value;
     sel.innerHTML = (data.branches || []).map(b =>
-      `<option ${b === currentBranch ? 'selected' : ''}>${escapeHtml(b)}</option>`
+      `<option value="${escapeHtml(b)}" ${b === currentBranch ? 'selected' : ''}>${escapeHtml(b)}</option>`
     ).join('');
   } catch (e) {
     console.error("Failed to load branches:", e);

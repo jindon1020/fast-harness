@@ -355,6 +355,7 @@ async def create_session(body: SessionCreateRequest, x_user_id: UserHeader = Non
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    branch = getattr(session_repo, "branch", None) or branch
     session_workspace = Path(ws_rec["cwd"]) / ".session-worktrees" / sid
     try:
         sid = session_store.create(

@@ -174,6 +174,19 @@ def _fetch_remote_heads(repo_path: Path, url: Optional[str] = None, timeout: int
     )
 
 
+def normalize_branch_name(branch: Optional[str]) -> Optional[str]:
+    """Normalize branch labels copied from git branch output or UI fallbacks."""
+    if branch is None:
+        return None
+    value = branch.strip()
+    while value[:1] in {"*", "+"}:
+        value = value[1:].strip()
+    for prefix in ("remotes/origin/", "origin/", "refs/heads/"):
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip()
+    return value or None
+
+
 def _install_fast_harness_suite(repo_path: Path) -> None:
     """Install or refresh fast-harness project files inside a workspace worktree."""
     logger.info("Installing fast-harness suite in %s", repo_path)
@@ -265,6 +278,9 @@ def create_worktree(url: str, source_dir: Path, worktree_path: Path, branch: Opt
 
     if branch is None:
         branch = _detect_default_branch(auth_url)
+    branch = normalize_branch_name(branch)
+    if not branch:
+        raise RuntimeError("Branch is required")
 
     rc, _stdout, stderr = _run(
         ["git", "worktree", "add", str(worktree_path), f"origin/{branch}"],
@@ -288,6 +304,7 @@ def pull(repo_path: Path, branch: Optional[str] = None) -> RepoInfo:
     if not (repo_path / ".git").exists():
         raise RuntimeError(f"Not a git repository: {repo_path}")
 
+    branch = normalize_branch_name(branch)
     if branch:
         _run(["git", "checkout", branch], repo_path)
 
@@ -311,6 +328,9 @@ def checkout(repo_path: Path, branch: str) -> RepoInfo:
     """Checkout a local or remote branch and fast-forward it when possible."""
     if not (repo_path / ".git").exists():
         raise RuntimeError(f"Not a git repository: {repo_path}")
+    branch = normalize_branch_name(branch)
+    if not branch:
+        raise RuntimeError("Branch is required")
 
     _fetch_remote_heads(repo_path, timeout=60)
     _reset_fast_harness_managed_paths(repo_path)
@@ -381,11 +401,12 @@ def branches(repo_path: Path) -> list[str]:
         return []
     lines = []
     for line in stdout.split("\n"):
-        line = line.strip().lstrip("*").strip()
-        if line and not line.startswith("remotes/"):
-            lines.append(line)
-        elif line and "HEAD" not in line:
-            lines.append(line.replace("remotes/origin/", ""))
+        raw = line.strip()
+        if not raw or "HEAD" in raw:
+            continue
+        normalized = normalize_branch_name(raw)
+        if normalized:
+            lines.append(normalized)
     return sorted(set(lines))
 
 
