@@ -35,7 +35,7 @@ users:
     git:
       name: gaofengbin
       codeup_user: gaofengbin
-      codeup_token_env: FAST_HARNESS_CODEUP_TOKEN_GAOFENGBIN
+      codeup_token_env: FAST_HARNESS_CODEUP_TOKEN_GAOFENBING
   - id: user02
     name: lijun
     password: MQcneeLng4cw0b
