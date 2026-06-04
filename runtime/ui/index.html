@@ -2907,9 +2907,15 @@ function preferredQuickCommands(commands) {
     "refactor",
     "modify",
   ];
+  const excluded = [
+    "deploy-creation-tool-dev",
+    "init",
+  ];
   const byName = new Map((commands || []).map(command => [command.name, command]));
   const picked = preferred.map(name => byName.get(name)).filter(Boolean);
-  const extras = (commands || []).filter(command => !preferred.includes(command.name)).slice(0, Math.max(0, 6 - picked.length));
+  const extras = (commands || [])
+    .filter(command => !preferred.includes(command.name) && !excluded.includes(command.name))
+    .slice(0, Math.max(0, 6 - picked.length));
   return [...picked, ...extras];
 }
 
