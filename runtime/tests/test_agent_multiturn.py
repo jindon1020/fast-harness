@@ -7,6 +7,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ProcessError,
     ResultMessage,
+    TextBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
@@ -124,6 +125,27 @@ async def test_ask_user_question_answers_return_sdk_updated_input():
         "answers": {"请选择运行模式。": "完整模式"},
     }
     agent._cleanup_answer_queue(session_id)
+
+
+@pytest.mark.asyncio
+async def test_generate_commit_message_uses_ai_subject(monkeypatch, tmp_path):
+    captured = {}
+
+    async def fake_query(*, prompt, options):
+        captured["prompt"] = prompt
+        captured["cwd"] = options.cwd
+        yield AssistantMessage(
+            content=[TextBlock(text='"Update runtime git actions"\n\nextra')],
+            model="test-model",
+        )
+
+    monkeypatch.setattr(agent, "query", fake_query)
+
+    message = await agent.generate_commit_message(tmp_path, "## status\n M runtime/ui/index.html")
+
+    assert message == "Update runtime git actions"
+    assert "runtime/ui/index.html" in captured["prompt"]
+    assert captured["cwd"] == str(tmp_path)
 
 
 @pytest.mark.asyncio

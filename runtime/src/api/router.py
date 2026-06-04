@@ -20,6 +20,9 @@ from src.api.schemas import (
     CurrentUserResponse,
     FeedbackRequest,
     FeedbackResponse,
+    GitActionResponse,
+    GitCommitMessageResponse,
+    GitCommitRequest,
     LoginRequest,
     LoginResponse,
     QueryRequest,
@@ -48,8 +51,14 @@ from src.core.auth import (
     public_user,
     verify_session_token,
 )
-from src.core.git import checkout as git_checkout, remote_branches
-from src.core.agent import provide_answers, run_query_stream, resolve_session_repo_path
+from src.core.git import (
+    checkout as git_checkout,
+    commit_all as git_commit_all,
+    commit_message_context,
+    push as git_push,
+    remote_branches,
+)
+from src.core.agent import generate_commit_message, provide_answers, run_query_stream, resolve_session_repo_path
 from src.core.session import session_store
 from src.core.workspace import workspace_store
 from src.harness.registry import get_capabilities
@@ -444,6 +453,67 @@ async def submit_feedback(session_id: str, body: FeedbackRequest, x_user_id: Use
     _ensure_owned(session_store.get(session_id), user_id, "Session not found")
     path = _append_feedback(user_id, session_id, body)
     return FeedbackResponse(status="ok", path=str(path))
+
+
+@router.post("/sessions/{session_id}/git/commit", response_model=GitActionResponse)
+async def commit_session_changes(session_id: str, body: GitCommitRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    rec = session_store.get(session_id)
+    _ensure_owned(rec, user_id, "Session not found")
+    if not _is_bound_session(rec):
+        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
+    if _is_query_active(session_id):
+        raise HTTPException(status_code=409, detail="Session already has a running query")
+    try:
+        repo_path = resolve_session_repo_path(session_id).resolve()
+        result = git_commit_all(repo_path, body.message, user_id=user_id)
+        return GitActionResponse(**result.to_dict())
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sessions/{session_id}/git/commit-message", response_model=GitCommitMessageResponse)
+async def suggest_session_commit_message(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    rec = session_store.get(session_id)
+    _ensure_owned(rec, user_id, "Session not found")
+    if not _is_bound_session(rec):
+        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
+    if _is_query_active(session_id):
+        raise HTTPException(status_code=409, detail="Session already has a running query")
+    repo_path = resolve_session_repo_path(session_id).resolve()
+    try:
+        context = commit_message_context(repo_path)
+        if not context:
+            return GitCommitMessageResponse(message="Update code", generated=False)
+        message = await generate_commit_message(repo_path, context)
+        return GitCommitMessageResponse(message=message, generated=True)
+    except RuntimeError as e:
+        logger.warning("AI commit message generation failed for %s: %s", session_id, e)
+        return GitCommitMessageResponse(message=_fallback_commit_message(rec), generated=False)
+
+
+@router.post("/sessions/{session_id}/git/push", response_model=GitActionResponse)
+async def push_session_changes(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    rec = session_store.get(session_id)
+    _ensure_owned(rec, user_id, "Session not found")
+    if not _is_bound_session(rec):
+        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
+    if _is_query_active(session_id):
+        raise HTTPException(status_code=409, detail="Session already has a running query")
+    try:
+        repo_path = resolve_session_repo_path(session_id).resolve()
+        branch = rec.get("metadata", {}).get("branch")
+        result = git_push(repo_path, branch=branch, user_id=user_id)
+        return GitActionResponse(**result.to_dict())
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _fallback_commit_message(session: dict) -> str:
+    repo = session.get("metadata", {}).get("repo_name") or "code"
+    return f"Update {repo}"
 
 
 @router.delete("/sessions/{session_id}")

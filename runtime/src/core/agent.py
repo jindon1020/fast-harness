@@ -50,6 +50,7 @@ KUBE_OBSERVABILITY_ALLOWED_TOOLS = [
 
 IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 MAX_DISCOVERED_IMAGE_FILES = 50
+MAX_COMMIT_MESSAGE_LENGTH = 72
 
 
 def _apply_api_config() -> None:
@@ -181,6 +182,57 @@ async def provide_answers(session_id: str, answers: list[dict]) -> None:
     if not queue:
         raise RuntimeError("No active query for this session")
     await queue.put(answers)
+
+
+async def generate_commit_message(repo_path: Path, change_context: str) -> str:
+    """Use the configured AI model to produce a concise commit subject."""
+    if not change_context.strip():
+        return "Update code"
+
+    _apply_api_config()
+    prompt = (
+        "Write one concise Git commit subject for the following repository changes.\n"
+        "Return only the commit subject, no quotes, no markdown, no explanation.\n"
+        "Keep it under 72 characters. Prefer an imperative verb.\n\n"
+        f"{change_context}"
+    )
+    options = ClaudeAgentOptions(
+        cwd=str(repo_path),
+        allowed_tools=[],
+        permission_mode="acceptEdits",
+        max_turns=1,
+        max_budget_usd=min(settings.default_max_budget_usd, 0.25),
+        setting_sources=["user", "project"],
+    )
+
+    chunks: list[str] = []
+    async for message in query(prompt=prompt, options=options):
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    chunks.append(block.text)
+        elif isinstance(message, ResultMessage):
+            result = getattr(message, "result", "")
+            if result:
+                chunks.append(str(result))
+
+    subject = _clean_commit_subject("\n".join(chunks))
+    if not subject:
+        raise RuntimeError("AI did not return a commit message")
+    return subject
+
+
+def _clean_commit_subject(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    subject = lines[0].strip("`'\" ")
+    for prefix in ("Commit message:", "commit message:"):
+        if subject.startswith(prefix):
+            subject = subject[len(prefix):].strip()
+    if len(subject) > MAX_COMMIT_MESSAGE_LENGTH:
+        subject = subject[:MAX_COMMIT_MESSAGE_LENGTH].rstrip(" .,:;")
+    return subject
 
 
 async def run_query_stream(

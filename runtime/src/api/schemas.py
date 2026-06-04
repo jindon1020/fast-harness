@@ -62,6 +62,10 @@ class FeedbackRequest(BaseModel):
     message_excerpt: str | None = Field(default=None, max_length=2000)
 
 
+class GitCommitRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500)
+
+
 class SessionCreateRequest(BaseModel):
     workspace_id: str = Field(..., description="Workspace this session belongs to")
     repo_name: str | None = Field(default=None, description="Repo to checkout before the session starts")
@@ -187,6 +191,18 @@ class RepoStatusResponse(BaseModel):
     modified: list[str]
     untracked: list[str]
     clean: bool
+
+
+class GitActionResponse(BaseModel):
+    status: str
+    branch: str
+    stdout: str = ""
+    stderr: str = ""
+
+
+class GitCommitMessageResponse(BaseModel):
+    message: str
+    generated: bool = True
 
 
 class CapabilityResponse(BaseModel):

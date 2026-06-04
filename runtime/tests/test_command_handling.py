@@ -208,6 +208,18 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn("query/cancel", html)
         self.assertIn("function consumeSseResponse", html)
 
+    def test_ui_has_fixed_git_commit_and_push_actions(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('id="btnGitCommit"', html)
+        self.assertIn('id="btnGitPush"', html)
+        self.assertIn("function commitActiveSession", html)
+        self.assertIn("function pushActiveSession", html)
+        self.assertIn("function loadSuggestedCommitMessage", html)
+        self.assertIn("/git/commit-message", html)
+        self.assertIn("/git/commit", html)
+        self.assertIn("/git/push", html)
+
 
 if __name__ == "__main__":
     unittest.main()

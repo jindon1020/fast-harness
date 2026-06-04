@@ -680,6 +680,67 @@ body::before {
   margin: 0 0 8px;
 }
 
+.repo-actions {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.repo-action {
+  height: 30px;
+  border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 0 12px;
+  transition: all var(--transition);
+}
+.repo-action:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.repo-action:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  background: var(--bg-elevated);
+  border-color: var(--border-v);
+  color: var(--text-muted);
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text);
+  z-index: 10000;
+  animation: toastSlideIn 0.3s ease-out;
+  max-width: 400px;
+}
+.toast--success { border-left: 3px solid #10b981; }
+.toast--error { border-left: 3px solid #ef4444; }
+.toast--info { border-left: 3px solid var(--accent); }
+@keyframes toastSlideIn {
+  from {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .quick-command {
   height: 28px;
   border: 1px solid var(--border-v);
@@ -1353,6 +1414,10 @@ body::before {
     <div class="input-area">
       <div class="input-area__inner">
         <div class="command-menu" id="commandMenu" role="listbox" style="display:none"></div>
+        <div class="repo-actions" aria-label="Repository actions">
+          <button class="repo-action" id="btnGitCommit" disabled title="提交当前会话仓库的全部改动">提交代码</button>
+          <button class="repo-action" id="btnGitPush" disabled title="推送当前会话分支到远端">推送远端</button>
+        </div>
         <div class="quick-commands" id="quickCommands" aria-label="Quick commands"></div>
         <div class="input-wrap">
           <div class="image-tray" id="imageTray" style="display:none"></div>
@@ -1433,6 +1498,7 @@ let state = {
   commandSuggestions: [],
   selectedCommandIndex: 0,
   pendingImages: [],
+  repoActionRunning: false,
 };
 
 /* ═══════════════════════ DOM REFS ═══════════════════════ */
@@ -1452,6 +1518,8 @@ const btnSend = $("#btnSend");
 const inputHint = $("#inputHint");
 const commandMenu = $("#commandMenu");
 const quickCommands = $("#quickCommands");
+const btnGitCommit = $("#btnGitCommit");
+const btnGitPush = $("#btnGitPush");
 const toolbarTitle = $("#toolbarTitle");
 const panel = $("#panel");
 const panelBody = $("#panelBody");
@@ -1911,6 +1979,66 @@ function showRenameDialog(title, currentName) {
     input.addEventListener("keydown", event => {
       if (event.key === "Enter") close(input.value);
       if (event.key === "Escape") close(null);
+    });
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
+  });
+}
+
+function showCommitDialog(defaultMessage) {
+  return new Promise(resolve => {
+    let overlay = document.getElementById("commitDialogOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "commitDialogOverlay";
+      overlay.className = "dialog-overlay";
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="dialog">
+      <h3>提交代码</h3>
+      <label>Commit message</label>
+      <input id="commitMessageInput" value="Generating commit message..." placeholder="Update from fast-harness runtime" disabled>
+      <div class="btn-row">
+        <button class="btn-cancel" id="btnCancelCommit">Cancel</button>
+        <button class="btn-confirm" id="btnConfirmCommit" disabled>Generating</button>
+      </div>
+    </div>`;
+    overlay.style.display = "flex";
+    const input = document.getElementById("commitMessageInput");
+    const close = value => {
+      overlay.style.display = "none";
+      resolve(value);
+    };
+    document.getElementById("btnCancelCommit").onclick = () => {
+      input.disabled = false;
+      input.value = defaultMessage || "";
+      input.focus();
+      input.select();
+      const confirm = document.getElementById("btnConfirmCommit");
+      if (confirm && confirm.disabled) {
+        confirm.disabled = false;
+        confirm.textContent = "Commit";
+      }
+    };
+    document.getElementById("btnConfirmCommit").onclick = () => close(input.value);
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !document.getElementById("btnConfirmCommit").disabled) close(input.value);
+      if (event.key === "Escape") close(null);
+    });
+    loadSuggestedCommitMessage(defaultMessage).then(message => {
+      if (input.disabled) {
+        input.value = message || defaultMessage || "";
+        input.disabled = false;
+        const confirm = document.getElementById("btnConfirmCommit");
+        if (confirm) {
+          confirm.disabled = false;
+          confirm.textContent = "Commit";
+        }
+        input.focus();
+        input.select();
+      }
     });
     requestAnimationFrame(() => {
       input.focus();
@@ -2693,6 +2821,7 @@ function updateSendButton() {
   if (!hasSession) {
     btnSend.textContent = "↑";
     btnSend.classList.remove("btn-send--stop");
+    updateRepoActionButtons();
     return;
   }
   if (streaming) {
@@ -2702,6 +2831,7 @@ function updateSendButton() {
     btnSend.textContent = "↑";
     btnSend.classList.remove("btn-send--stop");
   }
+  updateRepoActionButtons();
 }
 
 async function addImageFiles(files) {
@@ -2829,6 +2959,95 @@ function applyQuickCommand(commandName) {
   resizePromptInput();
   hideCommandSuggestions();
   promptInput.focus();
+}
+
+function currentSessionInfo() {
+  return state.sessions.find(session => session.session_id === state.activeSession) || null;
+}
+
+function defaultCommitMessage() {
+  const session = currentSessionInfo();
+  const repo = session?.metadata?.repo_name || "repo";
+  return `Update ${repo} from fast-harness runtime`;
+}
+
+async function loadSuggestedCommitMessage(fallback) {
+  if (!state.activeSession) return fallback;
+  try {
+    const data = await api("GET", `/sessions/${state.activeSession}/git/commit-message`);
+    return data.message || fallback;
+  } catch (e) {
+    console.warn("AI commit message generation failed:", e);
+    return fallback;
+  }
+}
+
+function updateRepoActionButtons() {
+  const disabled = !state.activeSession || isSessionStreaming(state.activeSession) || state.repoActionRunning;
+  if (btnGitCommit) btnGitCommit.disabled = disabled;
+  if (btnGitPush) btnGitPush.disabled = disabled;
+}
+
+function showToast(message, type = "info") {
+  const toast = document.createElement("div");
+  toast.className = `toast toast--${type}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(20px)";
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+function gitActionMessage(action, result) {
+  const branch = result?.branch ? ` (${result.branch})` : "";
+  if (action === "commit" && result?.status === "clean") return "No changes to commit.";
+  if (action === "commit") return `Committed changes${branch}.`;
+  return `Pushed changes${branch}.`;
+}
+
+async function commitActiveSession() {
+  if (!state.activeSession) return showToast("Select or create a session first", "error");
+  const message = await showCommitDialog(defaultCommitMessage());
+  if (!message || !message.trim()) return;
+  await runRepoAction(async () => {
+    const result = await api("POST", `/sessions/${state.activeSession}/git/commit`, { message: message.trim() });
+    const msg = gitActionMessage("commit", result);
+    const type = result?.status === "clean" ? "info" : "success";
+    showToast(msg, type);
+  });
+}
+
+async function pushActiveSession() {
+  if (!state.activeSession) return showToast("Select or create a session first", "error");
+  await runRepoAction(async () => {
+    const status = await api("GET", `/sessions/${state.activeSession}/git/status`);
+    if (!status.clean) {
+      showToast("You have uncommitted changes. Please commit first.", "error");
+      return;
+    }
+    const result = await api("POST", `/sessions/${state.activeSession}/git/push`);
+    showToast(gitActionMessage("push", result), "success");
+  });
+}
+
+async function runRepoAction(action) {
+  if (isSessionStreaming(state.activeSession)) {
+    showToast("Wait for the running session to finish first", "error");
+    return;
+  }
+  state.repoActionRunning = true;
+  updateRepoActionButtons();
+  try {
+    await action();
+    if (state.panelOpen && state.panelTab === "files") loadFiles();
+  } catch (e) {
+    showToast(e.message || "Git action failed", "error");
+  } finally {
+    state.repoActionRunning = false;
+    updateRepoActionButtons();
+  }
 }
 
 async function sendPrompt() {
@@ -3467,6 +3686,8 @@ quickCommands.addEventListener("click", (e) => {
   if (!item) return;
   applyQuickCommand(item.dataset.command || "");
 });
+btnGitCommit.addEventListener("click", commitActiveSession);
+btnGitPush.addEventListener("click", pushActiveSession);
 $("#btnClosePanel").addEventListener("click", closePanel);
 $("#themeToggle").addEventListener("click", toggleTheme);
 btnLogout.addEventListener("click", logout);

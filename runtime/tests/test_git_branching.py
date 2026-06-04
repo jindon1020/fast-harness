@@ -228,6 +228,95 @@ def test_configure_worktree_identity_uses_fallback_email(monkeypatch, tmp_path):
     ) in commands
 
 
+def test_commit_all_stages_and_commits_changes(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            return 0, "feature/x", ""
+        if cmd == ["git", "status", "--porcelain"]:
+            return 0, " M app.py", ""
+        if cmd == ["git", "commit", "-m", "ship changes"]:
+            return 0, "[feature/x abc] ship changes", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    result = git.commit_all(repo_path, "ship changes", user_id="alice")
+
+    assert result.status == "committed"
+    assert result.branch == "feature/x"
+    assert (["git", "add", "-A"], repo_path) in commands
+    assert (["git", "commit", "-m", "ship changes"], repo_path) in commands
+
+
+def test_commit_all_returns_clean_without_commit(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append(cmd)
+        if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            return 0, "main", ""
+        if cmd == ["git", "status", "--porcelain"]:
+            return 0, "", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    result = git.commit_all(repo_path, "nothing to do")
+
+    assert result.status == "clean"
+    assert ["git", "commit", "-m", "nothing to do"] not in commands
+
+
+def test_push_uses_authenticated_url_for_current_user(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+
+    def fake_get_user(user_id):
+        return {
+            "id": user_id,
+            "name": "Alice",
+            "git": {
+                "codeup_user": "alice-codeup",
+                "codeup_token": "secret token",
+            },
+        }
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        if cmd == ["git", "remote", "get-url", "origin"]:
+            return 0, "https://codeup.aliyun.com/group/app.git", ""
+        if cmd == ["git", "push", "https://alice-codeup:secret%20token@codeup.aliyun.com/group/app.git", "HEAD:refs/heads/feature/x"]:
+            return 0, "", "pushed"
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "settings", SimpleNamespace(
+        get_user=fake_get_user,
+        git_github_token="",
+        git_codeup_user="",
+        git_codeup_token="",
+        git_ssh_key_path="",
+        git_default_branch="main",
+    ))
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    result = git.push(repo_path, branch="feature/x", user_id="alice")
+
+    assert result.status == "pushed"
+    assert result.branch == "feature/x"
+    assert (
+        ["git", "push", "https://alice-codeup:secret%20token@codeup.aliyun.com/group/app.git", "HEAD:refs/heads/feature/x"],
+        repo_path,
+    ) in commands
+
+
 def test_create_worktree_installs_fast_harness_suite_after_worktree_add(monkeypatch, tmp_path):
     commands = []
     worktree_path = tmp_path / "ws-1" / "app"

@@ -179,6 +179,22 @@ class GitStatus:
     clean: bool = True
 
 
+@dataclass
+class GitActionResult:
+    status: str
+    branch: str = ""
+    stdout: str = ""
+    stderr: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "branch": self.branch,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+        }
+
+
 def _run(cmd: list[str], cwd: Path, timeout: int = 120) -> tuple[int, str, str]:
     """Run a git command and return (returncode, stdout, stderr)."""
     env = {}
@@ -444,6 +460,80 @@ def checkout(repo_path: Path, branch: str, user_id: Optional[str] = None) -> Rep
         provider=detect_provider(remote_url),
         branch=branch,
         local_path=repo_path,
+    )
+
+
+def commit_all(repo_path: Path, message: str, user_id: Optional[str] = None) -> GitActionResult:
+    """Stage all changes in a repo and create a commit."""
+    if not (repo_path / ".git").exists():
+        raise RuntimeError(f"Not a git repository: {repo_path}")
+    message = message.strip()
+    if not message:
+        raise RuntimeError("Commit message is required")
+
+    configure_worktree_identity(repo_path, user_id=user_id)
+    branch = _get_current_branch(repo_path)
+    rc, stdout, stderr = _run(["git", "status", "--porcelain"], repo_path, timeout=30)
+    if rc != 0:
+        raise RuntimeError(f"Git status failed: {_sanitize_git_output(stderr or stdout)}")
+    if not stdout:
+        return GitActionResult(status="clean", branch=branch)
+
+    rc, stdout, stderr = _run(["git", "add", "-A"], repo_path, timeout=120)
+    if rc != 0:
+        raise RuntimeError(f"Git add failed: {_sanitize_git_output(stderr or stdout)}")
+    rc, stdout, stderr = _run(["git", "commit", "-m", message], repo_path, timeout=120)
+    if rc != 0:
+        raise RuntimeError(f"Git commit failed: {_sanitize_git_output(stderr or stdout)}")
+    return GitActionResult(status="committed", branch=branch, stdout=_sanitize_git_output(stdout))
+
+
+def commit_message_context(repo_path: Path, max_chars: int = 12000) -> str:
+    """Return a compact git change summary suitable for AI commit-message generation."""
+    if not (repo_path / ".git").exists():
+        raise RuntimeError(f"Not a git repository: {repo_path}")
+
+    parts: list[str] = []
+    for label, cmd in [
+        ("status", ["git", "status", "--short"]),
+        ("stat", ["git", "diff", "--stat", "HEAD"]),
+        ("staged_diff", ["git", "diff", "--cached"]),
+        ("unstaged_diff", ["git", "diff"]),
+    ]:
+        rc, stdout, stderr = _run(cmd, repo_path, timeout=60)
+        if rc != 0:
+            raise RuntimeError(f"Git {label} failed: {_sanitize_git_output(stderr or stdout)}")
+        if stdout:
+            parts.append(f"## {label}\n{_sanitize_git_output(stdout)}")
+
+    context = "\n\n".join(parts).strip()
+    if not context:
+        return ""
+    if len(context) > max_chars:
+        context = context[:max_chars].rstrip() + "\n\n[diff truncated]"
+    return context
+
+
+def push(repo_path: Path, branch: Optional[str] = None, user_id: Optional[str] = None) -> GitActionResult:
+    """Push the current branch to origin using the current user's git credentials."""
+    if not (repo_path / ".git").exists():
+        raise RuntimeError(f"Not a git repository: {repo_path}")
+
+    configure_worktree_identity(repo_path, user_id=user_id)
+    branch = normalize_branch_name(branch) or _get_current_branch(repo_path)
+    if not branch or branch == "HEAD":
+        raise RuntimeError("Cannot push from detached HEAD")
+    remote_url = _get_remote_url(repo_path)
+    provider = detect_provider(remote_url)
+    auth_url = _build_auth_url(remote_url, provider, user_id=user_id)
+    rc, stdout, stderr = _run(["git", "push", auth_url, f"HEAD:refs/heads/{branch}"], repo_path, timeout=120)
+    if rc != 0:
+        raise RuntimeError(f"Git push failed: {_sanitize_git_output(stderr or stdout)}")
+    return GitActionResult(
+        status="pushed",
+        branch=branch,
+        stdout=_sanitize_git_output(stdout),
+        stderr=_sanitize_git_output(stderr),
     )
 
 

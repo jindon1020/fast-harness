@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from src.api import router
 from src.api.schemas import (
     FeedbackRequest,
+    GitCommitRequest,
     RenameRequest,
     SessionCreateRequest,
     WorkspaceCreateRequest,
@@ -851,6 +852,164 @@ async def test_query_checks_out_session_specific_repo(monkeypatch, tmp_path):
         break
 
     assert checked_out == [(repo_path, "main", "zhaojindong")]
+
+
+@pytest.mark.asyncio
+async def test_session_git_commit_uses_bound_repo_and_current_user(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    repo_path.mkdir()
+    calls = []
+
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(repo_path.parent),
+            "created_at": "now",
+            "last_access": "now",
+            "user_id": "zhaojindong",
+            "metadata": {
+                "workspace_id": "ws-1",
+                "repo_name": "app",
+                "branch": "main",
+                "session_repo_path": str(repo_path),
+                "user_id": "zhaojindong",
+            },
+        },
+    )
+    monkeypatch.setattr(router, "_is_query_active", lambda session_id: False)
+    monkeypatch.setattr(router, "resolve_session_repo_path", lambda session_id: repo_path)
+
+    def fake_commit(path, message, user_id=None):
+        calls.append((path, message, user_id))
+        return SimpleNamespace(to_dict=lambda: {"status": "committed", "branch": "main", "stdout": "ok", "stderr": ""})
+
+    monkeypatch.setattr(router, "git_commit_all", fake_commit)
+
+    response = await router.commit_session_changes("sess-1", GitCommitRequest(message="ship changes"))
+
+    assert calls == [(repo_path, "ship changes", "zhaojindong")]
+    assert response.status == "committed"
+    assert response.branch == "main"
+
+
+@pytest.mark.asyncio
+async def test_session_git_commit_message_uses_ai_suggestion(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    repo_path.mkdir()
+
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(repo_path.parent),
+            "created_at": "now",
+            "last_access": "now",
+            "user_id": "zhaojindong",
+            "metadata": {
+                "workspace_id": "ws-1",
+                "repo_name": "app",
+                "branch": "main",
+                "session_repo_path": str(repo_path),
+                "user_id": "zhaojindong",
+            },
+        },
+    )
+    monkeypatch.setattr(router, "_is_query_active", lambda session_id: False)
+    monkeypatch.setattr(router, "resolve_session_repo_path", lambda session_id: repo_path)
+    monkeypatch.setattr(router, "commit_message_context", lambda path: "## status\n M app.py")
+
+    async def fake_generate(path, context):
+        assert path == repo_path
+        assert "app.py" in context
+        return "Update app behavior"
+
+    monkeypatch.setattr(router, "generate_commit_message", fake_generate)
+
+    response = await router.suggest_session_commit_message("sess-1")
+
+    assert response.message == "Update app behavior"
+    assert response.generated is True
+
+
+@pytest.mark.asyncio
+async def test_session_git_commit_message_falls_back_on_ai_failure(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    repo_path.mkdir()
+
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(repo_path.parent),
+            "created_at": "now",
+            "last_access": "now",
+            "user_id": "zhaojindong",
+            "metadata": {
+                "workspace_id": "ws-1",
+                "repo_name": "app",
+                "branch": "main",
+                "session_repo_path": str(repo_path),
+                "user_id": "zhaojindong",
+            },
+        },
+    )
+    monkeypatch.setattr(router, "_is_query_active", lambda session_id: False)
+    monkeypatch.setattr(router, "resolve_session_repo_path", lambda session_id: repo_path)
+    monkeypatch.setattr(router, "commit_message_context", lambda path: "## status\n M app.py")
+
+    async def fail_generate(path, context):
+        raise RuntimeError("AI unavailable")
+
+    monkeypatch.setattr(router, "generate_commit_message", fail_generate)
+
+    response = await router.suggest_session_commit_message("sess-1")
+
+    assert response.message == "Update app"
+    assert response.generated is False
+
+
+@pytest.mark.asyncio
+async def test_session_git_push_uses_session_branch_and_current_user(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    repo_path.mkdir()
+    calls = []
+
+    monkeypatch.setattr(
+        router.session_store,
+        "get",
+        lambda session_id: {
+            "session_id": session_id,
+            "workspace": str(repo_path.parent),
+            "created_at": "now",
+            "last_access": "now",
+            "user_id": "zhaojindong",
+            "metadata": {
+                "workspace_id": "ws-1",
+                "repo_name": "app",
+                "branch": "feature/x",
+                "session_repo_path": str(repo_path),
+                "user_id": "zhaojindong",
+            },
+        },
+    )
+    monkeypatch.setattr(router, "_is_query_active", lambda session_id: False)
+    monkeypatch.setattr(router, "resolve_session_repo_path", lambda session_id: repo_path)
+
+    def fake_push(path, branch=None, user_id=None):
+        calls.append((path, branch, user_id))
+        return SimpleNamespace(to_dict=lambda: {"status": "pushed", "branch": branch, "stdout": "", "stderr": ""})
+
+    monkeypatch.setattr(router, "git_push", fake_push)
+
+    response = await router.push_session_changes("sess-1")
+
+    assert calls == [(repo_path, "feature/x", "zhaojindong")]
+    assert response.status == "pushed"
+    assert response.branch == "feature/x"
 
 
 def test_agent_rejects_unbound_session(monkeypatch, tmp_path):
