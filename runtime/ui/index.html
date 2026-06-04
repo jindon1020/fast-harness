@@ -2906,7 +2906,6 @@ function preferredQuickCommands(commands) {
     "fix",
     "refactor",
     "modify",
-    "deploy-creation-tool-dev",
   ];
   const byName = new Map((commands || []).map(command => [command.name, command]));
   const picked = preferred.map(name => byName.get(name)).filter(Boolean);
