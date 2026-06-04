@@ -484,11 +484,11 @@ async def get_session_git_status(session_id: str, x_user_id: UserHeader = None):
         repo_path = resolve_session_repo_path(session_id).resolve()
         result = git_status(repo_path, user_id=user_id)
         return RepoStatusResponse(
+            repo=rec.get("metadata", {}).get("repo_name", ""),
             branch=result.branch,
             ahead=result.ahead,
             behind=result.behind,
-            staged=result.staged,
-            unstaged=result.unstaged,
+            modified=result.modified,
             untracked=result.untracked,
             clean=result.clean,
         )
