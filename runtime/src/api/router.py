@@ -472,6 +472,29 @@ async def commit_session_changes(session_id: str, body: GitCommitRequest, x_user
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/sessions/{session_id}/git/status", response_model=RepoStatusResponse)
+async def get_session_git_status(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    rec = session_store.get(session_id)
+    _ensure_owned(rec, user_id, "Session not found")
+    if not _is_bound_session(rec):
+        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
+    try:
+        repo_path = resolve_session_repo_path(session_id).resolve()
+        result = git_status(repo_path, user_id=user_id)
+        return RepoStatusResponse(
+            branch=result.branch,
+            ahead=result.ahead,
+            behind=result.behind,
+            staged=result.staged,
+            unstaged=result.unstaged,
+            untracked=result.untracked,
+            clean=result.clean,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/sessions/{session_id}/git/commit-message", response_model=GitCommitMessageResponse)
 async def suggest_session_commit_message(session_id: str, x_user_id: UserHeader = None):
     user_id = _current_user_id(x_user_id)
