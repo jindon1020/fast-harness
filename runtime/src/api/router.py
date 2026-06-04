@@ -57,6 +57,7 @@ from src.core.git import (
     commit_message_context,
     push as git_push,
     remote_branches,
+    status as git_status,
 )
 from src.core.agent import generate_commit_message, provide_answers, run_query_stream, resolve_session_repo_path
 from src.core.session import session_store
