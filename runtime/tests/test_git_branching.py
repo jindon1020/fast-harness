@@ -549,3 +549,73 @@ def test_checkout_branch_falls_back_to_detached_origin_when_branch_is_in_use(mon
 
     assert repo.branch == "master"
     assert ["git", "checkout", "--detach", "origin/master"] in commands
+
+
+def test_session_diff_collects_tracked_and_untracked(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+
+    def fake_run(cmd, cwd, timeout=120):
+        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            return 0, "feature/x", ""
+        if cmd[:3] == ["git", "diff", "--numstat"]:
+            return 0, "3\t1\tsrc/app.py", ""
+        if cmd[:3] == ["git", "diff", "--name-status"]:
+            return 0, "M\tsrc/app.py", ""
+        if cmd[:2] == ["git", "diff"] and "--" in cmd and "src/app.py" in cmd:
+            return 0, "@@ -1 +1,3 @@\n-old\n+new\n+more\n+lines", ""
+        if cmd[:2] == ["git", "ls-files"]:
+            return 0, "src/new.py", ""
+        if cmd[:3] == ["git", "diff", "--no-index"]:
+            return 1, "@@ -0,0 +1,2 @@\n+line a\n+line b", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    result = git.session_diff(tmp_path)
+
+    assert result.branch == "feature/x"
+    assert result.clean is False
+    by_path = {f.path: f for f in result.files}
+    assert set(by_path) == {"src/app.py", "src/new.py"}
+    assert by_path["src/app.py"].change_type == "modified"
+    assert by_path["src/app.py"].additions == 3
+    assert by_path["src/app.py"].deletions == 1
+    assert by_path["src/new.py"].change_type == "untracked"
+    assert by_path["src/new.py"].additions == 2
+
+
+def test_session_diff_clean_repo(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+
+    def fake_run(cmd, cwd, timeout=120):
+        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            return 0, "main", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    result = git.session_diff(tmp_path)
+    assert result.clean is True
+    assert result.files == []
+
+
+def test_session_diff_truncates_large_file(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    big = "+" + ("x" * 100)
+
+    def fake_run(cmd, cwd, timeout=120):
+        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            return 0, "main", ""
+        if cmd[:3] == ["git", "diff", "--numstat"]:
+            return 0, "9\t0\tbig.txt", ""
+        if cmd[:3] == ["git", "diff", "--name-status"]:
+            return 0, "A\tbig.txt", ""
+        if cmd[:2] == ["git", "diff"] and "big.txt" in cmd:
+            return 0, "\n".join([big] * 50), ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    result = git.session_diff(tmp_path, max_file_chars=200)
+    assert result.files[0].truncated is True
+    assert "[diff truncated]" in result.files[0].diff

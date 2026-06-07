@@ -944,6 +944,52 @@ body::before {
   max-height: 400px; overflow: auto; color: var(--text-dim);
   line-height: 1.5;
 }
+/* ── Diff panel ── */
+.diff-summary {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; color: var(--text-dim);
+  padding: 4px 2px 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+}
+.diff-summary .diff-refresh {
+  margin-left: auto; background: none; border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer;
+  width: 22px; height: 22px; font-size: 12px; line-height: 1;
+}
+.diff-summary .diff-refresh:hover { color: var(--text); border-color: var(--border-focus); }
+.diff-stat--add { color: var(--success); }
+.diff-stat--del { color: var(--error); }
+.diff-file { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 6px; overflow: hidden; }
+.diff-file__head {
+  display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+  cursor: pointer; font-size: 11px; user-select: none;
+}
+.diff-file__head:hover { background: var(--bg-hover); }
+.diff-file__caret { color: var(--text-muted); width: 10px; flex-shrink: 0; }
+.diff-file__name {
+  font-family: var(--font-mono); color: var(--text); flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.diff-file__stat { flex-shrink: 0; font-family: var(--font-mono); white-space: nowrap; }
+.diff-file__badge {
+  flex-shrink: 0; font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  font-family: var(--font-mono); letter-spacing: .3px;
+}
+.diff-badge--added, .diff-badge--untracked { background: rgba(60,184,120,.15); color: var(--success); }
+.diff-badge--deleted { background: var(--error-dim); color: var(--error); }
+.diff-badge--modified, .diff-badge--typechange { background: var(--accent-dim); color: var(--accent); }
+.diff-badge--renamed, .diff-badge--copied { background: var(--bg-hover); color: var(--text-dim); }
+.diff-file__body { border-top: 1px solid var(--border); }
+.diff-code {
+  margin: 0; padding: 6px 0; background: var(--code-bg);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
+  overflow-x: auto; max-height: 460px; overflow-y: auto;
+}
+.diff-line { padding: 0 10px; white-space: pre; min-height: 1.55em; }
+.diff-line--add { background: rgba(60,184,120,.12); color: var(--success); }
+.diff-line--del { background: var(--error-dim); color: var(--error); }
+.diff-line--hunk { color: var(--accent); background: var(--accent-dim); }
+.diff-line--meta { color: var(--text-muted); }
+.diff-empty { padding: 10px; font-size: 11px; color: var(--text-muted); }
 .usage-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1401,6 +1447,7 @@ body::before {
       <span class="toolbar__title" id="toolbarTitle">Select or create a session</span>
       <button class="btn-tool" id="btnUsage" title="Usage" aria-label="Usage"><span class="btn-tool__icon" aria-hidden="true">U</span><span class="btn-tool__label">Usage</span></button>
       <button class="btn-tool" id="btnCapabilities" title="Capabilities" aria-label="Capabilities"><span class="btn-tool__icon" aria-hidden="true">⚙</span><span class="btn-tool__label">Capabilities</span></button>
+      <button class="btn-tool" id="btnDiff" title="本次变更 Diff" aria-label="Diff"><span class="btn-tool__icon" aria-hidden="true">⑂</span><span class="btn-tool__label">Diff</span></button>
       <button class="btn-tool" id="btnFiles" title="Session files" aria-label="Session files"><span class="btn-tool__icon" aria-hidden="true">📁</span><span class="btn-tool__label">Files</span></button>
     </div>
     <div class="chat" id="chat">
@@ -1421,7 +1468,7 @@ body::before {
         <div class="quick-commands" id="quickCommands" aria-label="Quick commands"></div>
         <div class="input-wrap">
           <div class="image-tray" id="imageTray" style="display:none"></div>
-          <textarea id="promptInput" rows="1" placeholder="Send a prompt, or use /implement, /fix..." disabled></textarea>
+          <textarea id="promptInput" rows="1" placeholder="Send a prompt, or use /implement, /fix, @file..." disabled></textarea>
           <button class="btn-send" id="btnSend" disabled title="Send">↑</button>
         </div>
         <div class="input-hint" id="inputHint">No session selected</div>
@@ -1437,6 +1484,7 @@ body::before {
     </div>
     <div class="panel__tabs" id="panelTabs" style="display:none">
       <button class="panel__tab panel__tab--active" data-tab="capabilities">Capabilities</button>
+      <button class="panel__tab" data-tab="diff">Diff</button>
       <button class="panel__tab" data-tab="files">Files</button>
       <button class="panel__tab" data-tab="repos">Repos</button>
     </div>
@@ -1497,6 +1545,10 @@ let state = {
   panelTab: "capabilities",
   commandSuggestions: [],
   selectedCommandIndex: 0,
+  mentionSuggestions: [],
+  mentionSelectedIndex: 0,
+  mentionRange: null,
+  mentionFilesCache: { sessionId: null, files: [] },
   pendingImages: [],
   repoActionRunning: false,
 };
@@ -1527,6 +1579,7 @@ const panelTabs = $("#panelTabs");
 const panelTitle = $("#panelTitle");
 const btnUsage = $("#btnUsage");
 const btnCapabilities = $("#btnCapabilities");
+const btnDiff = $("#btnDiff");
 const btnFiles = $("#btnFiles");
 const btnLogout = $("#btnLogout");
 const currentUserLabel = $("#currentUserLabel");
@@ -1661,6 +1714,7 @@ async function selectSession(id) {
   await loadSessionMessages(id);
   reconnectSessionStream(id);
   if (state.panelOpen && state.panelTab === "files") loadFiles();
+  if (state.panelOpen && state.panelTab === "diff") loadDiff();
   closeMobileSidebar();
 }
 
@@ -3037,6 +3091,7 @@ async function runRepoAction(action) {
   try {
     await action();
     if (state.panelOpen && state.panelTab === "files") loadFiles();
+    if (state.panelOpen && state.panelTab === "diff") loadDiff();
   } catch (e) {
     showToast(e.message || "Git action failed", "error");
   } finally {
@@ -3052,6 +3107,7 @@ async function sendPrompt() {
   const prompt = promptInput.value.trim() || (images.length ? "请分析这些图片。" : "");
   if ((!prompt && !images.length) || !sessionId || isSessionStreaming(sessionId)) return;
   hideCommandSuggestions();
+  hideMentionSuggestions();
 
   promptInput.value = "";
   promptInput.style.height = "auto";
@@ -3262,7 +3318,16 @@ function stopStreaming(sessionId = state.activeSession) {
     stream.textEl = null;
     delete state.sessionStreams[sessionId];
   }
-  if (state.activeSession === sessionId) updateSendButton();
+  if (state.activeSession === sessionId) {
+    updateSendButton();
+    // The AI may have added/edited files — invalidate the @-mention cache and
+    // refresh an open diff/files panel.
+    if (state.mentionFilesCache.sessionId === sessionId) {
+      state.mentionFilesCache = { sessionId: null, files: [] };
+    }
+    if (state.panelOpen && state.panelTab === "diff") loadDiff();
+    else if (state.panelOpen && state.panelTab === "files") loadFiles();
+  }
 }
 
 /* ═══════════════════════ PANEL ═══════════════════════ */
@@ -3278,9 +3343,10 @@ function togglePanel(btn) {
   panel.style.display = "flex";
   btnUsage.classList.remove("btn-tool--active");
   btnCapabilities.classList.remove("btn-tool--active");
+  btnDiff.classList.remove("btn-tool--active");
   btnFiles.classList.remove("btn-tool--active");
   btn.classList.add("btn-tool--active");
-  state.panelTab = btn === btnUsage ? "usage" : btn === btnCapabilities ? "capabilities" : btn === btnFiles ? "files" : "repos";
+  state.panelTab = btn === btnUsage ? "usage" : btn === btnCapabilities ? "capabilities" : btn === btnDiff ? "diff" : btn === btnFiles ? "files" : "repos";
   panelTitle.textContent = panelTitleForTab(state.panelTab);
   panelTabs.style.display = state.panelTab === "usage" ? "none" : "flex";
   $$(".panel__tab").forEach(t => t.classList.remove("panel__tab--active"));
@@ -3288,12 +3354,13 @@ function togglePanel(btn) {
   if (tab) tab.classList.add("panel__tab--active");
   if (state.panelTab === "usage") loadUsageStats();
   else if (state.panelTab === "capabilities") loadCapabilities();
+  else if (state.panelTab === "diff") loadDiff();
   else if (state.panelTab === "files") loadFiles();
   else renderRepoPanel();
 }
 
 function panelTitleForTab(tab) {
-  return tab === "usage" ? "Usage" : tab === "capabilities" ? "Capabilities" : tab === "files" ? "Session Files" : "Repos";
+  return tab === "usage" ? "Usage" : tab === "capabilities" ? "Capabilities" : tab === "diff" ? "本次变更 Diff" : tab === "files" ? "Session Files" : "Repos";
 }
 
 function closePanel() {
@@ -3302,6 +3369,7 @@ function closePanel() {
   panel.style.display = "none";
   btnUsage.classList.remove("btn-tool--active");
   btnCapabilities.classList.remove("btn-tool--active");
+  btnDiff.classList.remove("btn-tool--active");
   btnFiles.classList.remove("btn-tool--active");
 }
 
@@ -3441,6 +3509,81 @@ async function viewFile(path) {
   }
 }
 
+/* ═══════════════════════ DIFF ═══════════════════════ */
+
+async function loadDiff() {
+  if (!state.activeSession) {
+    panelBody.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:12px">Select a session to view its changes.</div>';
+    return;
+  }
+  panelBody.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+  try {
+    const data = await api("GET", "/sessions/" + state.activeSession + "/git/diff");
+    renderDiff(data);
+  } catch (e) {
+    panelBody.innerHTML = `<div class="msg--error">Failed to load diff: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+const DIFF_TYPE_LABEL = {
+  added: "新增", modified: "修改", deleted: "删除", renamed: "重命名",
+  copied: "复制", typechange: "类型变更", untracked: "未跟踪",
+};
+
+function renderDiff(data) {
+  if (data.clean || !data.files || !data.files.length) {
+    panelBody.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:12px">本次会话暂无代码变更。</div>';
+    return;
+  }
+  const totalAdd = data.files.reduce((n, f) => n + (f.additions || 0), 0);
+  const totalDel = data.files.reduce((n, f) => n + (f.deletions || 0), 0);
+  let html = `<div class="diff-summary">
+    <span>${data.files.length} 个文件</span>
+    <span class="diff-stat--add">+${totalAdd}</span>
+    <span class="diff-stat--del">−${totalDel}</span>
+    <button class="diff-refresh" onclick="loadDiff()" title="刷新">↻</button>
+  </div>`;
+  data.files.forEach((f, i) => {
+    const label = DIFF_TYPE_LABEL[f.change_type] || f.change_type;
+    const name = f.old_path ? `${f.old_path} → ${f.path}` : f.path;
+    html += `<div class="diff-file" data-index="${i}">
+      <div class="diff-file__head" onclick="toggleDiffFile(${i})">
+        <span class="diff-file__caret">▸</span>
+        <span class="diff-file__badge diff-badge--${f.change_type}">${label}</span>
+        <span class="diff-file__name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+        <span class="diff-file__stat"><span class="diff-stat--add">+${f.additions || 0}</span> <span class="diff-stat--del">−${f.deletions || 0}</span></span>
+      </div>
+      <div class="diff-file__body" style="display:none">${renderHunks(f.diff)}</div>
+    </div>`;
+  });
+  panelBody.innerHTML = html;
+}
+
+function renderHunks(diff) {
+  if (!diff) return '<div class="diff-empty">（无文本差异，可能是二进制文件）</div>';
+  const rows = diff.split("\n").map(line => {
+    let cls = "diff-line";
+    const c = line[0];
+    if (line.startsWith("+++") || line.startsWith("---")) cls += " diff-line--meta";
+    else if (line.startsWith("@@")) cls += " diff-line--hunk";
+    else if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("new file") || line.startsWith("deleted file") || line.startsWith("rename ") || line.startsWith("similarity ")) cls += " diff-line--meta";
+    else if (c === "+") cls += " diff-line--add";
+    else if (c === "-") cls += " diff-line--del";
+    return `<div class="${cls}">${escapeHtml(line) || "&nbsp;"}</div>`;
+  }).join("");
+  return `<pre class="diff-code">${rows}</pre>`;
+}
+
+function toggleDiffFile(i) {
+  const file = panelBody.querySelector(`.diff-file[data-index="${i}"]`);
+  if (!file) return;
+  const body = file.querySelector(".diff-file__body");
+  const caret = file.querySelector(".diff-file__caret");
+  const open = body.style.display !== "none";
+  body.style.display = open ? "none" : "block";
+  caret.textContent = open ? "▸" : "▾";
+}
+
 /* ═══════════════════════ COMMAND SUGGESTIONS ═══════════════════════ */
 
 async function ensureCapabilities() {
@@ -3518,6 +3661,120 @@ function applyCommandSuggestion(index) {
   promptInput.style.height = Math.min(promptInput.scrollHeight, 200) + "px";
   hideCommandSuggestions();
   promptInput.focus();
+}
+
+/* ═══════════════════════ @ FILE MENTIONS ═══════════════════════ */
+
+// Detect an active "@token" immediately before the caret. Returns
+// {start, end, query} or null. The token starts at @ and runs until whitespace.
+function detectMentionToken() {
+  const pos = promptInput.selectionStart;
+  if (pos !== promptInput.selectionEnd) return null;
+  const text = promptInput.value;
+  const before = text.slice(0, pos);
+  const at = before.lastIndexOf("@");
+  if (at < 0) return null;
+  // @ must be at start or preceded by whitespace.
+  if (at > 0 && !/\s/.test(text[at - 1])) return null;
+  const query = before.slice(at + 1);
+  // Stop if the token already contains whitespace (mention is complete).
+  if (/\s/.test(query)) return null;
+  return { start: at, end: pos, query };
+}
+
+async function ensureMentionFiles() {
+  const sid = state.activeSession;
+  if (!sid) return [];
+  if (state.mentionFilesCache.sessionId === sid) {
+    return state.mentionFilesCache.files;
+  }
+  try {
+    const data = await api("GET", "/sessions/" + sid + "/files");
+    const files = data.files || [];
+    state.mentionFilesCache = { sessionId: sid, files };
+    return files;
+  } catch {
+    return [];
+  }
+}
+
+async function updateMentionSuggestions() {
+  const token = detectMentionToken();
+  if (!token || promptInput.disabled || !state.activeSession) {
+    hideMentionSuggestions();
+    return;
+  }
+  const files = await ensureMentionFiles();
+  // Re-check the token is still active after the await.
+  const current = detectMentionToken();
+  if (!current) { hideMentionSuggestions(); return; }
+  const q = current.query.toLowerCase();
+  const matches = files
+    .filter(f => f.toLowerCase().includes(q))
+    .sort((a, b) => mentionRank(a, q) - mentionRank(b, q) || a.length - b.length)
+    .slice(0, 8);
+  if (!matches.length) { hideMentionSuggestions(); return; }
+  state.mentionSuggestions = matches;
+  state.mentionSelectedIndex = 0;
+  state.mentionRange = { start: current.start, end: current.end };
+  renderMentionItems();
+}
+
+// Prefer matches on the basename, and earlier matches, over deep-path matches.
+function mentionRank(path, q) {
+  if (!q) return 2;
+  const base = path.split("/").pop().toLowerCase();
+  if (base.startsWith(q)) return 0;
+  if (base.includes(q)) return 1;
+  return 3;
+}
+
+function renderMentionItems() {
+  commandMenu.innerHTML = state.mentionSuggestions.map((f, i) => {
+    const base = escapeHtml(f.split("/").pop());
+    const dir = escapeHtml(f.slice(0, f.length - f.split("/").pop().length));
+    return `<div class="command-menu__item ${i === state.mentionSelectedIndex ? "command-menu__item--selected" : ""}"
+         role="option" data-mention-index="${i}">
+      <div class="command-menu__name">@${base}</div>
+      <div class="command-menu__desc">${dir || "&nbsp;"}</div>
+    </div>`;
+  }).join("");
+  commandMenu.style.display = "block";
+}
+
+function hideMentionSuggestions() {
+  state.mentionSuggestions = [];
+  state.mentionSelectedIndex = 0;
+  state.mentionRange = null;
+  if (!isCommandMenuVisible()) {
+    commandMenu.style.display = "none";
+    commandMenu.innerHTML = "";
+  }
+}
+
+function isMentionMenuVisible() {
+  return state.mentionSuggestions.length > 0 && commandMenu.style.display !== "none";
+}
+
+function moveMentionSelection(delta) {
+  const count = state.mentionSuggestions.length;
+  if (!count) return;
+  state.mentionSelectedIndex = (state.mentionSelectedIndex + delta + count) % count;
+  renderMentionItems();
+}
+
+function applyMentionSuggestion(index) {
+  const path = state.mentionSuggestions[index];
+  const range = state.mentionRange;
+  if (!path || !range) return;
+  const text = promptInput.value;
+  const insert = "@" + path + " ";
+  promptInput.value = text.slice(0, range.start) + insert + text.slice(range.end);
+  const caret = range.start + insert.length;
+  hideMentionSuggestions();
+  promptInput.focus();
+  promptInput.setSelectionRange(caret, caret);
+  resizePromptInput();
 }
 
 /* ═══════════════════════ THEME ═══════════════════════ */
@@ -3602,6 +3859,7 @@ function resizePromptInput() {
 
 promptInput.addEventListener("input", resizePromptInput);
 promptInput.addEventListener("input", updateCommandSuggestions);
+promptInput.addEventListener("input", updateMentionSuggestions);
 promptInput.addEventListener("input", updateSendButton);
 promptInput.addEventListener("paste", event => {
   const files = [...(event.clipboardData?.items || [])]
@@ -3643,6 +3901,16 @@ inputWrap.addEventListener("drop", event => {
 /* ═══════════════════════ KEYBOARD SHORTCUTS ═══════════════════════ */
 
 promptInput.addEventListener("keydown", (e) => {
+  if (isMentionMenuVisible()) {
+    if (e.key === "ArrowDown") { e.preventDefault(); moveMentionSelection(1); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); moveMentionSelection(-1); return; }
+    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+      e.preventDefault();
+      applyMentionSuggestion(state.mentionSelectedIndex);
+      return;
+    }
+    if (e.key === "Escape") { e.preventDefault(); hideMentionSuggestions(); return; }
+  }
   if (isCommandMenuVisible()) {
     if (e.key === "ArrowDown") { e.preventDefault(); moveCommandSelection(1); return; }
     if (e.key === "ArrowUp") { e.preventDefault(); moveCommandSelection(-1); return; }
@@ -3669,12 +3937,17 @@ btnSend.addEventListener("click", () => {
 });
 btnCapabilities.addEventListener("click", () => togglePanel(btnCapabilities));
 btnUsage.addEventListener("click", () => togglePanel(btnUsage));
+btnDiff.addEventListener("click", () => togglePanel(btnDiff));
 btnFiles.addEventListener("click", () => togglePanel(btnFiles));
 commandMenu.addEventListener("mousedown", (e) => {
   const item = e.target.closest(".command-menu__item");
   if (!item) return;
   e.preventDefault();
-  applyCommandSuggestion(Number(item.dataset.index));
+  if (item.dataset.mentionIndex !== undefined) {
+    applyMentionSuggestion(Number(item.dataset.mentionIndex));
+  } else {
+    applyCommandSuggestion(Number(item.dataset.index));
+  }
 });
 quickCommands.addEventListener("click", (e) => {
   const item = e.target.closest(".quick-command");
@@ -3694,9 +3967,11 @@ panelTabs.addEventListener("click", (e) => {
   e.target.classList.add("panel__tab--active");
   btnUsage.classList.toggle("btn-tool--active", state.panelTab === "usage");
   btnCapabilities.classList.toggle("btn-tool--active", state.panelTab === "capabilities");
+  btnDiff.classList.toggle("btn-tool--active", state.panelTab === "diff");
   btnFiles.classList.toggle("btn-tool--active", state.panelTab === "files");
   if (state.panelTab === "usage") loadUsageStats();
   else if (state.panelTab === "capabilities") loadCapabilities();
+  else if (state.panelTab === "diff") loadDiff();
   else if (state.panelTab === "files") loadFiles();
   else renderRepoPanel();
 });

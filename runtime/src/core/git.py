@@ -195,6 +195,44 @@ class GitActionResult:
         }
 
 
+@dataclass
+class FileDiff:
+    path: str
+    change_type: str  # added | modified | deleted | renamed | copied | typechange | untracked
+    additions: int = 0
+    deletions: int = 0
+    diff: str = ""
+    old_path: str = ""
+    truncated: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "path": self.path,
+            "change_type": self.change_type,
+            "additions": self.additions,
+            "deletions": self.deletions,
+            "diff": self.diff,
+            "old_path": self.old_path,
+            "truncated": self.truncated,
+        }
+
+
+@dataclass
+class SessionDiff:
+    branch: str = ""
+    base: str = "HEAD"
+    files: list[FileDiff] = field(default_factory=list)
+    clean: bool = True
+
+    def to_dict(self) -> dict:
+        return {
+            "branch": self.branch,
+            "base": self.base,
+            "files": [f.to_dict() for f in self.files],
+            "clean": self.clean,
+        }
+
+
 def _run(cmd: list[str], cwd: Path, timeout: int = 120) -> tuple[int, str, str]:
     """Run a git command and return (returncode, stdout, stderr)."""
     env = {}
@@ -512,6 +550,112 @@ def commit_message_context(repo_path: Path, max_chars: int = 12000) -> str:
     if len(context) > max_chars:
         context = context[:max_chars].rstrip() + "\n\n[diff truncated]"
     return context
+
+
+# Map git's name-status / diff codes to human-friendly change types.
+_DIFF_STATUS_MAP = {
+    "A": "added",
+    "M": "modified",
+    "D": "deleted",
+    "R": "renamed",
+    "C": "copied",
+    "T": "typechange",
+}
+
+
+def _parse_numstat(output: str) -> dict[str, tuple[int, int]]:
+    """Parse `git diff --numstat` into {path: (additions, deletions)}.
+
+    Binary files report '-' for both counts; we record them as (0, 0).
+    Rename entries use the new path as the key.
+    """
+    stats: dict[str, tuple[int, int]] = {}
+    for line in output.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        add_raw, del_raw, path = parts[0], parts[1], parts[-1]
+        additions = 0 if add_raw == "-" else int(add_raw or 0)
+        deletions = 0 if del_raw == "-" else int(del_raw or 0)
+        stats[path] = (additions, deletions)
+    return stats
+
+
+def session_diff(repo_path: Path, base: str = "HEAD", max_file_chars: int = 60000) -> SessionDiff:
+    """Return a structured, per-file diff of the working tree against `base`.
+
+    Covers tracked changes (`git diff <base>`) plus untracked files (rendered via
+    `git diff --no-index`). Each file's unified diff is capped at `max_file_chars`
+    to keep responses bounded.
+    """
+    if not (repo_path / ".git").exists():
+        raise RuntimeError(f"Not a git repository: {repo_path}")
+
+    branch = _get_current_branch(repo_path)
+    files: list[FileDiff] = []
+
+    # Tracked changes (modified / staged / deleted / renamed) vs base.
+    rc, numstat_out, stderr = _run(["git", "diff", "--numstat", base], repo_path, timeout=60)
+    if rc != 0:
+        raise RuntimeError(f"Git diff failed: {_sanitize_git_output(stderr or numstat_out)}")
+    stats = _parse_numstat(numstat_out)
+
+    rc, status_out, _ = _run(["git", "diff", "--name-status", base], repo_path, timeout=60)
+    statuses: dict[str, tuple[str, str]] = {}  # path -> (change_type, old_path)
+    if rc == 0:
+        for line in status_out.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            code = parts[0]
+            change_type = _DIFF_STATUS_MAP.get(code[0], "modified")
+            if code[0] in ("R", "C") and len(parts) >= 3:
+                statuses[parts[2]] = (change_type, parts[1])
+            elif len(parts) >= 2:
+                statuses[parts[1]] = (change_type, "")
+
+    for path, (change_type, old_path) in statuses.items():
+        additions, deletions = stats.get(path, (0, 0))
+        rc, diff_text, _ = _run(["git", "diff", base, "--", path], repo_path, timeout=60)
+        files.append(_make_file_diff(
+            path, change_type, additions, deletions, diff_text, old_path, max_file_chars,
+        ))
+
+    # Untracked files — not part of `git diff <base>`, render against /dev/null.
+    rc, untracked_out, _ = _run(["git", "ls-files", "--others", "--exclude-standard"], repo_path)
+    for path in [f for f in untracked_out.split("\n") if f]:
+        # --no-index exits 1 when files differ; that's expected, not an error.
+        _, diff_text, _ = _run(
+            ["git", "diff", "--no-index", "--", "/dev/null", path], repo_path, timeout=60,
+        )
+        additions = sum(
+            1 for ln in diff_text.split("\n") if ln.startswith("+") and not ln.startswith("+++")
+        )
+        files.append(_make_file_diff(
+            path, "untracked", additions, 0, diff_text, "", max_file_chars,
+        ))
+
+    files.sort(key=lambda f: f.path)
+    return SessionDiff(branch=branch, base=base, files=files, clean=not files)
+
+
+def _make_file_diff(
+    path: str, change_type: str, additions: int, deletions: int,
+    diff_text: str, old_path: str, max_file_chars: int,
+) -> FileDiff:
+    diff_text = _sanitize_git_output(diff_text)
+    truncated = False
+    if len(diff_text) > max_file_chars:
+        diff_text = diff_text[:max_file_chars].rstrip() + "\n\n[diff truncated]"
+        truncated = True
+    return FileDiff(
+        path=path, change_type=change_type, additions=additions, deletions=deletions,
+        diff=diff_text, old_path=old_path, truncated=truncated,
+    )
 
 
 def push(repo_path: Path, branch: Optional[str] = None, user_id: Optional[str] = None) -> GitActionResult:

@@ -200,6 +200,24 @@ class GitActionResponse(BaseModel):
     stderr: str = ""
 
 
+class FileDiffSchema(BaseModel):
+    path: str
+    change_type: str
+    additions: int = 0
+    deletions: int = 0
+    diff: str = ""
+    old_path: str = ""
+    truncated: bool = False
+
+
+class SessionDiffResponse(BaseModel):
+    repo: str = ""
+    branch: str = ""
+    base: str = "HEAD"
+    files: list[FileDiffSchema] = Field(default_factory=list)
+    clean: bool = True
+
+
 class GitCommitMessageResponse(BaseModel):
     message: str
     generated: bool = True

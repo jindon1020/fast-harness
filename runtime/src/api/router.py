@@ -39,6 +39,7 @@ from src.api.schemas import (
     WorkspaceListResponse,
     RepositoryListResponse,
     RepoStatusResponse,
+    SessionDiffResponse,
     CapabilityResponse,
     HealthResponse,
 )
@@ -57,6 +58,7 @@ from src.core.git import (
     commit_message_context,
     push as git_push,
     remote_branches,
+    session_diff as git_session_diff,
     status as git_status,
 )
 from src.core.agent import generate_commit_message, provide_answers, run_query_stream, resolve_session_repo_path
@@ -490,6 +492,27 @@ async def get_session_git_status(session_id: str, x_user_id: UserHeader = None):
             behind=result.behind,
             modified=result.modified,
             untracked=result.untracked,
+            clean=result.clean,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sessions/{session_id}/git/diff", response_model=SessionDiffResponse)
+async def get_session_git_diff(session_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    rec = session_store.get(session_id)
+    _ensure_owned(rec, user_id, "Session not found")
+    if not _is_bound_session(rec):
+        raise HTTPException(status_code=400, detail="Session is not bound to a workspace")
+    try:
+        repo_path = resolve_session_repo_path(session_id).resolve()
+        result = git_session_diff(repo_path)
+        return SessionDiffResponse(
+            repo=rec.get("metadata", {}).get("repo_name", ""),
+            branch=result.branch,
+            base=result.base,
+            files=[f.to_dict() for f in result.files],
             clean=result.clean,
         )
     except RuntimeError as e:

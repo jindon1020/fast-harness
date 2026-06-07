@@ -5,6 +5,7 @@ Agent session manager — wraps the Claude Agent SDK query().
 import asyncio
 import logging
 import os
+import re
 import uuid
 from contextlib import suppress
 from pathlib import Path
@@ -51,6 +52,13 @@ KUBE_OBSERVABILITY_ALLOWED_TOOLS = [
 IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 MAX_DISCOVERED_IMAGE_FILES = 50
 MAX_COMMIT_MESSAGE_LENGTH = 72
+
+# @-mention file references in a prompt, e.g. "@src/app.py".
+# A path runs until whitespace; it may contain dots, dashes, slashes, underscores.
+MENTION_PATTERN = re.compile(r"(?<!\S)@([^\s@]+)")
+MAX_MENTION_FILES = 10
+MAX_MENTION_FILE_BYTES = 100_000
+MAX_MENTION_TOTAL_BYTES = 300_000
 
 
 def _apply_api_config() -> None:
@@ -410,7 +418,88 @@ def _build_user_text(
             "use the Read tool on the relevant path without asking the user to paste it again.]\n"
             f"{listing}"
         )
+
+    mention_context = _build_mention_context(prompt, Path(str(options.cwd)))
+    if mention_context:
+        parts.append(mention_context)
     return "".join(parts)
+
+
+def _build_mention_context(prompt: str, cwd: Path) -> str:
+    """Read files referenced via @path in the prompt and return them as a context block.
+
+    Paths are resolved relative to the workspace root (`cwd`). References that escape
+    the workspace, point at missing files, or are not regular files are skipped.
+    Content is bounded per-file and in total to keep the prompt size reasonable.
+    """
+    mentions = _extract_mentions(prompt)
+    if not mentions:
+        return ""
+
+    if not cwd.exists():
+        return ""
+    cwd_resolved = cwd.resolve()
+
+    blocks: list[str] = []
+    seen: set[str] = set()
+    total_bytes = 0
+    for rel_path in mentions:
+        if rel_path in seen:
+            continue
+        seen.add(rel_path)
+        if len(blocks) >= MAX_MENTION_FILES:
+            break
+
+        target = (cwd_resolved / rel_path).resolve()
+        # Guard against path traversal outside the workspace.
+        if cwd_resolved != target and cwd_resolved not in target.parents:
+            continue
+        if not target.is_file():
+            continue
+
+        try:
+            data = target.read_bytes()
+        except OSError:
+            continue
+
+        truncated = False
+        if len(data) > MAX_MENTION_FILE_BYTES:
+            data = data[:MAX_MENTION_FILE_BYTES]
+            truncated = True
+        if total_bytes + len(data) > MAX_MENTION_TOTAL_BYTES:
+            break
+        total_bytes += len(data)
+
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            # Skip binary files — they aren't useful as text context.
+            continue
+
+        suffix = "\n\n[... 内容超长，已截断 ...]" if truncated else ""
+        blocks.append(f"### {rel_path}\n```\n{text}\n```{suffix}")
+
+    if not blocks:
+        return ""
+
+    body = "\n\n".join(blocks)
+    return (
+        "\n\n[fast-harness 已根据用户输入中的 @ 引用，附上以下工作区文件的内容作为上下文。"
+        "请直接使用这些内容，无需再次调用工具读取（除非需要查看截断或未引用的部分）。]\n\n"
+        f"{body}"
+    )
+
+
+def _extract_mentions(prompt: str) -> list[str]:
+    """Return the ordered list of @-referenced paths in a prompt."""
+    mentions: list[str] = []
+    for match in MENTION_PATTERN.finditer(prompt):
+        raw = match.group(1)
+        # Trim trailing punctuation that commonly abuts a path in prose.
+        raw = raw.rstrip(".,;:)]}'\"")
+        if raw:
+            mentions.append(raw)
+    return mentions
 
 
 def _discover_workspace_images(cwd: Path) -> list[str]:

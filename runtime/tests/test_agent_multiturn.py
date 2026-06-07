@@ -410,3 +410,62 @@ def test_stream_filter_can_show_configured_tools(monkeypatch):
         ],
         "parent_tool_use_id": None,
     }
+
+
+def test_extract_mentions_parses_paths():
+    assert agent._extract_mentions("look at @src/app.py please") == ["src/app.py"]
+    assert agent._extract_mentions("no mention here") == []
+    # @ must be at a token boundary, not mid-word (e.g. emails).
+    assert agent._extract_mentions("mail me@example.com") == []
+    # Trailing prose punctuation is trimmed.
+    assert agent._extract_mentions("see @README.md.") == ["README.md"]
+    # Multiple mentions preserve order.
+    assert agent._extract_mentions("@a.py and @b/c.py") == ["a.py", "b/c.py"]
+
+
+def test_build_user_content_injects_mentioned_file(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('hi')\n")
+
+    content = agent._build_user_content(
+        "explain @src/app.py", [], SimpleNamespace(cwd=str(tmp_path))
+    )
+
+    assert isinstance(content, str)
+    assert "src/app.py" in content
+    assert "print('hi')" in content
+
+
+def test_build_mention_context_blocks_path_traversal(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP SECRET")
+
+    ctx = agent._build_mention_context("read @../secret.txt", workspace)
+
+    assert "TOP SECRET" not in ctx
+    assert ctx == ""
+
+
+def test_build_mention_context_skips_missing_file(tmp_path):
+    ctx = agent._build_mention_context("read @does/not/exist.py", tmp_path)
+    assert ctx == ""
+
+
+def test_build_mention_context_truncates_large_file(tmp_path):
+    big = "A" * (agent.MAX_MENTION_FILE_BYTES + 500)
+    (tmp_path / "big.txt").write_text(big)
+
+    ctx = agent._build_mention_context("see @big.txt", tmp_path)
+
+    assert "已截断" in ctx
+    # Content should be capped near the per-file limit, not the full file.
+    assert len(ctx) < agent.MAX_MENTION_FILE_BYTES + 1000
+
+
+def test_build_mention_context_skips_binary_file(tmp_path):
+    (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00\x01binary")
+
+    ctx = agent._build_mention_context("inspect @blob.bin", tmp_path)
+    assert ctx == ""
