@@ -18,7 +18,7 @@ from src.core.git import (
     pull,
     status as git_status,
     RepoInfo,
-    branches as git_branches,
+    remote_branches as git_remote_branches,
     checkout as git_checkout,
     normalize_branch_name,
 )
@@ -272,8 +272,20 @@ class WorkspaceStore:
         record = self.get(ws_id)
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
-        repo_path = Path(record["cwd"]) / repo_name
-        return git_branches(repo_path, user_id=record.get("user_id"))
+        repo = self._find_repo(record, repo_name)
+        # Only list branches that exist on the remote — never local-only branches
+        # or stale remote-tracking refs from the local clone. A session worktree
+        # can only be created from a branch that exists on origin anyway.
+        url = repo.get("url") if repo else None
+        if not url:
+            return []
+        return git_remote_branches(url, user_id=record.get("user_id"))
+
+    def _find_repo(self, record: dict, repo_name: str) -> dict | None:
+        for repo in record.get("repos", []):
+            if repo.get("name") == repo_name:
+                return repo
+        return None
 
     def checkout_branch(self, ws_id: str, repo_name: str, branch: str) -> dict:
         record = self.get(ws_id)

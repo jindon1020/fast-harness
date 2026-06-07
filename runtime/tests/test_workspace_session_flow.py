@@ -1150,6 +1150,60 @@ def test_workspace_creates_session_specific_worktree(monkeypatch, tmp_path):
     ]
 
 
+def test_list_branches_uses_remote_source(monkeypatch, tmp_path):
+    """Branch dropdown must reflect origin only — never local clone refs."""
+    monkeypatch.setattr(workspace.settings, "workspace_root", str(tmp_path))
+    store = workspace.WorkspaceStore()
+    ws_id = "ws-1"
+    ws_dir = tmp_path / ws_id
+    ws_dir.mkdir()
+    store._path(ws_id).write_text(
+        json.dumps(
+            {
+                "workspace_id": ws_id,
+                "name": "test",
+                "cwd": str(ws_dir),
+                "user_id": "alice",
+                "repos": [{"name": "app", "url": "https://example.com/app.git", "branch": "main"}],
+            }
+        )
+    )
+
+    calls = []
+
+    def fake_remote_branches(url, user_id=None):
+        calls.append((url, user_id))
+        return ["dev", "main"]
+
+    monkeypatch.setattr(workspace, "git_remote_branches", fake_remote_branches)
+
+    assert store.list_branches(ws_id, "app") == ["dev", "main"]
+    assert calls == [("https://example.com/app.git", "alice")]
+
+
+def test_list_branches_returns_remote_result_verbatim(monkeypatch, tmp_path):
+    """The list comes straight from the remote, even when empty — no local fallback."""
+    monkeypatch.setattr(workspace.settings, "workspace_root", str(tmp_path))
+    store = workspace.WorkspaceStore()
+    ws_id = "ws-1"
+    ws_dir = tmp_path / ws_id
+    ws_dir.mkdir()
+    store._path(ws_id).write_text(
+        json.dumps(
+            {
+                "workspace_id": ws_id,
+                "name": "test",
+                "cwd": str(ws_dir),
+                "repos": [{"name": "app", "url": "https://example.com/app.git", "branch": "main"}],
+            }
+        )
+    )
+
+    monkeypatch.setattr(workspace, "git_remote_branches", lambda url, user_id=None: [])
+
+    assert store.list_branches(ws_id, "app") == []
+
+
 def test_workspace_store_backfills_legacy_user(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace.settings, "workspace_root", str(tmp_path))
     store_dir = tmp_path / ".workspaces"

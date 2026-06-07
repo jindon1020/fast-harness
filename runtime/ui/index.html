@@ -446,7 +446,7 @@ body::before {
   max-width: 500px; box-shadow: var(--shadow);
 }
 .dialog h3 { font-size: 16px; font-weight: 500; margin-bottom: 16px; }
-.dialog__message { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 16px; }
+.dialog__message { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 16px; white-space: pre-line; }
 .dialog label { font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 4px; }
 .dialog input, .dialog select {
   width: 100%; background: var(--bg); border: 1px solid var(--border-v);
@@ -709,6 +709,15 @@ body::before {
   background: var(--bg-elevated);
   border-color: var(--border-v);
   color: var(--text-muted);
+}
+.repo-action--deploy {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.repo-action--deploy:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 .toast {
@@ -1464,6 +1473,7 @@ body::before {
         <div class="repo-actions" aria-label="Repository actions">
           <button class="repo-action" id="btnGitCommit" disabled title="提交当前会话仓库的全部改动">提交代码</button>
           <button class="repo-action" id="btnGitPush" disabled title="推送当前会话分支到远端">推送远端</button>
+          <button class="repo-action repo-action--deploy" id="btnDeployDev" disabled title="将当前分支合并进 dev 并通过堡垒机部署 dev 环境（仅 creation-tool）">部署 dev</button>
         </div>
         <div class="quick-commands" id="quickCommands" aria-label="Quick commands"></div>
         <div class="input-wrap">
@@ -1572,6 +1582,7 @@ const commandMenu = $("#commandMenu");
 const quickCommands = $("#quickCommands");
 const btnGitCommit = $("#btnGitCommit");
 const btnGitPush = $("#btnGitPush");
+const btnDeployDev = $("#btnDeployDev");
 const toolbarTitle = $("#toolbarTitle");
 const panel = $("#panel");
 const panelBody = $("#panelBody");
@@ -3031,10 +3042,19 @@ async function loadSuggestedCommitMessage(fallback) {
   }
 }
 
+function isDeployableSession() {
+  const session = currentSessionInfo();
+  return session?.metadata?.repo_name === DEPLOY_DEV_REPO;
+}
+
 function updateRepoActionButtons() {
   const disabled = !state.activeSession || isSessionStreaming(state.activeSession) || state.repoActionRunning;
   if (btnGitCommit) btnGitCommit.disabled = disabled;
   if (btnGitPush) btnGitPush.disabled = disabled;
+  if (btnDeployDev) {
+    btnDeployDev.disabled = disabled || !isDeployableSession();
+    btnDeployDev.style.display = isDeployableSession() ? "" : "none";
+  }
 }
 
 function showToast(message, type = "info") {
@@ -3079,6 +3099,32 @@ async function pushActiveSession() {
     const result = await api("POST", `/sessions/${state.activeSession}/git/push`);
     showToast(gitActionMessage("push", result), "success");
   });
+}
+
+const DEPLOY_DEV_REPO = "creation-tool";
+const DEPLOY_DEV_COMMAND = "/deploy-creation-tool-dev";
+
+async function deployDevActiveSession() {
+  if (!state.activeSession) return showToast("Select or create a session first", "error");
+  if (!isDeployableSession()) {
+    return showToast(`部署 dev 仅支持 ${DEPLOY_DEV_REPO} 仓库的会话`, "error");
+  }
+  if (isSessionStreaming(state.activeSession)) {
+    return showToast("Wait for the running session to finish first", "error");
+  }
+  const session = currentSessionInfo();
+  const branch = session?.metadata?.branch || "当前分支";
+  const confirmed = await showConfirmDialog(
+    `将把分支 “${branch}” 合并进 dev，并通过堡垒机部署 dev 环境。\n\n` +
+    `· 合并冲突会在对话中通过提问让你确认\n` +
+    `· 仅操作 dev，绝不触碰 prod/master 生产环境\n\n` +
+    `确定开始部署？`,
+    { title: "部署 dev 环境", confirmLabel: "开始部署" }
+  );
+  if (!confirmed) return;
+  promptInput.value = DEPLOY_DEV_COMMAND;
+  resizePromptInput();
+  await sendPrompt();
 }
 
 async function runRepoAction(action) {
@@ -3956,6 +4002,7 @@ quickCommands.addEventListener("click", (e) => {
 });
 btnGitCommit.addEventListener("click", commitActiveSession);
 btnGitPush.addEventListener("click", pushActiveSession);
+btnDeployDev?.addEventListener("click", deployDevActiveSession);
 $("#btnClosePanel").addEventListener("click", closePanel);
 $("#themeToggle").addEventListener("click", toggleTheme);
 btnLogout.addEventListener("click", logout);
