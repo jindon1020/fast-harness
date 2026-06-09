@@ -1516,9 +1516,19 @@ function authHeaders() {
 }
 
 async function api(method, path, body) {
-  const opts = { method, headers: { "Content-Type": "application/json", ...authHeaders() } };
+  const opts = {
+    method,
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+  };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem("currentUserId");
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+  }
   if (!res.ok) throw new Error(await responseErrorMessage(res));
   return res.json();
 }
