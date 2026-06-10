@@ -17,6 +17,12 @@ repositories:
     default_branch: main
     enabled: true
 
+  - key: content-publish
+    name: content-publish
+    url: https://codeup.aliyun.com/64802395702c0cacad997dc6/backend/video-creation-tool/content-publish.git
+    default_branch: master
+    enabled: true
+
 users:
   - id: zhaojindong
     name: zhaojindong
