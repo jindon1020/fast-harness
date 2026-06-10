@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bug Fix Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,200..1000;1,9..40,200..1000&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/bug-fix/styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar__head">
+      <div class="brand"><span class="brand-mark">FH</span><span>Harness Console</span></div>
+    </div>
+    <nav class="nav">
+      <a href="/">Chat Console</a>
+      <a class="active" href="/bug-fix">Bug Fix Pipeline</a>
+    </nav>
+    <div class="pipeline-list" id="pipelineList"></div>
+    <div class="sidebar__foot">
+      <span class="user-label" id="userLabel"></span>
+      <button class="btn" id="btnTheme">Theme</button>
+      <button class="btn" id="btnLogout">Logout</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="toolbar">
+      <h1>测试环境 Bug 排查流水线</h1>
+      <div class="toolbar__actions">
+        <button class="btn" id="btnNewPipeline">新建</button>
+        <button class="btn" id="btnRefresh">Refresh</button>
+      </div>
+    </div>
+    <section class="create-view" id="createView">
+      <div class="create-copy">
+        <h2>提交测试环境 Bug</h2>
+        <p>先收集必要信息并强制指定目标 feature 分支。提交后会自动进入流水线，从根因分析开始推进。</p>
+      </div>
+      <section class="panel form-panel">
+        <div class="panel__head">
+          <span>Bug 信息</span>
+          <span class="hint">feature 分支必填</span>
+        </div>
+        <form class="form" id="pipelineForm">
+          <div class="grid-2">
+            <div class="field">
+              <label for="repoKey">仓库</label>
+              <select id="repoKey" required></select>
+            </div>
+            <div class="field">
+              <label for="targetBranch">目标修复分支</label>
+              <select id="targetBranch" required></select>
+              <div class="hint">只允许远端 feature/* 分支。</div>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="namespace">测试环境 namespace</label>
+              <input id="namespace" required placeholder="drama-dev">
+            </div>
+            <div class="field">
+              <label for="requestId">request_id</label>
+              <input id="requestId" placeholder="可选">
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="reviewerId">审批研发</label>
+              <select id="reviewerId" required></select>
+            </div>
+            <div class="field">
+              <label for="occurredAt">发生时间</label>
+              <input id="occurredAt" placeholder="可选">
+            </div>
+          </div>
+          <div class="field">
+            <label for="affectedApi">涉及接口</label>
+            <textarea id="affectedApi" required placeholder="HTTP method / path / 调用链"></textarea>
+          </div>
+          <div class="field">
+            <label for="problemDescription">问题描述</label>
+            <textarea id="problemDescription" required></textarea>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="expectedResult">预期结果</label>
+              <textarea id="expectedResult" required></textarea>
+            </div>
+            <div class="field">
+              <label for="actualResult">实际结果</label>
+              <textarea id="actualResult" required></textarea>
+            </div>
+          </div>
+          <div class="field">
+            <label for="regressionCurl">用例回归 curl</label>
+            <textarea id="regressionCurl" placeholder="可选，支持多条串联 curl"></textarea>
+          </div>
+          <div class="field">
+            <label for="affectedData">影响用户或数据 ID</label>
+            <textarea id="affectedData" placeholder="可选"></textarea>
+          </div>
+          <div class="field">
+            <label for="screenshotNotes">截图说明</label>
+            <textarea id="screenshotNotes" placeholder="可选，描述截图中的关键异常"></textarea>
+          </div>
+          <div class="field">
+            <label for="extraContext">补充信息</label>
+            <textarea id="extraContext" placeholder="可选"></textarea>
+          </div>
+          <button class="btn btn-primary" type="submit" id="btnCreate">创建流水线</button>
+        </form>
+      </section>
+    </section>
+
+    <section class="pipeline-view" id="pipelineView" hidden>
+      <section class="detail" id="detail"></section>
+      <section class="stage-output card">
+        <div class="stage-output__head">
+          <div>
+            <div class="stage-output__eyebrow">阶段输出</div>
+            <h2 id="outputTitle">请选择阶段</h2>
+          </div>
+          <button class="btn" id="btnReloadOutput">Reload</button>
+        </div>
+        <div class="stage-output__body" id="outputBody">
+          <div class="empty">点击阶段节点查看当前输出。</div>
+        </div>
+      </section>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<div class="modal-backdrop" id="approvalModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approvalModalTitle">
+    <div class="modal__head">
+      <h2 id="approvalModalTitle">审批意见</h2>
+      <button class="modal__close" id="btnApprovalClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="modal__body">
+      <label class="field" for="approvalComment">
+        <span id="approvalCommentLabel">审批意见（可选）</span>
+        <textarea id="approvalComment" rows="4" placeholder="填写给流水线和研发看的补充说明"></textarea>
+      </label>
+    </div>
+    <div class="modal__actions">
+      <button class="btn" id="btnApprovalCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="btnApprovalConfirm" type="button">确认</button>
+    </div>
+  </div>
+</div>
+<script src="/bug-fix/app.js" defer></script>
+</body>
+</html>

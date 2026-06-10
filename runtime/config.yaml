@@ -78,6 +78,11 @@ users:
       name: zhangxiang
       codeup_user: zhangxiang
       codeup_token_env: FAST_HARNESS_CODEUP_TOKEN_ZHANGXIANG
+  - id: reporter01
+    name: tester
+    password: reporter01
+    role: reporter
+    enabled: true
 
 # UI/stream display configuration for fast-harness runtime.
 stream:

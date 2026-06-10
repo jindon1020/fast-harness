@@ -58,6 +58,7 @@ class WorkspaceStore:
         repo_name: Optional[str] = None,
         branch: Optional[str] = None,
         user_id: Optional[str] = None,
+        git_user_id: Optional[str] = None,
     ) -> dict:
         ws_id = f"ws-{uuid.uuid4().hex[:10]}"
         ws_dir = Path(settings.workspace_root) / ws_id
@@ -93,6 +94,7 @@ class WorkspaceStore:
                     repo.get("name"),
                     repo.get("branch"),
                     user_id=record["user_id"],
+                    git_user_id=git_user_id,
                 )
         except Exception:
             self.delete(ws_id)
@@ -179,11 +181,13 @@ class WorkspaceStore:
         name: Optional[str] = None,
         branch: Optional[str] = None,
         user_id: Optional[str] = None,
+        git_user_id: Optional[str] = None,
     ) -> RepoInfo:
         record = self.get(ws_id)
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         owner_id = user_id or record.get("user_id") or settings.default_user_id
+        credential_user_id = git_user_id or owner_id
         ws_dir = Path(record["cwd"])
         repo_name = name or settings.default_project_repo_name
         if any(repo.get("name") == repo_name for repo in record.get("repos", [])):
@@ -194,7 +198,7 @@ class WorkspaceStore:
             source_dir=Path(settings.workspace_root) / ".sources",
             worktree_path=ws_dir / repo_name,
             branch=branch,
-            user_id=owner_id,
+            user_id=credential_user_id,
         )
 
         # Persist to workspace record
@@ -211,11 +215,13 @@ class WorkspaceStore:
         session_id: str,
         branch: str,
         user_id: Optional[str] = None,
+        git_user_id: Optional[str] = None,
     ) -> RepoInfo:
         record = self.get(ws_id)
         if not record:
             raise ValueError(f"Workspace not found: {ws_id}")
         owner_id = user_id or record.get("user_id") or settings.default_user_id
+        credential_user_id = git_user_id or owner_id
         repo_record = next(
             (repo for repo in record.get("repos", []) if repo.get("name") == repo_name),
             None,
@@ -229,7 +235,7 @@ class WorkspaceStore:
             source_dir=Path(settings.workspace_root) / ".sources",
             worktree_path=worktree_path,
             branch=branch,
-            user_id=owner_id,
+            user_id=credential_user_id,
         )
 
     def remove_session_worktree(self, repo_path: str | Path) -> None:

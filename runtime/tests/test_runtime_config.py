@@ -100,6 +100,11 @@ users:
     password: secret-2
     role: member
     enabled: false
+  - id: qa01
+    name: QA
+    password: secret-3
+    role: reporter
+    enabled: true
 """,
         encoding="utf-8",
     )
@@ -123,11 +128,28 @@ users:
                 "github_token_env": "",
                 "github_token": "",
             },
-        }
+        },
+        {
+            "id": "qa01",
+            "name": "QA",
+            "password": "secret-3",
+            "role": "reporter",
+            "enabled": True,
+            "git": {
+                "name": "QA",
+                "email": "",
+                "codeup_user": "qa01",
+                "codeup_token_env": "",
+                "codeup_token": "",
+                "github_token_env": "",
+                "github_token": "",
+            },
+        },
     ]
     assert settings.default_user_id == "zhaojindong"
     assert settings.get_user("zhaojindong")["name"] == "zhaojindong"
     assert settings.is_admin("zhaojindong") is True
+    assert settings.is_reporter("qa01") is True
 
     config._load_runtime_config.cache_clear()
 

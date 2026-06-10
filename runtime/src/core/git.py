@@ -313,6 +313,25 @@ def normalize_branch_name(branch: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def create_local_branch(repo_path: Path, branch: str, start_point: Optional[str] = None) -> str:
+    """Create or reset a local branch in an existing worktree."""
+    if not (repo_path / ".git").exists():
+        raise RuntimeError(f"Not a git repository: {repo_path}")
+    branch = normalize_branch_name(branch) or ""
+    if not branch:
+        raise RuntimeError("Branch is required")
+    rc, _stdout, stderr = _run(["git", "check-ref-format", "--branch", branch], repo_path, timeout=30)
+    if rc != 0:
+        raise RuntimeError(f"Invalid branch name: {_sanitize_git_output(stderr) or branch}")
+    cmd = ["git", "checkout", "-B", branch]
+    if start_point:
+        cmd.append(start_point)
+    rc, _stdout, stderr = _run(cmd, repo_path, timeout=60)
+    if rc != 0:
+        raise RuntimeError(f"Branch creation failed: {_sanitize_git_output(stderr)}")
+    return branch
+
+
 def _install_fast_harness_suite(repo_path: Path) -> None:
     """Install or refresh fast-harness project files inside a workspace worktree."""
     logger.info("Installing fast-harness suite in %s", repo_path)

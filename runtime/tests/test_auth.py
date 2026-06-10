@@ -55,6 +55,27 @@ def test_login_sets_cookie_and_allows_home():
     assert me.json()["user"]["id"] == "zhaojindong"
 
 
+def test_reporter_is_restricted_to_bug_fix_page_and_api():
+    client = TestClient(app)
+    user = auth.settings.get_user("reporter01")
+
+    login = client.post(
+        "/api/login",
+        json={"user_id": "reporter01", "password": user["password"]},
+    )
+    home = client.get("/", follow_redirects=False)
+    bug_fix = client.get("/bug-fix", follow_redirects=False)
+    blocked_api = client.get("/api/workspaces")
+    allowed_api = client.get("/api/bug-pipelines")
+
+    assert login.status_code == 200
+    assert home.status_code == 303
+    assert home.headers["location"] == "/bug-fix"
+    assert bug_fix.status_code == 200
+    assert blocked_api.status_code == 403
+    assert allowed_api.status_code == 200
+
+
 def test_users_endpoint_does_not_expose_passwords():
     client = TestClient(app)
 

@@ -57,6 +57,65 @@ class CommandHandlingTest(unittest.TestCase):
         self.assertIn(">fast-harness</span>", html)
         self.assertNotIn("sidebar__logo-dot", html)
 
+    def test_bug_fix_page_uses_split_frontend_assets(self):
+        ui_dir = Path(__file__).resolve().parents[1].joinpath("ui")
+        page = ui_dir.joinpath("bug-fix", "index.html").read_text()
+        styles = ui_dir.joinpath("bug-fix", "styles.css")
+        app = ui_dir.joinpath("bug-fix", "app.js")
+
+        self.assertTrue(styles.exists())
+        self.assertTrue(app.exists())
+        self.assertIn('<link rel="stylesheet" href="/bug-fix/styles.css">', page)
+        self.assertIn('<script src="/bug-fix/app.js" defer></script>', page)
+        self.assertNotIn("<style>", page)
+        self.assertNotIn("<script>", page)
+
+    def test_bug_fix_page_separates_create_and_pipeline_views(self):
+        ui_dir = Path(__file__).resolve().parents[1].joinpath("ui")
+        page = ui_dir.joinpath("bug-fix", "index.html").read_text()
+        styles = ui_dir.joinpath("bug-fix", "styles.css").read_text()
+        app = ui_dir.joinpath("bug-fix", "app.js").read_text()
+
+        self.assertIn('id="createView"', page)
+        self.assertIn('id="pipelineView"', page)
+        self.assertIn('id="outputBody"', page)
+        self.assertNotIn('<aside class="output"', page)
+        self.assertIn("function showCreateView", app)
+        self.assertIn("function showPipelineView", app)
+        self.assertIn("pipeline-track", styles)
+        self.assertIn("node-circle", styles)
+        self.assertIn("@keyframes spin", styles)
+        self.assertIn('id="approvalModal"', page)
+        self.assertIn("function openApprovalModal", app)
+        self.assertNotIn("window.prompt", app)
+
+    def test_bug_fix_stage_output_uses_artifact_summary_and_markdown(self):
+        ui_dir = Path(__file__).resolve().parents[1].joinpath("ui")
+        styles = ui_dir.joinpath("bug-fix", "styles.css").read_text()
+        app = ui_dir.joinpath("bug-fix", "app.js").read_text()
+
+        self.assertIn("const STEP_ARTIFACTS", app)
+        self.assertIn('root_cause: "diagnosis.md"', app)
+        self.assertIn('fix_plan: "fix_plan.md"', app)
+        self.assertIn("function buildIntakeMarkdown", app)
+        self.assertIn("function renderMarkdown", app)
+        self.assertIn("function renderStageOutput", app)
+        self.assertIn("阶段摘要", app)
+        self.assertIn("实时输出", app)
+        self.assertIn("markdown-body", styles)
+        self.assertIn(".stage-section__title", styles)
+
+    def test_chat_sidebar_shows_developer_bug_pipeline_approvals(self):
+        html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
+
+        self.assertIn('id="approvalSection"', html)
+        self.assertIn('id="approvalList"', html)
+        self.assertIn("function loadPendingApprovals", html)
+        self.assertIn('api("GET", "/bug-pipelines")', html)
+        self.assertIn("/artifacts/fix_plan.md", html)
+        self.assertIn("/approval", html)
+        self.assertIn("/bug-fix?pipeline=", html)
+
     def test_ui_nests_sessions_under_workspaces_and_uses_dialog_branch_select(self):
         html = Path(__file__).resolve().parents[1].joinpath("ui", "index.html").read_text()
 

@@ -7,6 +7,7 @@ import logging
 import re
 import uuid
 import asyncio
+import urllib.request
 from pathlib import Path
 from typing import Annotated
 
@@ -17,6 +18,11 @@ from starlette.responses import JSONResponse, Response
 from src.api.schemas import (
     AnswerRequest,
     AnswerResponse,
+    BugPipelineApprovalRequest,
+    BugPipelineCreateRequest,
+    BugPipelineListResponse,
+    BugPipelineResponse,
+    BugPipelineStepRunRequest,
     CurrentUserResponse,
     FeedbackRequest,
     FeedbackResponse,
@@ -53,6 +59,7 @@ from src.core.auth import (
     verify_session_token,
 )
 from src.core.git import (
+    create_local_branch as git_create_local_branch,
     checkout as git_checkout,
     commit_all as git_commit_all,
     commit_message_context,
@@ -62,6 +69,7 @@ from src.core.git import (
     status as git_status,
 )
 from src.core.agent import generate_commit_message, provide_answers, run_query_stream, resolve_session_repo_path
+from src.core.bug_pipeline import PIPELINE_STEPS, bug_pipeline_store
 from src.core.session import session_store
 from src.core.workspace import workspace_store
 from src.harness.registry import get_capabilities
@@ -338,6 +346,461 @@ async def repository_branches(repo_key: str, x_user_id: UserHeader = None):
         raise HTTPException(status_code=404, detail=str(e))
     branches = remote_branches(repo["url"], user_id=user_id)
     return {"branches": branches or [repo["default_branch"]]}
+
+
+# ═══════════════════════ Bug fix pipelines ═══════════════════════
+
+@router.post("/bug-pipelines", response_model=BugPipelineResponse, status_code=201)
+async def create_bug_pipeline(body: BugPipelineCreateRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_developer_user(body.reviewer_id)
+    repo = _repo_spec_from_config(body.repo_key, body.target_branch)
+    target_branch = _normalize_feature_branch(body.target_branch)
+    git_user_id = body.reviewer_id if settings.is_reporter(user_id) else user_id
+    _ensure_remote_feature_branch(repo["url"], target_branch, git_user_id)
+
+    pipeline_id = f"bug-{uuid.uuid4().hex[:10]}"
+    bugfix_branch = f"bugfix/{pipeline_id}-{_branch_slug(body.problem_description)}"
+    workspace_rec = workspace_store.create(
+        f"BugFix {pipeline_id}",
+        repositories=[{**repo, "branch": target_branch}],
+        user_id=user_id,
+        git_user_id=git_user_id,
+    )
+    sid = uuid.uuid4().hex[:12]
+    try:
+        session_repo = workspace_store.create_session_worktree(
+            workspace_rec["workspace_id"],
+            repo["name"],
+            sid,
+            target_branch,
+            user_id=user_id,
+            git_user_id=git_user_id,
+        )
+        bugfix_branch = git_create_local_branch(Path(session_repo.local_path), bugfix_branch)
+        session_workspace = Path(workspace_rec["cwd"]) / ".session-worktrees" / sid
+        session_store.create(
+            workspace_dir=str(session_workspace),
+            metadata={
+                "user_id": user_id,
+                "workspace_id": workspace_rec["workspace_id"],
+                "repo_name": repo["name"],
+                "branch": bugfix_branch,
+                "target_branch": target_branch,
+                "bug_pipeline_id": pipeline_id,
+                "session_repo_path": str(session_repo.local_path),
+            },
+            session_id=sid,
+            user_id=user_id,
+        )
+    except Exception:
+        local_path = getattr(locals().get("session_repo", None), "local_path", None)
+        if local_path:
+            workspace_store.remove_session_worktree(local_path)
+        workspace_store.delete(workspace_rec["workspace_id"])
+        raise
+
+    artifact_dir = Path(session_repo.local_path) / ".ai" / "dev-fix" / pipeline_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    record = bug_pipeline_store.create(
+        {
+            "pipeline_id": pipeline_id,
+            "user_id": user_id,
+            "reviewer_id": body.reviewer_id,
+            "repo_key": body.repo_key,
+            "repo_name": repo["name"],
+            "workspace_id": workspace_rec["workspace_id"],
+            "session_id": sid,
+            "target_branch": target_branch,
+            "bugfix_branch": bugfix_branch,
+            "namespace": body.namespace.strip(),
+            "request_id": _clean_optional(body.request_id),
+            "affected_api": body.affected_api.strip(),
+            "problem_description": body.problem_description.strip(),
+            "expected_result": body.expected_result.strip(),
+            "actual_result": body.actual_result.strip(),
+            "screenshot_notes": _clean_optional(body.screenshot_notes),
+            "occurred_at": _clean_optional(body.occurred_at),
+            "affected_data": _clean_optional(body.affected_data),
+            "regression_curl": _clean_optional(body.regression_curl),
+            "extra_context": _clean_optional(body.extra_context),
+            "artifact_dir": str(artifact_dir.relative_to(session_repo.local_path)),
+        }
+    )
+    _write_bug_report(record, Path(session_repo.local_path))
+    bug_pipeline_store.set_step(pipeline_id, "intake", "passed", "已生成结构化 bug_report.md")
+    bug_pipeline_store.append_event(
+        pipeline_id,
+        {"type": "created", "message": f"Created {bugfix_branch} from {target_branch}"},
+    )
+    asyncio.create_task(_start_bug_pipeline_step(pipeline_id, "root_cause"))
+    return BugPipelineResponse(**bug_pipeline_store.require(pipeline_id))
+
+
+@router.get("/bug-pipelines", response_model=BugPipelineListResponse)
+async def list_bug_pipelines(x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    records = [
+        record
+        for record in bug_pipeline_store.list_all()
+        if _can_view_pipeline(record, user_id)
+    ]
+    return BugPipelineListResponse(pipelines=[BugPipelineResponse(**record) for record in records])
+
+
+@router.get("/bug-pipelines/{pipeline_id}", response_model=BugPipelineResponse)
+async def get_bug_pipeline(pipeline_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    return BugPipelineResponse(**record)
+
+
+@router.get("/bug-pipelines/{pipeline_id}/artifacts/{artifact_name}")
+async def get_bug_pipeline_artifact(pipeline_id: str, artifact_name: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    allowed = {
+        "bug_report.md",
+        "diagnosis.md",
+        "fix_plan.md",
+        "changed_files.txt",
+        "implementation_notes.md",
+        "review_feedback.md",
+        "unit_test_results.md",
+        "regression_results.md",
+    }
+    if artifact_name not in allowed:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    repo_path = resolve_session_repo_path(record["session_id"]).resolve()
+    target = _artifact_path(record, repo_path, artifact_name).resolve()
+    if repo_path != target and repo_path not in target.parents:
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    if not target.exists() or not target.is_file():
+        return {"pipeline_id": pipeline_id, "artifact": artifact_name, "content": ""}
+    return {"pipeline_id": pipeline_id, "artifact": artifact_name, "content": target.read_text(encoding="utf-8")}
+
+
+@router.post("/bug-pipelines/{pipeline_id}/steps/{step}/run", response_model=BugPipelineResponse)
+async def run_bug_pipeline_step(
+    pipeline_id: str,
+    step: str,
+    body: BugPipelineStepRunRequest | None = None,
+    x_user_id: UserHeader = None,
+):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    if step not in PIPELINE_STEPS:
+        raise HTTPException(status_code=404, detail=f"Unknown pipeline step: {step}")
+    if step == "intake":
+        return BugPipelineResponse(**record)
+    if _is_query_active(record["session_id"]):
+        raise HTTPException(status_code=409, detail="Pipeline already has a running step")
+    _ensure_step_can_run(record, step)
+    updated = await _start_bug_pipeline_step(pipeline_id, step, body.note if body else None)
+    return BugPipelineResponse(**updated)
+
+
+@router.post("/bug-pipelines/{pipeline_id}/approval", response_model=BugPipelineResponse)
+async def approve_bug_pipeline(
+    pipeline_id: str,
+    body: BugPipelineApprovalRequest,
+    x_user_id: UserHeader = None,
+):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    _ensure_pipeline_approver(record, user_id)
+    if record.get("steps", {}).get("fix_plan", {}).get("status") != "waiting_approval":
+        raise HTTPException(status_code=409, detail="Pipeline is not waiting for plan approval")
+    approval_status = "approved" if body.approved else "rejected"
+    bug_pipeline_store.update(
+        pipeline_id,
+        {
+            "approval_status": approval_status,
+            "approval_comment": _clean_optional(body.comment),
+            "approved_by": user_id,
+        },
+    )
+    if body.approved:
+        updated = bug_pipeline_store.set_step(pipeline_id, "fix_plan", "passed", "研发已审批通过修复计划")
+        asyncio.create_task(_start_bug_pipeline_step(pipeline_id, "code_generation"))
+    else:
+        updated = bug_pipeline_store.set_step(pipeline_id, "fix_plan", "failed", "研发已拒绝修复计划")
+    bug_pipeline_store.append_event(
+        pipeline_id,
+        {"type": "approval", "approved": body.approved, "user_id": user_id, "comment": body.comment or ""},
+    )
+    return BugPipelineResponse(**bug_pipeline_store.require(pipeline_id))
+
+
+@router.get("/bug-pipelines/{pipeline_id}/stream")
+async def stream_bug_pipeline(pipeline_id: str, since: int = -1, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    return EventSourceResponse(_query_event_stream(record["session_id"], since=since))
+
+
+def _ensure_known_user(user_id: str) -> None:
+    try:
+        settings.get_user(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+def _ensure_developer_user(user_id: str) -> None:
+    try:
+        if settings.is_developer(user_id):
+            return
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    raise HTTPException(status_code=400, detail="审批研发必须是 member 或 admin 角色")
+
+
+def _normalize_feature_branch(branch: str) -> str:
+    value = branch.strip()
+    for prefix in ("origin/", "refs/heads/"):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+    if not value:
+        raise HTTPException(status_code=400, detail="目标 feature 分支不能为空")
+    if not value.startswith("feature/"):
+        raise HTTPException(status_code=400, detail="目标修复分支必须是 feature/* 远端分支")
+    return value
+
+
+def _ensure_remote_feature_branch(repo_url: str, branch: str, user_id: str) -> None:
+    branches = remote_branches(repo_url, user_id=user_id)
+    if branch not in branches:
+        raise HTTPException(status_code=400, detail=f"目标 feature 分支不存在于远端: {branch}")
+
+
+def _branch_slug(text: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", text.lower()).strip(".-")
+    return (slug[:32].strip(".-") or "fix")
+
+
+def _clean_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _can_view_pipeline(record: dict, user_id: str) -> bool:
+    return (
+        record.get("user_id") == user_id
+        or record.get("reviewer_id") == user_id
+        or settings.is_admin(user_id)
+    )
+
+
+def _ensure_pipeline_visible(pipeline_id: str, user_id: str) -> dict:
+    try:
+        record = bug_pipeline_store.require(pipeline_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not _can_view_pipeline(record, user_id):
+        raise HTTPException(status_code=404, detail="Bug pipeline not found")
+    return record
+
+
+def _ensure_pipeline_approver(record: dict, user_id: str) -> None:
+    if not settings.is_developer(user_id):
+        raise HTTPException(status_code=403, detail="Only developer roles can approve this plan")
+    if record.get("reviewer_id") == user_id or settings.is_admin(user_id):
+        return
+    raise HTTPException(status_code=403, detail="Only the assigned reviewer or admin can approve this plan")
+
+
+def _pipeline_session(record: dict) -> dict:
+    session = session_store.get(record["session_id"])
+    if not session:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+    return session
+
+
+def _ensure_step_can_run(record: dict, step: str) -> None:
+    steps = record.get("steps") or {}
+    index = PIPELINE_STEPS.index(step)
+    for previous in PIPELINE_STEPS[1:index]:
+        if steps.get(previous, {}).get("status") != "passed":
+            raise HTTPException(status_code=409, detail=f"Previous step is not passed: {previous}")
+    if step == "code_generation" and record.get("approval_status") != "approved":
+        raise HTTPException(status_code=409, detail="Fix plan must be approved before code generation")
+    if step == "code_generation" and int(record.get("review_retry_count") or 0) >= 3:
+        raise HTTPException(status_code=409, detail="Code review retry limit reached")
+
+
+async def _start_bug_pipeline_step(pipeline_id: str, step: str, note: str | None = None) -> dict:
+    record = bug_pipeline_store.require(pipeline_id)
+    if step not in PIPELINE_STEPS:
+        raise HTTPException(status_code=404, detail=f"Unknown pipeline step: {step}")
+    if _is_query_active(record["session_id"]):
+        return record
+    _ensure_step_can_run(record, step)
+    _checkout_session_branch(_pipeline_session(record))
+    prompt = _bug_pipeline_step_prompt(record, step, note)
+    query_body = QueryRequest(prompt=prompt, max_turns=settings.default_max_turns)
+    active = _ensure_query_started(record["session_id"], query_body)
+    updated = bug_pipeline_store.set_step(pipeline_id, step, "running")
+    asyncio.create_task(_finalize_bug_pipeline_step(pipeline_id, step, active.task))
+    return updated
+
+
+def _artifact_path(record: dict, repo_path: Path, name: str) -> Path:
+    return repo_path / record["artifact_dir"] / name
+
+
+def _write_bug_report(record: dict, repo_path: Path) -> None:
+    path = _artifact_path(record, repo_path, "bug_report.md")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# Bug Report: {record['pipeline_id']}",
+        "",
+        "## 基本信息",
+        f"- pipeline_id: `{record['pipeline_id']}`",
+        f"- namespace: `{record['namespace']}`",
+        f"- repo: `{record['repo_name']}`",
+        f"- target_branch: `{record['target_branch']}`",
+        f"- bugfix_branch: `{record['bugfix_branch']}`",
+        f"- reviewer_id: `{record['reviewer_id']}`",
+        "",
+        "## 问题描述",
+        record["problem_description"],
+        "",
+        "## 涉及接口",
+        record["affected_api"],
+        "",
+        "## 预期结果",
+        record["expected_result"],
+        "",
+        "## 实际结果",
+        record["actual_result"],
+    ]
+    optional_fields = [
+        ("request_id", "Request ID"),
+        ("occurred_at", "发生时间"),
+        ("affected_data", "影响用户或数据"),
+        ("screenshot_notes", "截图说明"),
+        ("regression_curl", "用例回归 Curl"),
+        ("extra_context", "补充信息"),
+    ]
+    for key, title in optional_fields:
+        value = record.get(key)
+        if value:
+            lines.extend(["", f"## {title}", value])
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _bug_pipeline_step_prompt(record: dict, step: str, note: str | None = None) -> str:
+    artifact_dir = record["artifact_dir"]
+    common = (
+        f"你正在执行 fast-harness 测试环境 bug dev-fix 流水线。\n"
+        f"Pipeline: {record['pipeline_id']}\n"
+        f"目标修复分支: {record['target_branch']}\n"
+        f"当前临时分支: {record['bugfix_branch']}\n"
+        f"测试环境 namespace: {record['namespace']}\n"
+        f"产物目录: {artifact_dir}\n"
+        f"Bug 报告: {artifact_dir}/bug_report.md\n"
+    )
+    if record.get("request_id"):
+        common += f"request_id: {record['request_id']}\n"
+    if note:
+        common += f"\n人工补充说明:\n{note}\n"
+
+    prompts = {
+        "root_cause": (
+            "请执行根因分析。结合 request_id/namespace 的测试环境日志、dev 环境观测信息和当前 feature 分支代码定位可能根因。"
+            "必要时只读查询数据库获取真实数据快照。禁止修改代码。"
+            f"输出写入 {artifact_dir}/diagnosis.md，结尾给出 VERDICT: PASS 或 VERDICT: FAIL。"
+        ),
+        "fix_plan": (
+            "请制定修复计划。先读取 .wiki/ 相关上下文；如果 .wiki 不存在，请明确标注缺少 codewiki 并基于代码上下文制定计划。"
+            f"输出写入 {artifact_dir}/fix_plan.md，内容包含根因摘要、修复范围、风险、测试策略。禁止修改代码。"
+        ),
+        "code_generation": (
+            "审批已通过。请基于修复计划执行最小化代码修复，只修改当前 bug 必要文件。"
+            f"完成后写入 {artifact_dir}/changed_files.txt 和 {artifact_dir}/implementation_notes.md，输出 VERDICT。"
+        ),
+        "code_review": (
+            "请只调用 code-reviewer-agent 执行常规代码审查，不执行安全审查。"
+            f"审查 bug_report、diagnosis、fix_plan 和本次 diff，结果写入 {artifact_dir}/review_feedback.md。"
+            "若有 Critical，输出 VERDICT: FAIL；否则输出 VERDICT: PASS。"
+        ),
+        "unit_test": (
+            "请基于本次变更接口生成并运行接口级单元测试。测试数据必须优先从 dev/本地真实数据库只读查询获得，禁止凭空编造 ID。"
+            f"测试代码和结果写入 {artifact_dir}/unit_test_results.md，输出 VERDICT。"
+        ),
+        "regression": (
+            "请根据 bug_report 中测试提供的 curl 串联命令执行用例回归；如果未提供 curl，请输出需要测试补充的 curl 清单并标记阻塞。"
+            f"结果写入 {artifact_dir}/regression_results.md，输出 VERDICT。"
+        ),
+    }
+    return common + "\n" + prompts[step]
+
+
+async def _finalize_bug_pipeline_step(pipeline_id: str, step: str, task: asyncio.Task | None) -> None:
+    if task:
+        try:
+            await task
+        except asyncio.CancelledError:
+            bug_pipeline_store.set_step(pipeline_id, step, "failed", "阶段已取消")
+            return
+    try:
+        if step == "fix_plan":
+            bug_pipeline_store.update(pipeline_id, {"approval_status": "waiting"})
+            bug_pipeline_store.set_step(pipeline_id, step, "waiting_approval", "修复计划已生成，等待研发审批")
+            await _send_plan_approval_webhook(bug_pipeline_store.require(pipeline_id))
+        else:
+            bug_pipeline_store.set_step(pipeline_id, step, "passed", "阶段执行完成，请查看输出详情")
+            next_step = _next_auto_step(step)
+            if next_step:
+                await _start_bug_pipeline_step(pipeline_id, next_step)
+    except Exception as exc:
+        logger.warning("Failed to finalize bug pipeline %s step %s: %s", pipeline_id, step, exc)
+
+
+def _next_auto_step(step: str) -> str | None:
+    if step == "root_cause":
+        return "fix_plan"
+    if step == "code_generation":
+        return "code_review"
+    if step == "code_review":
+        return "unit_test"
+    if step == "unit_test":
+        return "regression"
+    return None
+
+
+async def _send_plan_approval_webhook(record: dict) -> None:
+    if not settings.feishu_webhook_url:
+        bug_pipeline_store.append_event(record["pipeline_id"], {"type": "webhook_skipped", "message": "FEISHU_WEBHOOK_URL is not configured"})
+        return
+    text = (
+        f"Bug 修复计划待审批\n"
+        f"Pipeline: {record['pipeline_id']}\n"
+        f"Repo: {record['repo_name']}\n"
+        f"Target: {record['target_branch']}\n"
+        f"Bugfix: {record['bugfix_branch']}\n"
+        f"Namespace: {record['namespace']}\n"
+        f"请登录 fast-harness runtime 的 /bug-fix 页面审批。"
+    )
+    payload = json.dumps({"msg_type": "text", "content": {"text": text}}, ensure_ascii=False).encode("utf-8")
+
+    def _post() -> None:
+        req = urllib.request.Request(
+            settings.feishu_webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            response.read()
+
+    try:
+        await asyncio.to_thread(_post)
+        bug_pipeline_store.append_event(record["pipeline_id"], {"type": "webhook_sent", "message": "Feishu approval notification sent"})
+    except Exception as exc:
+        bug_pipeline_store.append_event(record["pipeline_id"], {"type": "webhook_failed", "message": str(exc)})
 
 
 # ═══════════════════════ Sessions ═══════════════════════

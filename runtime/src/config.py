@@ -95,7 +95,7 @@ def _user_configs() -> list[dict[str, Any]]:
         if user_id in seen_ids:
             raise ValueError(f"Duplicate user id: {user_id}")
         role = str(raw_user.get("role", "member")).strip().lower() or "member"
-        if role not in {"admin", "member"}:
+        if role not in {"admin", "member", "reporter"}:
             raise ValueError(f"user {user_id!r} has invalid role: {role}")
         seen_ids.add(user_id)
         normalized.append(
@@ -184,6 +184,7 @@ class Settings(BaseSettings):
     session_cleanup_days: int = 7
 
     log_level: str = "INFO"
+    feishu_webhook_url: str = ""
 
     @property
     def resolved_harness_path(self) -> Path:
@@ -267,6 +268,12 @@ class Settings(BaseSettings):
 
     def is_admin(self, user_id: str) -> bool:
         return self.get_user(user_id).get("role") == "admin"
+
+    def is_developer(self, user_id: str) -> bool:
+        return self.get_user(user_id).get("role") in {"admin", "member"}
+
+    def is_reporter(self, user_id: str) -> bool:
+        return self.get_user(user_id).get("role") == "reporter"
 
 
 settings = Settings()

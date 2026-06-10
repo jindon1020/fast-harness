@@ -71,6 +71,12 @@ async def require_login(request, call_next):
             return JSONResponse({"detail": "Not authenticated"}, status_code=401)
         return RedirectResponse(url="/login", status_code=303)
 
+    if _is_reporter_user(user_id):
+        if path.startswith("/api/") and not _is_reporter_api_path(path):
+            return JSONResponse({"detail": "Reporter role can only access bug-fix workflows"}, status_code=403)
+        if not path.startswith("/api/") and not _is_reporter_page_path(path):
+            return RedirectResponse(url="/bug-fix", status_code=303)
+
     headers = [
         (key, value)
         for key, value in request.scope.get("headers", [])
@@ -88,9 +94,37 @@ def _is_public_path(path: str) -> bool:
     )
 
 
+def _is_reporter_user(user_id: str) -> bool:
+    try:
+        return settings.is_reporter(user_id)
+    except ValueError:
+        return False
+
+
+def _is_reporter_page_path(path: str) -> bool:
+    return path in {"/bug-fix", "/bug-fix/"} or path.startswith("/bug-fix/")
+
+
+def _is_reporter_api_path(path: str) -> bool:
+    if path in {"/api/me", "/api/logout"}:
+        return True
+    if path.startswith("/api/users") or path.startswith("/api/repositories"):
+        return True
+    if path.startswith("/api/bug-pipelines"):
+        return True
+    if path.startswith("/api/sessions/"):
+        return True
+    return False
+
+
 @app.get("/login", include_in_schema=False)
 async def login_page():
     return FileResponse(Path(__file__).resolve().parent.parent / "ui" / "login.html")
+
+
+@app.get("/bug-fix", include_in_schema=False)
+async def bug_fix_page():
+    return FileResponse(Path(__file__).resolve().parent.parent / "ui" / "bug-fix" / "index.html")
 
 # Serve UI static files
 ui_dir = Path(__file__).resolve().parent.parent / "ui"

@@ -93,6 +93,32 @@ class WorkspaceRepoAddRequest(BaseModel):
     branch: str | None = Field(default=None)
 
 
+class BugPipelineCreateRequest(BaseModel):
+    repo_key: str = Field(..., min_length=1)
+    target_branch: str = Field(..., min_length=1, description="Remote feature branch to fix from")
+    namespace: str = Field(..., min_length=1)
+    affected_api: str = Field(..., min_length=1, max_length=2000)
+    problem_description: str = Field(..., min_length=1, max_length=10000)
+    expected_result: str = Field(..., min_length=1, max_length=5000)
+    actual_result: str = Field(..., min_length=1, max_length=5000)
+    reviewer_id: str = Field(..., min_length=1)
+    request_id: str | None = Field(default=None, max_length=500)
+    screenshot_notes: str | None = Field(default=None, max_length=2000)
+    occurred_at: str | None = Field(default=None, max_length=500)
+    affected_data: str | None = Field(default=None, max_length=5000)
+    regression_curl: str | None = Field(default=None, max_length=20000)
+    extra_context: str | None = Field(default=None, max_length=10000)
+
+
+class BugPipelineStepRunRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=5000)
+
+
+class BugPipelineApprovalRequest(BaseModel):
+    approved: bool
+    comment: str | None = Field(default=None, max_length=5000)
+
+
 class UserInfo(BaseModel):
     id: str
     name: str
@@ -165,6 +191,45 @@ class WorkspaceResponse(BaseModel):
     created_at: str
     updated_at: str
     user_id: str | None = Field(default=None)
+
+
+class BugPipelineStepInfo(BaseModel):
+    id: str
+    title: str
+    status: str
+    attempts: int = 0
+    started_at: str | None = None
+    completed_at: str | None = None
+    summary: str = ""
+
+
+class BugPipelineResponse(BaseModel):
+    pipeline_id: str
+    status: str
+    approval_status: str
+    user_id: str
+    reviewer_id: str
+    repo_key: str
+    repo_name: str
+    workspace_id: str
+    session_id: str
+    target_branch: str
+    bugfix_branch: str
+    namespace: str
+    request_id: str | None = None
+    affected_api: str
+    problem_description: str
+    expected_result: str
+    actual_result: str
+    artifact_dir: str
+    steps: dict[str, BugPipelineStepInfo]
+    events: list[dict] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class BugPipelineListResponse(BaseModel):
+    pipelines: list[BugPipelineResponse]
 
 
 class WorkspaceListResponse(BaseModel):
