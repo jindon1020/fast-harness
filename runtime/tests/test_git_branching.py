@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from src.core import git
 
 
@@ -205,6 +207,49 @@ def test_configure_worktree_identity_uses_user_git_config(monkeypatch, tmp_path)
     assert "password='secret'" in helper_commands[0][4]
 
 
+def test_configure_worktree_identity_falls_back_to_global_codeup_token(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+
+    def fake_get_user(user_id):
+        assert user_id == "alice"
+        return {
+            "id": "alice",
+            "name": "Alice",
+            "git": {
+                "name": "Alice Z",
+                "codeup_user": "alice-codeup",
+                "codeup_token_env": "MISSING_ALICE_CODEUP_TOKEN",
+                "codeup_token": "",
+            },
+        }
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "settings", SimpleNamespace(
+        get_user=fake_get_user,
+        git_github_token="",
+        git_codeup_user="fallback-user",
+        git_codeup_token="global secret",
+        git_ssh_key_path="",
+        git_default_branch="main",
+    ))
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    git.configure_worktree_identity(repo_path, user_id="alice")
+
+    helper_commands = [
+        cmd for cmd, cwd in commands
+        if cwd == repo_path and cmd[:4] == ["git", "config", "--worktree", "credential.helper"]
+    ]
+    assert len(helper_commands) == 1
+    assert "username='alice-codeup'" in helper_commands[0][4]
+    assert "password='global secret'" in helper_commands[0][4]
+
+
 def test_configure_worktree_identity_uses_fallback_email(monkeypatch, tmp_path):
     repo_path = tmp_path / "app"
     (repo_path / ".git").mkdir(parents=True)
@@ -274,7 +319,7 @@ def test_commit_all_returns_clean_without_commit(monkeypatch, tmp_path):
     assert ["git", "commit", "-m", "nothing to do"] not in commands
 
 
-def test_push_uses_authenticated_url_for_current_user(monkeypatch, tmp_path):
+def test_push_uses_origin_with_worktree_credentials(monkeypatch, tmp_path):
     repo_path = tmp_path / "app"
     (repo_path / ".git").mkdir(parents=True)
     commands = []
@@ -291,9 +336,7 @@ def test_push_uses_authenticated_url_for_current_user(monkeypatch, tmp_path):
 
     def fake_run(cmd, cwd, timeout=120):
         commands.append((cmd, cwd))
-        if cmd == ["git", "remote", "get-url", "origin"]:
-            return 0, "https://codeup.aliyun.com/group/app.git", ""
-        if cmd == ["git", "push", "https://alice-codeup:secret%20token@codeup.aliyun.com/group/app.git", "HEAD:refs/heads/feature/x"]:
+        if cmd == ["git", "push", "origin", "HEAD:refs/heads/feature/x"]:
             return 0, "", "pushed"
         return 0, "", ""
 
@@ -312,9 +355,89 @@ def test_push_uses_authenticated_url_for_current_user(monkeypatch, tmp_path):
     assert result.status == "pushed"
     assert result.branch == "feature/x"
     assert (
-        ["git", "push", "https://alice-codeup:secret%20token@codeup.aliyun.com/group/app.git", "HEAD:refs/heads/feature/x"],
+        ["git", "push", "origin", "HEAD:refs/heads/feature/x"],
         repo_path,
     ) in commands
+
+
+def test_push_rebases_and_retries_when_remote_is_ahead(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+    push_attempts = 0
+
+    def fake_get_user(user_id):
+        return {"id": user_id, "name": "Alice", "git": {}}
+
+    def fake_run(cmd, cwd, timeout=120):
+        nonlocal push_attempts
+        commands.append((cmd, cwd))
+        if cmd == ["git", "push", "origin", "HEAD:refs/heads/feature/x"]:
+            push_attempts += 1
+            if push_attempts == 1:
+                return 1, "", "failed to push some refs\nnon-fast-forward"
+            return 0, "pushed", ""
+        if cmd == ["git", "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"]:
+            return 0, "fetched", ""
+        if cmd == ["git", "rebase", "--autostash", "origin/feature/x"]:
+            return 0, "rebased", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "settings", SimpleNamespace(
+        get_user=fake_get_user,
+        git_github_token="",
+        git_codeup_user="",
+        git_codeup_token="",
+        git_ssh_key_path="",
+        git_default_branch="main",
+    ))
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    result = git.push(repo_path, branch="feature/x", user_id="alice")
+
+    assert result.status == "pushed"
+    assert push_attempts == 2
+    assert (
+        ["git", "rebase", "--autostash", "origin/feature/x"],
+        repo_path,
+    ) in commands
+    assert "Rebased onto remote branch before push." in result.stdout
+
+
+def test_push_aborts_rebase_when_auto_sync_conflicts(monkeypatch, tmp_path):
+    repo_path = tmp_path / "app"
+    (repo_path / ".git").mkdir(parents=True)
+    commands = []
+
+    def fake_get_user(user_id):
+        return {"id": user_id, "name": "Alice", "git": {}}
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd))
+        if cmd == ["git", "push", "origin", "HEAD:refs/heads/feature/x"]:
+            return 1, "", "failed to push some refs\nnon-fast-forward"
+        if cmd == ["git", "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"]:
+            return 0, "fetched", ""
+        if cmd == ["git", "rebase", "--autostash", "origin/feature/x"]:
+            return 1, "", "CONFLICT (content): Merge conflict"
+        if cmd == ["git", "rebase", "--abort"]:
+            return 0, "", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "settings", SimpleNamespace(
+        get_user=fake_get_user,
+        git_github_token="",
+        git_codeup_user="",
+        git_codeup_token="",
+        git_ssh_key_path="",
+        git_default_branch="main",
+    ))
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    with pytest.raises(RuntimeError, match="automatic rebase conflicted"):
+        git.push(repo_path, branch="feature/x", user_id="alice")
+
+    assert (["git", "rebase", "--abort"], repo_path) in commands
 
 
 def test_create_worktree_installs_fast_harness_suite_after_worktree_add(monkeypatch, tmp_path):
@@ -346,6 +469,31 @@ def test_create_worktree_installs_fast_harness_suite_after_worktree_add(monkeypa
     assert "install.sh" in commands[install][0][2]
     assert "--force" in commands[install][0][2]
     assert "--local" in commands[install][0][2]
+
+
+def test_create_worktree_can_skip_fast_harness_install(monkeypatch, tmp_path):
+    commands = []
+    worktree_path = tmp_path / "ws-1" / "app"
+
+    def fake_run(cmd, cwd, timeout=120):
+        commands.append((cmd, cwd, timeout))
+        return 0, "", ""
+
+    monkeypatch.setattr(git, "_run", fake_run)
+
+    git.create_worktree(
+        url="https://example.com/app.git",
+        source_dir=tmp_path / ".sources",
+        worktree_path=worktree_path,
+        branch="feature/x",
+        install_harness=False,
+    )
+
+    assert any(
+        cmd == ["git", "worktree", "add", str(worktree_path), "origin/feature/x"]
+        for cmd, _cwd, _timeout in commands
+    )
+    assert not any(cmd[:2] == ["bash", "-lc"] and cwd == worktree_path for cmd, cwd, _timeout in commands)
 
 
 def test_create_worktree_removes_worktree_when_fast_harness_install_fails(monkeypatch, tmp_path):

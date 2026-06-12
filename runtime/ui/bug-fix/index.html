@@ -16,14 +16,17 @@
       <div class="brand"><span class="brand-mark">FH</span><span>Harness Console</span></div>
     </div>
     <nav class="nav">
-      <a href="/">Chat Console</a>
-      <a class="active" href="/bug-fix">Bug Fix Pipeline</a>
+      <a href="/" id="chatNavLink">返回聊天工作台</a>
     </nav>
+    <div class="sidebar__create">
+      <button class="sidebar-new-button" id="btnSidebarNewPipeline" type="button">新增 Bug 会话</button>
+    </div>
+    <div class="sidebar__section-label">历史会话</div>
     <div class="pipeline-list" id="pipelineList"></div>
     <div class="sidebar__foot">
       <span class="user-label" id="userLabel"></span>
-      <button class="btn" id="btnTheme">Theme</button>
-      <button class="btn" id="btnLogout">Logout</button>
+      <button class="btn" id="btnTheme">主题</button>
+      <button class="btn" id="btnLogout">退出</button>
     </div>
   </aside>
 
@@ -32,24 +35,33 @@
       <h1>测试环境 Bug 排查流水线</h1>
       <div class="toolbar__actions">
         <button class="btn" id="btnNewPipeline">新建</button>
-        <button class="btn" id="btnRefresh">Refresh</button>
+        <button class="btn" id="btnRefresh">刷新</button>
       </div>
     </div>
     <section class="create-view" id="createView">
       <div class="create-copy">
         <h2>提交测试环境 Bug</h2>
-        <p>先收集必要信息并强制指定目标 feature 分支。提交后会自动进入流水线，从根因分析开始推进。</p>
+        <p>指定一个主修复仓库和目标 feature 分支；跨服务调用可追加关联仓库，Agent 会读取这些仓库的 dev/观测分支代码辅助根因分析。</p>
       </div>
       <section class="panel form-panel">
         <div class="panel__head">
           <span>Bug 信息</span>
-          <span class="hint">feature 分支必填</span>
+          <span class="hint">主修复分支必填</span>
         </div>
         <form class="form" id="pipelineForm">
+          <div class="form-section">
+            <div class="form-section__head">
+              <div>
+                <div class="form-section__kicker">01</div>
+                <h3>修复目标</h3>
+              </div>
+              <span class="hint">直接修改并推送目标 feature 分支</span>
+            </div>
           <div class="grid-2">
             <div class="field">
-              <label for="repoKey">仓库</label>
+              <label for="repoKey">主修复仓库</label>
               <select id="repoKey" required></select>
+              <div class="hint hint--placeholder">占位</div>
             </div>
             <div class="field">
               <label for="targetBranch">目标修复分支</label>
@@ -63,27 +75,69 @@
               <input id="namespace" required placeholder="drama-dev">
             </div>
             <div class="field">
-              <label for="requestId">request_id</label>
-              <input id="requestId" placeholder="可选">
+              <label for="reviewerId">审批研发</label>
+              <select id="reviewerId" required></select>
             </div>
           </div>
           <div class="grid-2">
             <div class="field">
-              <label for="reviewerId">审批研发</label>
-              <select id="reviewerId" required></select>
+              <label for="primaryCorrelationName">主仓库关联 ID 类型</label>
+              <input id="primaryCorrelationName" value="request_id" placeholder="request_id">
             </div>
             <div class="field">
-              <label for="occurredAt">发生时间</label>
-              <input id="occurredAt" placeholder="可选">
+              <label for="requestId">主仓库关联 ID 值</label>
+              <input id="requestId" placeholder="例如 request_id，可选">
+            </div>
+          </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section__head">
+              <div>
+                <div class="form-section__kicker">02</div>
+                <h3>关联仓库排查上下文</h3>
+              </div>
+              <button class="btn" id="btnAddRepoContext" type="button">添加仓库</button>
+            </div>
+            <div class="hint">用于跨服务调用链排查。关联仓库默认读取配置的 dev/default 分支，不参与代码修复。</div>
+            <div class="repo-context-list" id="repoContextList"></div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section__head">
+              <div>
+                <div class="form-section__kicker">03</div>
+                <h3>Bug 现象</h3>
+              </div>
+            </div>
+            <div class="grid-2">
+            <div class="field">
+              <label for="occurredAt">发生时间范围</label>
+              <select id="occurredAt">
+                <option value="">可选</option>
+                <option value="近 1 小时">近 1 小时</option>
+                <option value="近 3 小时">近 3 小时</option>
+                <option value="近 6 小时">近 6 小时</option>
+                <option value="近 12 小时">近 12 小时</option>
+                <option value="近 24 小时">近 24 小时</option>
+                <option value="近 2 天">近 2 天</option>
+                <option value="近 3 天">近 3 天</option>
+              </select>
+              <div class="hint">用于后续日志检索的时间范围参考。</div>
+            </div>
+            <div class="field">
+              <label for="affectedData">当前登录用户ID</label>
+              <input id="affectedData" placeholder="可选，用于按用户维度排查日志和数据">
+              <div class="hint hint--placeholder">占位</div>
             </div>
           </div>
           <div class="field">
-            <label for="affectedApi">涉及接口</label>
-            <textarea id="affectedApi" required placeholder="HTTP method / path / 调用链"></textarea>
+            <label for="affectedApi">涉及接口 / 调用链</label>
+            <textarea id="affectedApi" required placeholder="例如：GET /projects/list -> algo-manager task callback"></textarea>
           </div>
           <div class="field">
             <label for="problemDescription">问题描述</label>
-            <textarea id="problemDescription" required></textarea>
+            <textarea id="problemDescription" required placeholder="用一句话说明用户看到的异常和触发条件"></textarea>
           </div>
           <div class="grid-2">
             <div class="field">
@@ -95,21 +149,36 @@
               <textarea id="actualResult" required></textarea>
             </div>
           </div>
-          <div class="field">
-            <label for="regressionCurl">用例回归 curl</label>
-            <textarea id="regressionCurl" placeholder="可选，支持多条串联 curl"></textarea>
           </div>
-          <div class="field">
-            <label for="affectedData">影响用户或数据 ID</label>
-            <textarea id="affectedData" placeholder="可选"></textarea>
-          </div>
-          <div class="field">
-            <label for="screenshotNotes">截图说明</label>
-            <textarea id="screenshotNotes" placeholder="可选，描述截图中的关键异常"></textarea>
-          </div>
-          <div class="field">
-            <label for="extraContext">补充信息</label>
-            <textarea id="extraContext" placeholder="可选"></textarea>
+
+          <div class="form-section">
+            <div class="form-section__head">
+              <div>
+                <div class="form-section__kicker">04</div>
+                <h3>回归与补充</h3>
+              </div>
+            </div>
+            <div class="field">
+              <label for="regressionCurl">用例回归 curl</label>
+              <textarea id="regressionCurl" placeholder="可选，支持多条串联 curl"></textarea>
+            </div>
+            <div class="field">
+              <label for="screenshotNotes">截图说明</label>
+              <textarea id="screenshotNotes" placeholder="可选，描述截图中的关键异常"></textarea>
+            </div>
+            <div class="screenshot-uploader" id="screenshotDropzone" tabindex="0">
+              <input id="screenshotInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+              <div class="screenshot-uploader__copy">
+                <strong>问题截图</strong>
+                <span>支持 Ctrl+V 粘贴、拖拽图片，或从本地选择上传。</span>
+              </div>
+              <button class="btn" id="btnSelectScreenshots" type="button">上传截图</button>
+            </div>
+            <div class="screenshot-preview" id="screenshotPreview"></div>
+            <div class="field">
+              <label for="extraContext">补充信息</label>
+              <textarea id="extraContext" placeholder="可选"></textarea>
+            </div>
           </div>
           <button class="btn btn-primary" type="submit" id="btnCreate">创建流水线</button>
         </form>
@@ -149,6 +218,44 @@
     <div class="modal__actions">
       <button class="btn" id="btnApprovalCancel" type="button">取消</button>
       <button class="btn btn-primary" id="btnApprovalConfirm" type="button">确认</button>
+    </div>
+  </div>
+</div>
+<div class="modal-backdrop" id="commitModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="commitModalTitle">
+    <div class="modal__head">
+      <h2 id="commitModalTitle">代码提交</h2>
+      <button class="modal__close" id="btnCommitClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="modal__body">
+      <label class="field" for="commitMessage">
+        <span>提交信息</span>
+        <textarea id="commitMessage" rows="5" placeholder="描述本次 bugfix 改动"></textarea>
+      </label>
+      <div class="hint">提交会发生在目标 feature 分支上，推送后直接更新远端同名分支。</div>
+    </div>
+    <div class="modal__actions">
+      <button class="btn" id="btnCommitCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="btnCommitConfirm" type="button">确认提交</button>
+    </div>
+  </div>
+</div>
+<div class="modal-backdrop" id="pipelineSessionModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pipelineSessionModalTitle">
+    <div class="modal__head">
+      <h2 id="pipelineSessionModalTitle">流水线会话</h2>
+      <button class="modal__close" id="btnPipelineSessionClose" type="button" aria-label="关闭">×</button>
+    </div>
+    <div class="modal__body">
+      <label class="field" id="pipelineSessionNameField" for="pipelineSessionName">
+        <span>会话名称</span>
+        <input id="pipelineSessionName" placeholder="输入新的会话名称">
+      </label>
+      <div class="hint" id="pipelineSessionMessage"></div>
+    </div>
+    <div class="modal__actions">
+      <button class="btn" id="btnPipelineSessionCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="btnPipelineSessionConfirm" type="button">确认</button>
     </div>
   </div>
 </div>

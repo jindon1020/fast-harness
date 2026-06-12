@@ -2,6 +2,7 @@
 REST API routes for the fast-harness runtime service.
 """
 
+import base64
 import json
 import logging
 import re
@@ -23,6 +24,7 @@ from src.api.schemas import (
     BugPipelineListResponse,
     BugPipelineResponse,
     BugPipelineStepRunRequest,
+    BugPipelineTerminateRequest,
     CurrentUserResponse,
     FeedbackRequest,
     FeedbackResponse,
@@ -59,7 +61,6 @@ from src.core.auth import (
     verify_session_token,
 )
 from src.core.git import (
-    create_local_branch as git_create_local_branch,
     checkout as git_checkout,
     commit_all as git_commit_all,
     commit_message_context,
@@ -78,6 +79,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 FEEDBACK_PATH = Path(__file__).resolve().parents[2] / "feedback.md"
+SKIPPABLE_BUG_STEPS = {"code_review", "unit_test", "regression"}
+STEP_COMPLETE_STATUSES = {"passed", "skipped"}
 
 UserHeader = Annotated[str | None, Header(alias="X-User-Id")]
 SessionCookie = Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)]
@@ -354,72 +357,108 @@ async def repository_branches(repo_key: str, x_user_id: UserHeader = None):
 async def create_bug_pipeline(body: BugPipelineCreateRequest, x_user_id: UserHeader = None):
     user_id = _current_user_id(x_user_id)
     _ensure_developer_user(body.reviewer_id)
-    repo = _repo_spec_from_config(body.repo_key, body.target_branch)
     target_branch = _normalize_feature_branch(body.target_branch)
     git_user_id = body.reviewer_id if settings.is_reporter(user_id) else user_id
+    repo_contexts = _build_bug_repo_contexts(body, target_branch)
+    primary_context = repo_contexts[0]
+    repo = _repo_spec_from_config(primary_context["repo_key"], target_branch)
     _ensure_remote_feature_branch(repo["url"], target_branch, git_user_id)
+    for context in repo_contexts[1:]:
+        _ensure_remote_branch(context["url"], context["branch"], git_user_id)
 
     pipeline_id = f"bug-{uuid.uuid4().hex[:10]}"
-    bugfix_branch = f"bugfix/{pipeline_id}-{_branch_slug(body.problem_description)}"
     workspace_rec = workspace_store.create(
         f"BugFix {pipeline_id}",
-        repositories=[{**repo, "branch": target_branch}],
+        repositories=[
+            {
+                "key": context["repo_key"],
+                "name": context["repo_name"],
+                "url": context["url"],
+                "branch": context["branch"],
+                "install_harness": False,
+            }
+            for context in repo_contexts
+        ],
         user_id=user_id,
         git_user_id=git_user_id,
     )
     sid = uuid.uuid4().hex[:12]
+    session_repos = []
     try:
         session_repo = workspace_store.create_session_worktree(
             workspace_rec["workspace_id"],
-            repo["name"],
+            primary_context["repo_name"],
             sid,
             target_branch,
             user_id=user_id,
             git_user_id=git_user_id,
+            install_harness=True,
         )
-        bugfix_branch = git_create_local_branch(Path(session_repo.local_path), bugfix_branch)
+        session_repos.append(session_repo)
+        for context in repo_contexts[1:]:
+            related_repo = workspace_store.create_session_worktree(
+                workspace_rec["workspace_id"],
+                context["repo_name"],
+                sid,
+                context["branch"],
+                user_id=user_id,
+                git_user_id=git_user_id,
+                install_harness=False,
+            )
+            session_repos.append(related_repo)
+            context["local_path"] = str(related_repo.local_path)
+        primary_context["local_path"] = str(session_repo.local_path)
         session_workspace = Path(workspace_rec["cwd"]) / ".session-worktrees" / sid
         session_store.create(
             workspace_dir=str(session_workspace),
             metadata={
                 "user_id": user_id,
                 "workspace_id": workspace_rec["workspace_id"],
-                "repo_name": repo["name"],
-                "branch": bugfix_branch,
+                "repo_name": primary_context["repo_name"],
+                "branch": target_branch,
                 "target_branch": target_branch,
                 "bug_pipeline_id": pipeline_id,
+                "git_user_id": git_user_id,
                 "session_repo_path": str(session_repo.local_path),
+                "related_repo_paths": {
+                    context["repo_name"]: context.get("local_path")
+                    for context in repo_contexts[1:]
+                },
             },
             session_id=sid,
             user_id=user_id,
         )
     except Exception:
-        local_path = getattr(locals().get("session_repo", None), "local_path", None)
-        if local_path:
-            workspace_store.remove_session_worktree(local_path)
+        for created_repo in session_repos:
+            workspace_store.remove_session_worktree(created_repo.local_path)
         workspace_store.delete(workspace_rec["workspace_id"])
         raise
 
     artifact_dir = Path(session_repo.local_path) / ".ai" / "dev-fix" / pipeline_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    screenshot_attachments = _save_bug_screenshots(body, artifact_dir, Path(session_repo.local_path))
     record = bug_pipeline_store.create(
         {
             "pipeline_id": pipeline_id,
+            "code_approval_status": "not_required",
             "user_id": user_id,
             "reviewer_id": body.reviewer_id,
             "repo_key": body.repo_key,
-            "repo_name": repo["name"],
+            "repo_name": primary_context["repo_name"],
+            "repo_contexts": _public_repo_contexts(repo_contexts),
             "workspace_id": workspace_rec["workspace_id"],
             "session_id": sid,
             "target_branch": target_branch,
-            "bugfix_branch": bugfix_branch,
+            "bugfix_branch": target_branch,
+            "git_user_id": git_user_id,
             "namespace": body.namespace.strip(),
-            "request_id": _clean_optional(body.request_id),
+            "request_id": primary_context.get("correlation_id_value") or _clean_optional(body.request_id),
             "affected_api": body.affected_api.strip(),
             "problem_description": body.problem_description.strip(),
             "expected_result": body.expected_result.strip(),
             "actual_result": body.actual_result.strip(),
             "screenshot_notes": _clean_optional(body.screenshot_notes),
+            "screenshot_attachments": screenshot_attachments,
             "occurred_at": _clean_optional(body.occurred_at),
             "affected_data": _clean_optional(body.affected_data),
             "regression_curl": _clean_optional(body.regression_curl),
@@ -431,7 +470,7 @@ async def create_bug_pipeline(body: BugPipelineCreateRequest, x_user_id: UserHea
     bug_pipeline_store.set_step(pipeline_id, "intake", "passed", "已生成结构化 bug_report.md")
     bug_pipeline_store.append_event(
         pipeline_id,
-        {"type": "created", "message": f"Created {bugfix_branch} from {target_branch}"},
+        {"type": "created", "message": f"Pipeline will modify and push target branch {target_branch}"},
     )
     asyncio.create_task(_start_bug_pipeline_step(pipeline_id, "root_cause"))
     return BugPipelineResponse(**bug_pipeline_store.require(pipeline_id))
@@ -453,6 +492,29 @@ async def get_bug_pipeline(pipeline_id: str, x_user_id: UserHeader = None):
     user_id = _current_user_id(x_user_id)
     record = _ensure_pipeline_visible(pipeline_id, user_id)
     return BugPipelineResponse(**record)
+
+
+@router.patch("/bug-pipelines/{pipeline_id}", response_model=BugPipelineResponse)
+async def rename_bug_pipeline(pipeline_id: str, body: RenameRequest, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    _ensure_pipeline_visible(pipeline_id, user_id)
+    record = bug_pipeline_store.rename(pipeline_id, body.name)
+    bug_pipeline_store.append_event(
+        pipeline_id,
+        {"type": "rename", "user_id": user_id, "name": body.name.strip()},
+    )
+    return BugPipelineResponse(**bug_pipeline_store.require(pipeline_id))
+
+
+@router.delete("/bug-pipelines/{pipeline_id}")
+async def delete_bug_pipeline(pipeline_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    if _is_query_active(record["session_id"]):
+        raise HTTPException(status_code=409, detail="Pipeline already has a running step")
+    session_store.delete(record["session_id"])
+    bug_pipeline_store.delete(pipeline_id)
+    return {"status": "deleted", "pipeline_id": pipeline_id}
 
 
 @router.get("/bug-pipelines/{pipeline_id}/artifacts/{artifact_name}")
@@ -480,6 +542,29 @@ async def get_bug_pipeline_artifact(pipeline_id: str, artifact_name: str, x_user
     return {"pipeline_id": pipeline_id, "artifact": artifact_name, "content": target.read_text(encoding="utf-8")}
 
 
+@router.get("/bug-pipelines/{pipeline_id}/screenshots/{filename}")
+async def get_bug_pipeline_screenshot(pipeline_id: str, filename: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    attachment = next(
+        (
+            item
+            for item in record.get("screenshot_attachments") or []
+            if Path(str(item.get("path", ""))).name == filename
+        ),
+        None,
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    repo_path = resolve_session_repo_path(record["session_id"]).resolve()
+    target = (repo_path / attachment["path"]).resolve()
+    if repo_path != target and repo_path not in target.parents:
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return Response(content=target.read_bytes(), media_type=attachment.get("mime_type") or "application/octet-stream")
+
+
 @router.post("/bug-pipelines/{pipeline_id}/steps/{step}/run", response_model=BugPipelineResponse)
 async def run_bug_pipeline_step(
     pipeline_id: str,
@@ -498,6 +583,43 @@ async def run_bug_pipeline_step(
     _ensure_step_can_run(record, step)
     updated = await _start_bug_pipeline_step(pipeline_id, step, body.note if body else None)
     return BugPipelineResponse(**updated)
+
+
+@router.post("/bug-pipelines/{pipeline_id}/steps/{step}/skip", response_model=BugPipelineResponse)
+async def skip_bug_pipeline_step(
+    pipeline_id: str,
+    step: str,
+    body: BugPipelineStepRunRequest | None = None,
+    x_user_id: UserHeader = None,
+):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    _ensure_pipeline_terminator(record, user_id)
+    if step not in SKIPPABLE_BUG_STEPS:
+        raise HTTPException(status_code=400, detail="Only code review, unit test, and regression steps can be skipped")
+    _ensure_step_can_run(record, step)
+    current_status = record.get("steps", {}).get(step, {}).get("status")
+    if current_status in STEP_COMPLETE_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Step is already complete: {step}")
+    if _is_query_active(record["session_id"]):
+        running_step = _running_bug_step(record)
+        if running_step != step:
+            raise HTTPException(status_code=409, detail="Pipeline already has another running step")
+        active = _active_queries.get(record["session_id"])
+        if active and active.task and not active.task.done():
+            active.task.cancel()
+    reason = _clean_optional(body.note if body else None) or "人工跳过该阶段"
+    updated = bug_pipeline_store.set_step(pipeline_id, step, "skipped", reason)
+    bug_pipeline_store.append_event(
+        pipeline_id,
+        {"type": "step_skipped", "step": step, "user_id": user_id, "reason": reason},
+    )
+    next_step = _next_auto_step(step)
+    if next_step:
+        refreshed = bug_pipeline_store.require(pipeline_id)
+        if refreshed.get("steps", {}).get(next_step, {}).get("status") == "pending":
+            asyncio.create_task(_start_bug_pipeline_step(pipeline_id, next_step))
+    return BugPipelineResponse(**bug_pipeline_store.require(pipeline_id))
 
 
 @router.post("/bug-pipelines/{pipeline_id}/approval", response_model=BugPipelineResponse)
@@ -530,6 +652,123 @@ async def approve_bug_pipeline(
         {"type": "approval", "approved": body.approved, "user_id": user_id, "comment": body.comment or ""},
     )
     return BugPipelineResponse(**bug_pipeline_store.require(pipeline_id))
+
+
+@router.post("/bug-pipelines/{pipeline_id}/terminate", response_model=BugPipelineResponse)
+async def terminate_bug_pipeline(
+    pipeline_id: str,
+    body: BugPipelineTerminateRequest | None = None,
+    x_user_id: UserHeader = None,
+):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    _ensure_pipeline_terminator(record, user_id)
+    if record.get("status") in {"passed", "failed", "terminated"}:
+        raise HTTPException(status_code=409, detail="Pipeline is already finished")
+    active = _active_queries.get(record["session_id"])
+    if active and active.task and not active.task.done():
+        active.task.cancel()
+    reason = _clean_optional(body.reason if body else None) or "测试确认无需继续修复"
+    updated = bug_pipeline_store.terminate(pipeline_id, user_id, reason)
+    bug_pipeline_store.append_event(
+        pipeline_id,
+        {"type": "terminated", "user_id": user_id, "reason": reason},
+    )
+    return BugPipelineResponse(**bug_pipeline_store.require(pipeline_id))
+
+
+@router.post("/bug-pipelines/{pipeline_id}/code-approval", response_model=BugPipelineResponse)
+async def approve_bug_pipeline_code(
+    pipeline_id: str,
+    body: BugPipelineApprovalRequest,
+    x_user_id: UserHeader = None,
+):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    _ensure_pipeline_developer_operator(record, user_id)
+    _ensure_pipeline_code_ready(record)
+    code_approval_status = "approved" if body.approved else "rejected"
+    updated = bug_pipeline_store.update(
+        pipeline_id,
+        {
+            "code_approval_status": code_approval_status,
+            "code_approval_comment": _clean_optional(body.comment),
+            "code_approved_by": user_id,
+        },
+    )
+    bug_pipeline_store.append_event(
+        pipeline_id,
+        {"type": "code_approval", "approved": body.approved, "user_id": user_id, "comment": body.comment or ""},
+    )
+    return BugPipelineResponse(**updated)
+
+
+@router.get("/bug-pipelines/{pipeline_id}/git/commit-message", response_model=GitCommitMessageResponse)
+async def suggest_bug_pipeline_commit_message(pipeline_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    _ensure_pipeline_developer_operator(record, user_id)
+    _ensure_pipeline_code_ready(record)
+    if _is_query_active(record["session_id"]):
+        raise HTTPException(status_code=409, detail="Pipeline already has a running step")
+    repo_path = resolve_session_repo_path(record["session_id"]).resolve()
+    try:
+        context = commit_message_context(repo_path)
+        if not context:
+            return GitCommitMessageResponse(message=_fallback_bug_commit_message(record), generated=False)
+        message = await generate_commit_message(repo_path, context)
+        return GitCommitMessageResponse(message=message, generated=True)
+    except RuntimeError as e:
+        logger.warning("AI commit message generation failed for bug pipeline %s: %s", pipeline_id, e)
+        return GitCommitMessageResponse(message=_fallback_bug_commit_message(record), generated=False)
+
+
+@router.post("/bug-pipelines/{pipeline_id}/git/commit", response_model=GitActionResponse)
+async def commit_bug_pipeline_changes(
+    pipeline_id: str,
+    body: GitCommitRequest,
+    x_user_id: UserHeader = None,
+):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    _ensure_pipeline_developer_operator(record, user_id)
+    _ensure_pipeline_code_ready(record)
+    _ensure_pipeline_code_approved(record)
+    if _is_query_active(record["session_id"]):
+        raise HTTPException(status_code=409, detail="Pipeline already has a running step")
+    try:
+        repo_path = resolve_session_repo_path(record["session_id"]).resolve()
+        git_user_id = record.get("git_user_id") or record.get("reviewer_id") or user_id
+        result = git_commit_all(repo_path, body.message, user_id=git_user_id)
+        bug_pipeline_store.append_event(
+            pipeline_id,
+            {"type": "git_commit", "user_id": user_id, "status": result.status, "branch": result.branch},
+        )
+        return GitActionResponse(**result.to_dict())
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bug-pipelines/{pipeline_id}/git/push", response_model=GitActionResponse)
+async def push_bug_pipeline_changes(pipeline_id: str, x_user_id: UserHeader = None):
+    user_id = _current_user_id(x_user_id)
+    record = _ensure_pipeline_visible(pipeline_id, user_id)
+    _ensure_pipeline_developer_operator(record, user_id)
+    _ensure_pipeline_code_ready(record)
+    _ensure_pipeline_code_approved(record)
+    if _is_query_active(record["session_id"]):
+        raise HTTPException(status_code=409, detail="Pipeline already has a running step")
+    try:
+        repo_path = resolve_session_repo_path(record["session_id"]).resolve()
+        git_user_id = record.get("git_user_id") or record.get("reviewer_id") or user_id
+        result = git_push(repo_path, branch=record.get("target_branch"), user_id=git_user_id)
+        bug_pipeline_store.append_event(
+            pipeline_id,
+            {"type": "git_push", "user_id": user_id, "status": result.status, "branch": result.branch},
+        )
+        return GitActionResponse(**result.to_dict())
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/bug-pipelines/{pipeline_id}/stream")
@@ -573,6 +812,75 @@ def _ensure_remote_feature_branch(repo_url: str, branch: str, user_id: str) -> N
         raise HTTPException(status_code=400, detail=f"目标 feature 分支不存在于远端: {branch}")
 
 
+def _ensure_remote_branch(repo_url: str, branch: str, user_id: str) -> None:
+    branches = remote_branches(repo_url, user_id=user_id)
+    if branch not in branches:
+        raise HTTPException(status_code=400, detail=f"关联仓库分支不存在于远端: {branch}")
+
+
+def _build_bug_repo_contexts(body: BugPipelineCreateRequest, target_branch: str) -> list[dict]:
+    contexts = body.repo_contexts or []
+    by_repo_key = {context.repo_key: context for context in contexts}
+    primary_input = by_repo_key.get(body.repo_key)
+    primary_correlation_name = _clean_optional(primary_input.correlation_id_name if primary_input else None) or "request_id"
+    primary_correlation_value = _clean_optional(primary_input.correlation_id_value if primary_input else None) or _clean_optional(body.request_id)
+    try:
+        primary_repo = settings.get_repository(body.repo_key)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    result = [
+        {
+            "repo_key": primary_repo["key"],
+            "repo_name": primary_repo["name"],
+            "url": primary_repo["url"],
+            "branch": target_branch,
+            "role": "fix",
+            "correlation_id_name": primary_correlation_name,
+            "correlation_id_value": primary_correlation_value,
+            "note": _clean_optional(primary_input.note if primary_input else None),
+        }
+    ]
+    seen = {body.repo_key}
+    for context in contexts:
+        if context.repo_key in seen:
+            continue
+        try:
+            repo = settings.get_repository(context.repo_key)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        branch = _clean_optional(context.branch) or repo["default_branch"]
+        result.append(
+            {
+                "repo_key": repo["key"],
+                "repo_name": repo["name"],
+                "url": repo["url"],
+                "branch": branch,
+                "role": "observe",
+                "correlation_id_name": _clean_optional(context.correlation_id_name),
+                "correlation_id_value": _clean_optional(context.correlation_id_value),
+                "note": _clean_optional(context.note),
+            }
+        )
+        seen.add(context.repo_key)
+    return result
+
+
+def _public_repo_contexts(contexts: list[dict]) -> list[dict]:
+    return [
+        {
+            "repo_key": context["repo_key"],
+            "repo_name": context["repo_name"],
+            "branch": context["branch"],
+            "role": context["role"],
+            "correlation_id_name": context.get("correlation_id_name"),
+            "correlation_id_value": context.get("correlation_id_value"),
+            "note": context.get("note"),
+            "local_path": context.get("local_path"),
+        }
+        for context in contexts
+    ]
+
+
 def _branch_slug(text: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", text.lower()).strip(".-")
     return (slug[:32].strip(".-") or "fix")
@@ -611,6 +919,32 @@ def _ensure_pipeline_approver(record: dict, user_id: str) -> None:
     raise HTTPException(status_code=403, detail="Only the assigned reviewer or admin can approve this plan")
 
 
+def _ensure_pipeline_terminator(record: dict, user_id: str) -> None:
+    if record.get("user_id") == user_id or record.get("reviewer_id") == user_id or settings.is_admin(user_id):
+        return
+    raise HTTPException(status_code=403, detail="Only the reporter, assigned reviewer, or admin can terminate this pipeline")
+
+
+def _ensure_pipeline_developer_operator(record: dict, user_id: str) -> None:
+    if not settings.is_developer(user_id):
+        raise HTTPException(status_code=403, detail="Only developer roles can operate bugfix code")
+    if record.get("reviewer_id") == user_id or settings.is_admin(user_id):
+        return
+    raise HTTPException(status_code=403, detail="Only the assigned reviewer or admin can operate this bugfix code")
+
+
+def _ensure_pipeline_code_ready(record: dict) -> None:
+    if record.get("status") == "terminated":
+        raise HTTPException(status_code=409, detail="Bug pipeline has been terminated")
+    if record.get("steps", {}).get("regression", {}).get("status") not in STEP_COMPLETE_STATUSES:
+        raise HTTPException(status_code=409, detail="Bug pipeline must pass regression before code approval")
+
+
+def _ensure_pipeline_code_approved(record: dict) -> None:
+    if record.get("code_approval_status") != "approved":
+        raise HTTPException(status_code=409, detail="Bugfix code must be approved before commit or push")
+
+
 def _pipeline_session(record: dict) -> dict:
     session = session_store.get(record["session_id"])
     if not session:
@@ -619,15 +953,24 @@ def _pipeline_session(record: dict) -> dict:
 
 
 def _ensure_step_can_run(record: dict, step: str) -> None:
+    if record.get("status") == "terminated":
+        raise HTTPException(status_code=409, detail="Pipeline has been terminated")
     steps = record.get("steps") or {}
     index = PIPELINE_STEPS.index(step)
     for previous in PIPELINE_STEPS[1:index]:
-        if steps.get(previous, {}).get("status") != "passed":
+        if steps.get(previous, {}).get("status") not in STEP_COMPLETE_STATUSES:
             raise HTTPException(status_code=409, detail=f"Previous step is not passed: {previous}")
     if step == "code_generation" and record.get("approval_status") != "approved":
         raise HTTPException(status_code=409, detail="Fix plan must be approved before code generation")
     if step == "code_generation" and int(record.get("review_retry_count") or 0) >= 3:
         raise HTTPException(status_code=409, detail="Code review retry limit reached")
+
+
+def _running_bug_step(record: dict) -> str | None:
+    for step, info in (record.get("steps") or {}).items():
+        if info.get("status") == "running":
+            return step
+    return None
 
 
 async def _start_bug_pipeline_step(pipeline_id: str, step: str, note: str | None = None) -> dict:
@@ -659,27 +1002,45 @@ def _write_bug_report(record: dict, repo_path: Path) -> None:
         "## 基本信息",
         f"- pipeline_id: `{record['pipeline_id']}`",
         f"- namespace: `{record['namespace']}`",
-        f"- repo: `{record['repo_name']}`",
+        f"- 主修复仓库: `{record['repo_name']}`",
         f"- target_branch: `{record['target_branch']}`",
-        f"- bugfix_branch: `{record['bugfix_branch']}`",
+        f"- push_branch: `{record['target_branch']}`",
         f"- reviewer_id: `{record['reviewer_id']}`",
-        "",
-        "## 问题描述",
-        record["problem_description"],
-        "",
-        "## 涉及接口",
-        record["affected_api"],
-        "",
-        "## 预期结果",
-        record["expected_result"],
-        "",
-        "## 实际结果",
-        record["actual_result"],
     ]
+    repo_contexts = record.get("repo_contexts") or []
+    if repo_contexts:
+        lines.extend(["", "## 仓库上下文"])
+        for context in repo_contexts:
+            correlation_name = context.get("correlation_id_name") or "关联 ID"
+            correlation_value = context.get("correlation_id_value") or "未提供"
+            local_path = context.get("local_path") or ""
+            lines.append(
+                f"- `{context.get('repo_name')}` ({context.get('role')}): "
+                f"branch `{context.get('branch')}`, {correlation_name} `{correlation_value}`"
+                + (f", path `{local_path}`" if local_path else "")
+            )
+            if context.get("note"):
+                lines.append(f"  - 说明: {context['note']}")
+    lines.extend(
+        [
+            "",
+            "## 问题描述",
+            record["problem_description"],
+            "",
+            "## 涉及接口",
+            record["affected_api"],
+            "",
+            "## 预期结果",
+            record["expected_result"],
+            "",
+            "## 实际结果",
+            record["actual_result"],
+        ]
+    )
     optional_fields = [
         ("request_id", "Request ID"),
-        ("occurred_at", "发生时间"),
-        ("affected_data", "影响用户或数据"),
+        ("occurred_at", "发生时间范围"),
+        ("affected_data", "当前登录用户ID"),
         ("screenshot_notes", "截图说明"),
         ("regression_curl", "用例回归 Curl"),
         ("extra_context", "补充信息"),
@@ -688,34 +1049,90 @@ def _write_bug_report(record: dict, repo_path: Path) -> None:
         value = record.get(key)
         if value:
             lines.extend(["", f"## {title}", value])
+    attachments = record.get("screenshot_attachments") or []
+    if attachments:
+        lines.extend(["", "## 问题截图"])
+        for attachment in attachments:
+            name = attachment.get("name") or Path(str(attachment.get("path", ""))).name
+            path_value = attachment.get("path") or ""
+            lines.append(f"- {name}: `{path_value}`")
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _save_bug_screenshots(body: BugPipelineCreateRequest, artifact_dir: Path, repo_path: Path) -> list[dict]:
+    attachments = []
+    screenshots_dir = artifact_dir / "screenshots"
+    for index, image in enumerate(body.screenshot_images or [], start=1):
+        suffix = _image_suffix(image.mime_type)
+        original_name = Path(image.name or f"screenshot-{index}{suffix}").name
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(original_name).stem).strip(".-") or "screenshot"
+        filename = f"{index:02d}-{safe_stem}{suffix}"
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+        target = screenshots_dir / filename
+        data = base64.b64decode(image.data)
+        target.write_bytes(data)
+        attachments.append(
+            {
+                "name": original_name,
+                "mime_type": image.mime_type,
+                "size": image.size or len(data),
+                "path": str(target.relative_to(repo_path)),
+            }
+        )
+    return attachments
+
+
+def _image_suffix(mime_type: str) -> str:
+    return {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }.get(mime_type, ".img")
 
 
 def _bug_pipeline_step_prompt(record: dict, step: str, note: str | None = None) -> str:
     artifact_dir = record["artifact_dir"]
+    repo_context_lines = []
+    for context in record.get("repo_contexts") or []:
+        correlation = ""
+        if context.get("correlation_id_name") or context.get("correlation_id_value"):
+            correlation = f", {context.get('correlation_id_name') or '关联 ID'}={context.get('correlation_id_value') or '未提供'}"
+        local_path = context.get("local_path") or "未记录"
+        repo_context_lines.append(
+            f"- {context.get('repo_name')} [{context.get('role')}]: branch={context.get('branch')}, path={local_path}{correlation}"
+        )
     common = (
         f"你正在执行 fast-harness 测试环境 bug dev-fix 流水线。\n"
         f"Pipeline: {record['pipeline_id']}\n"
+        f"主修复仓库: {record['repo_name']}\n"
         f"目标修复分支: {record['target_branch']}\n"
-        f"当前临时分支: {record['bugfix_branch']}\n"
+        f"当前修复分支: {record['target_branch']}\n"
         f"测试环境 namespace: {record['namespace']}\n"
         f"产物目录: {artifact_dir}\n"
         f"Bug 报告: {artifact_dir}/bug_report.md\n"
+        "仓库上下文:\n"
+        + ("\n".join(repo_context_lines) if repo_context_lines else "- 未提供关联仓库\n")
+        + "\n约束: 只有 role=fix 的主仓库允许代码修改；role=observe 的关联仓库只用于查看 dev/观测分支代码、日志关联和调用链分析，禁止修改。\n"
     )
     if record.get("request_id"):
         common += f"request_id: {record['request_id']}\n"
+    if record.get("screenshot_attachments"):
+        paths = "\n".join(f"- {item.get('path')}" for item in record["screenshot_attachments"])
+        common += f"问题截图附件:\n{paths}\n"
     if note:
         common += f"\n人工补充说明:\n{note}\n"
 
     prompts = {
         "root_cause": (
-            "请执行根因分析。结合 request_id/namespace 的测试环境日志、dev 环境观测信息和当前 feature 分支代码定位可能根因。"
+            "请执行根因分析。结合各仓库配置的关联 ID（例如 request_id/task_id）、namespace 的测试环境日志、dev 环境观测信息、"
+            "主修复仓库 feature 分支代码以及关联仓库 dev/观测分支代码定位跨服务调用链根因。"
             "必要时只读查询数据库获取真实数据快照。禁止修改代码。"
             f"输出写入 {artifact_dir}/diagnosis.md，结尾给出 VERDICT: PASS 或 VERDICT: FAIL。"
         ),
         "fix_plan": (
-            "请制定修复计划。先读取 .wiki/ 相关上下文；如果 .wiki 不存在，请明确标注缺少 codewiki 并基于代码上下文制定计划。"
-            f"输出写入 {artifact_dir}/fix_plan.md，内容包含根因摘要、修复范围、风险、测试策略。禁止修改代码。"
+            "请制定修复计划。先读取主修复仓库和关联仓库可用的 .wiki/ 上下文；如果 .wiki 不存在，请明确标注缺少 codewiki 并基于代码上下文制定计划。"
+            f"输出写入 {artifact_dir}/fix_plan.md，内容包含跨仓库调用链判断、根因摘要、主仓库修复范围、关联仓库影响、风险、测试策略。禁止修改代码。"
         ),
         "code_generation": (
             "审批已通过。请基于修复计划执行最小化代码修复，只修改当前 bug 必要文件。"
@@ -743,9 +1160,15 @@ async def _finalize_bug_pipeline_step(pipeline_id: str, step: str, task: asyncio
         try:
             await task
         except asyncio.CancelledError:
+            current = bug_pipeline_store.require(pipeline_id)
+            if current.get("status") == "terminated" or current.get("steps", {}).get(step, {}).get("status") == "skipped":
+                return
             bug_pipeline_store.set_step(pipeline_id, step, "failed", "阶段已取消")
             return
     try:
+        current = bug_pipeline_store.require(pipeline_id)
+        if current.get("status") == "terminated" or current.get("steps", {}).get(step, {}).get("status") == "skipped":
+            return
         if step == "fix_plan":
             bug_pipeline_store.update(pipeline_id, {"approval_status": "waiting"})
             bug_pipeline_store.set_step(pipeline_id, step, "waiting_approval", "修复计划已生成，等待研发审批")
@@ -780,7 +1203,7 @@ async def _send_plan_approval_webhook(record: dict) -> None:
         f"Pipeline: {record['pipeline_id']}\n"
         f"Repo: {record['repo_name']}\n"
         f"Target: {record['target_branch']}\n"
-        f"Bugfix: {record['bugfix_branch']}\n"
+        f"Push branch: {record['target_branch']}\n"
         f"Namespace: {record['namespace']}\n"
         f"请登录 fast-harness runtime 的 /bug-fix 页面审批。"
     )
@@ -1024,6 +1447,12 @@ async def push_session_changes(session_id: str, x_user_id: UserHeader = None):
 def _fallback_commit_message(session: dict) -> str:
     repo = session.get("metadata", {}).get("repo_name") or "code"
     return f"Update {repo}"
+
+
+def _fallback_bug_commit_message(record: dict) -> str:
+    repo = record.get("repo_name") or record.get("repo_key") or "code"
+    description = _branch_slug(record.get("problem_description") or "bugfix").replace("-", " ")
+    return f"Fix {repo} bug: {description}"
 
 
 @router.delete("/sessions/{session_id}")

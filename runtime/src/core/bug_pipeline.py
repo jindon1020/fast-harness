@@ -34,6 +34,7 @@ STEP_TITLES = {
 }
 
 TERMINAL_STEP_STATUSES = {"passed", "failed", "skipped", "waiting_approval"}
+COMPLETE_STEP_STATUSES = {"passed", "skipped"}
 
 
 class BugPipelineStore:
@@ -92,6 +93,14 @@ class BugPipelineStore:
         self._write(record)
         return record
 
+    def rename(self, pipeline_id: str, name: str) -> dict[str, Any]:
+        return self.update(pipeline_id, {"display_name": name.strip()})
+
+    def delete(self, pipeline_id: str) -> None:
+        path = self._path(pipeline_id)
+        if path.exists():
+            path.unlink()
+
     def set_step(self, pipeline_id: str, step: str, status: str, summary: str = "") -> dict[str, Any]:
         record = self.require(pipeline_id)
         if step not in PIPELINE_STEPS:
@@ -108,6 +117,21 @@ class BugPipelineStore:
         if summary:
             item["summary"] = summary
         record["status"] = _pipeline_status(record)
+        record["updated_at"] = _now()
+        self._write(record)
+        return record
+
+    def terminate(self, pipeline_id: str, user_id: str, reason: str = "") -> dict[str, Any]:
+        record = self.require(pipeline_id)
+        for step in record.get("steps", {}).values():
+            if step.get("status") in {"pending", "running", "waiting_approval"}:
+                step["status"] = "skipped"
+                step["completed_at"] = _now()
+                if reason:
+                    step["summary"] = "流水线已终止"
+        record["status"] = "terminated"
+        record["terminated_by"] = user_id
+        record["termination_reason"] = reason
         record["updated_at"] = _now()
         self._write(record)
         return record
@@ -134,6 +158,8 @@ class BugPipelineStore:
 
 
 def _pipeline_status(record: dict[str, Any]) -> str:
+    if record.get("status") == "terminated":
+        return "terminated"
     steps = record.get("steps") or {}
     if any(step.get("status") == "running" for step in steps.values()):
         return "running"
@@ -141,7 +167,7 @@ def _pipeline_status(record: dict[str, Any]) -> str:
         return "waiting_approval"
     if any(step.get("status") == "failed" for step in steps.values()):
         return "failed"
-    if steps and all(step.get("status") == "passed" for step in steps.values()):
+    if steps and all(step.get("status") in COMPLETE_STEP_STATUSES for step in steps.values()):
         return "passed"
     return "pending"
 

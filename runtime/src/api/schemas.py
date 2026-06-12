@@ -93,6 +93,15 @@ class WorkspaceRepoAddRequest(BaseModel):
     branch: str | None = Field(default=None)
 
 
+class BugPipelineRepoContext(BaseModel):
+    repo_key: str = Field(..., min_length=1)
+    branch: str | None = Field(default=None, min_length=1)
+    role: str = Field(default="observe", description="fix or observe")
+    correlation_id_name: str | None = Field(default=None, max_length=100)
+    correlation_id_value: str | None = Field(default=None, max_length=500)
+    note: str | None = Field(default=None, max_length=1000)
+
+
 class BugPipelineCreateRequest(BaseModel):
     repo_key: str = Field(..., min_length=1)
     target_branch: str = Field(..., min_length=1, description="Remote feature branch to fix from")
@@ -104,14 +113,20 @@ class BugPipelineCreateRequest(BaseModel):
     reviewer_id: str = Field(..., min_length=1)
     request_id: str | None = Field(default=None, max_length=500)
     screenshot_notes: str | None = Field(default=None, max_length=2000)
+    screenshot_images: list[QueryImageAttachment] = Field(default_factory=list, max_length=MAX_QUERY_IMAGES)
     occurred_at: str | None = Field(default=None, max_length=500)
     affected_data: str | None = Field(default=None, max_length=5000)
     regression_curl: str | None = Field(default=None, max_length=20000)
     extra_context: str | None = Field(default=None, max_length=10000)
+    repo_contexts: list[BugPipelineRepoContext] | None = Field(default=None, max_length=8)
 
 
 class BugPipelineStepRunRequest(BaseModel):
     note: str | None = Field(default=None, max_length=5000)
+
+
+class BugPipelineTerminateRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=5000)
 
 
 class BugPipelineApprovalRequest(BaseModel):
@@ -205,8 +220,14 @@ class BugPipelineStepInfo(BaseModel):
 
 class BugPipelineResponse(BaseModel):
     pipeline_id: str
+    display_name: str | None = None
     status: str
     approval_status: str
+    code_approval_status: str = "not_required"
+    code_approval_comment: str | None = None
+    code_approved_by: str | None = None
+    terminated_by: str | None = None
+    termination_reason: str | None = None
     user_id: str
     reviewer_id: str
     repo_key: str
@@ -217,10 +238,17 @@ class BugPipelineResponse(BaseModel):
     bugfix_branch: str
     namespace: str
     request_id: str | None = None
+    repo_contexts: list[dict] = Field(default_factory=list)
     affected_api: str
     problem_description: str
     expected_result: str
     actual_result: str
+    screenshot_notes: str | None = None
+    screenshot_attachments: list[dict] = Field(default_factory=list)
+    occurred_at: str | None = None
+    affected_data: str | None = None
+    regression_curl: str | None = None
+    extra_context: str | None = None
     artifact_dir: str
     steps: dict[str, BugPipelineStepInfo]
     events: list[dict] = Field(default_factory=list)

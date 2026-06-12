@@ -95,6 +95,7 @@ class WorkspaceStore:
                     repo.get("branch"),
                     user_id=record["user_id"],
                     git_user_id=git_user_id,
+                    install_harness=repo.get("install_harness", True),
                 )
         except Exception:
             self.delete(ws_id)
@@ -182,6 +183,7 @@ class WorkspaceStore:
         branch: Optional[str] = None,
         user_id: Optional[str] = None,
         git_user_id: Optional[str] = None,
+        install_harness: bool = True,
     ) -> RepoInfo:
         record = self.get(ws_id)
         if not record:
@@ -199,6 +201,7 @@ class WorkspaceStore:
             worktree_path=ws_dir / repo_name,
             branch=branch,
             user_id=credential_user_id,
+            install_harness=install_harness,
         )
 
         # Persist to workspace record
@@ -216,6 +219,7 @@ class WorkspaceStore:
         branch: str,
         user_id: Optional[str] = None,
         git_user_id: Optional[str] = None,
+        install_harness: bool = True,
     ) -> RepoInfo:
         record = self.get(ws_id)
         if not record:
@@ -236,6 +240,7 @@ class WorkspaceStore:
             worktree_path=worktree_path,
             branch=branch,
             user_id=credential_user_id,
+            install_harness=install_harness,
         )
 
     def remove_session_worktree(self, repo_path: str | Path) -> None:

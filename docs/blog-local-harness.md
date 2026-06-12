@@ -20,7 +20,7 @@
 - 让线上 trace_id 能一键进入排障链路；
 - 让每次执行结果反过来改进 Harness 本身。
 
-![影视创作工具平台 AI Coding Harness](../images/film-platform-harness-practice.png)
+![影视创作工具平台 AI Coding Harness](images/film-platform-harness-practice.png)
 
 ## 二、第一步不是写 Prompt，而是建设团队共享上下文
 
@@ -73,7 +73,7 @@ Code Wiki 的定位不是给人看的项目文档，而是给 Agent 消费的工
 5. 结合代码定位根因，输出排障报告；
 6. 经人类确认后，才进入最小化修复和回归验证。
 
-![影视创作工具平台生产观测集成](../images/film-platform-prod-observability.png)
+![影视创作工具平台生产观测集成](images/film-platform-prod-observability.png)
 
 这里最重要的是安全边界。MCP 不是让 AI 拿到一把万能钥匙，而是把生产能力封装成白名单、只读、可审计的工具集合。K8s 只能查询，不能 exec、delete、apply；数据库只能做必要的只读查询；所有生产修复前必须先给出根因分析并等待确认。
 

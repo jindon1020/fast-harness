@@ -10,6 +10,8 @@ from src.api import router
 from src.api.schemas import (
     BugPipelineApprovalRequest,
     BugPipelineCreateRequest,
+    BugPipelineStepRunRequest,
+    BugPipelineTerminateRequest,
     FeedbackRequest,
     GitCommitRequest,
     RenameRequest,
@@ -69,6 +71,7 @@ class FakeBugPipelineStore:
             **record,
             "status": "pending",
             "approval_status": record.get("approval_status", "not_required"),
+            "code_approval_status": record.get("code_approval_status", "not_required"),
             "review_retry_count": 0,
             "steps": steps,
             "events": [],
@@ -88,6 +91,13 @@ class FakeBugPipelineStore:
         self.records[pipeline_id].update(patch)
         return self.records[pipeline_id]
 
+    def rename(self, pipeline_id, name):
+        self.records[pipeline_id]["display_name"] = name.strip()
+        return self.records[pipeline_id]
+
+    def delete(self, pipeline_id):
+        self.records.pop(pipeline_id, None)
+
     def set_step(self, pipeline_id, step, status, summary=""):
         item = self.records[pipeline_id]["steps"][step]
         item["status"] = status
@@ -99,6 +109,17 @@ class FakeBugPipelineStore:
     def append_event(self, pipeline_id, event):
         self.records[pipeline_id]["events"].append(event)
         return self.records[pipeline_id]
+
+    def terminate(self, pipeline_id, user_id, reason=""):
+        record = self.records[pipeline_id]
+        for step in record["steps"].values():
+            if step["status"] in {"pending", "running", "waiting_approval"}:
+                step["status"] = "skipped"
+                step["summary"] = "流水线已终止"
+        record["status"] = "terminated"
+        record["terminated_by"] = user_id
+        record["termination_reason"] = reason
+        return record
 
 
 @pytest.mark.asyncio
@@ -229,12 +250,11 @@ async def test_bug_pipeline_rejects_non_feature_branch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_bug_pipeline_creates_bugfix_branch_from_feature(monkeypatch, tmp_path):
+async def test_bug_pipeline_uses_target_feature_branch_directly(monkeypatch, tmp_path):
     repo_path = tmp_path / "ws-1" / ".session-worktrees" / "sess-1" / "app-service"
     repo_path.mkdir(parents=True)
     created_workspaces = []
     session_meta = {}
-    branch_calls = []
 
     class FakeWorkspaceStore:
         def create(self, name, repositories, user_id=None, git_user_id=None):
@@ -249,10 +269,20 @@ async def test_bug_pipeline_creates_bugfix_branch_from_feature(monkeypatch, tmp_
                 "user_id": user_id,
             }
 
-        def create_session_worktree(self, workspace_id, repo_name, session_id, branch, user_id=None, git_user_id=None):
+        def create_session_worktree(
+            self,
+            workspace_id,
+            repo_name,
+            session_id,
+            branch,
+            user_id=None,
+            git_user_id=None,
+            install_harness=True,
+        ):
             assert branch == "feature/sp11"
             assert user_id == "zhaojindong"
             assert git_user_id == "zhaojindong"
+            assert install_harness is True
             return SimpleNamespace(local_path=repo_path)
 
         def remove_session_worktree(self, repo_path):
@@ -274,10 +304,6 @@ async def test_bug_pipeline_creates_bugfix_branch_from_feature(monkeypatch, tmp_
         "enabled": True,
     }
 
-    def fake_branch(path, branch, start_point=None):
-        branch_calls.append((path, branch, start_point))
-        return branch
-
     fake_pipeline_store = FakeBugPipelineStore()
     monkeypatch.setattr(router, "workspace_store", FakeWorkspaceStore())
     monkeypatch.setattr(router, "session_store", FakeSessionStore())
@@ -285,17 +311,33 @@ async def test_bug_pipeline_creates_bugfix_branch_from_feature(monkeypatch, tmp_
     monkeypatch.setattr(type(router.settings), "get_repository", lambda self, key: repo)
     monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: {"id": user_id, "name": user_id, "role": "member", "enabled": True})
     monkeypatch.setattr(router, "remote_branches", lambda url, user_id=None: ["feature/sp11"])
-    monkeypatch.setattr(router, "git_create_local_branch", fake_branch)
 
-    response = await router.create_bug_pipeline(bug_pipeline_request())
+    response = await router.create_bug_pipeline(
+        bug_pipeline_request(
+            screenshot_notes="红框内接口报错",
+            screenshot_images=[
+                {
+                    "name": "error.png",
+                    "mime_type": "image/png",
+                    "data": "iVBORw0KGgo=",
+                    "size": 8,
+                }
+            ],
+        )
+    )
 
     assert created_workspaces[0][1][0]["branch"] == "feature/sp11"
-    assert branch_calls[0][0] == repo_path
-    assert branch_calls[0][1].startswith("bugfix/bug-")
+    assert created_workspaces[0][1][0]["install_harness"] is False
     assert session_meta["target_branch"] == "feature/sp11"
-    assert session_meta["branch"] == response.bugfix_branch
+    assert session_meta["branch"] == "feature/sp11"
+    assert response.bugfix_branch == "feature/sp11"
     assert response.steps["intake"].status == "passed"
-    assert (repo_path / ".ai" / "dev-fix" / response.pipeline_id / "bug_report.md").exists()
+    assert response.screenshot_attachments[0]["name"] == "error.png"
+    screenshot_path = repo_path / response.screenshot_attachments[0]["path"]
+    assert screenshot_path.exists()
+    bug_report = (repo_path / ".ai" / "dev-fix" / response.pipeline_id / "bug_report.md").read_text(encoding="utf-8")
+    assert "## 问题截图" in bug_report
+    assert response.screenshot_attachments[0]["path"] in bug_report
 
 
 @pytest.mark.asyncio
@@ -319,8 +361,17 @@ async def test_reporter_bug_pipeline_uses_reviewer_git_credentials(monkeypatch, 
                 "user_id": user_id,
             }
 
-        def create_session_worktree(self, workspace_id, repo_name, session_id, branch, user_id=None, git_user_id=None):
-            session_worktree_calls.append((workspace_id, repo_name, branch, user_id, git_user_id))
+        def create_session_worktree(
+            self,
+            workspace_id,
+            repo_name,
+            session_id,
+            branch,
+            user_id=None,
+            git_user_id=None,
+            install_harness=True,
+        ):
+            session_worktree_calls.append((workspace_id, repo_name, branch, user_id, git_user_id, install_harness))
             return SimpleNamespace(local_path=repo_path)
 
         def remove_session_worktree(self, repo_path):
@@ -354,14 +405,120 @@ async def test_reporter_bug_pipeline_uses_reviewer_git_credentials(monkeypatch, 
     monkeypatch.setattr(type(router.settings), "get_repository", lambda self, key: repo)
     monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: {"id": user_id, "name": user_id, "role": roles[user_id], "enabled": True})
     monkeypatch.setattr(router, "remote_branches", lambda url, user_id=None: remote_branch_user_ids.append(user_id) or ["feature/sp11"])
-    monkeypatch.setattr(router, "git_create_local_branch", lambda path, branch, start_point=None: branch)
-
     response = await router.create_bug_pipeline(bug_pipeline_request(), x_user_id="qa01")
 
     assert response.user_id == "qa01"
     assert remote_branch_user_ids == ["reviewer"]
     assert workspace_calls[0][2:] == ("qa01", "reviewer")
-    assert session_worktree_calls[0][3:] == ("qa01", "reviewer")
+    assert session_worktree_calls[0][3:] == ("qa01", "reviewer", True)
+
+
+@pytest.mark.asyncio
+async def test_bug_pipeline_creates_related_repo_context_worktrees(monkeypatch, tmp_path):
+    primary_path = tmp_path / "ws-1" / ".session-worktrees" / "sess-1" / "creation-tool"
+    related_path = tmp_path / "ws-1" / ".session-worktrees" / "sess-1" / "algo-manager"
+    primary_path.mkdir(parents=True)
+    related_path.mkdir(parents=True)
+    created_repositories = []
+    session_worktrees = []
+    session_meta = {}
+    remote_checks = []
+
+    class FakeWorkspaceStore:
+        def create(self, name, repositories, user_id=None, git_user_id=None):
+            created_repositories.extend(repositories)
+            return {
+                "workspace_id": "ws-1",
+                "name": name,
+                "cwd": str(tmp_path / "ws-1"),
+                "repos": repositories,
+                "created_at": "now",
+                "updated_at": "now",
+                "user_id": user_id,
+            }
+
+        def create_session_worktree(
+            self,
+            workspace_id,
+            repo_name,
+            session_id,
+            branch,
+            user_id=None,
+            git_user_id=None,
+            install_harness=True,
+        ):
+            session_worktrees.append((repo_name, branch, user_id, git_user_id, install_harness))
+            if repo_name == "creation-tool":
+                return SimpleNamespace(local_path=primary_path)
+            return SimpleNamespace(local_path=related_path)
+
+        def remove_session_worktree(self, repo_path):
+            raise AssertionError("should not remove successful worktree")
+
+        def delete(self, workspace_id):
+            raise AssertionError("should not delete successful workspace")
+
+    class FakeSessionStore:
+        def create(self, *, workspace_dir, metadata, session_id=None, user_id=None):
+            session_meta.update(metadata)
+            return session_id
+
+    repos = {
+        "app": {
+            "key": "app",
+            "name": "creation-tool",
+            "url": "https://example.com/creation-tool.git",
+            "default_branch": "dev",
+            "enabled": True,
+        },
+        "algo": {
+            "key": "algo",
+            "name": "algo-manager",
+            "url": "https://example.com/algo-manager.git",
+            "default_branch": "dev",
+            "enabled": True,
+        },
+    }
+
+    fake_pipeline_store = FakeBugPipelineStore()
+    monkeypatch.setattr(router, "workspace_store", FakeWorkspaceStore())
+    monkeypatch.setattr(router, "session_store", FakeSessionStore())
+    monkeypatch.setattr(router, "bug_pipeline_store", fake_pipeline_store)
+    monkeypatch.setattr(type(router.settings), "get_repository", lambda self, key: repos[key])
+    monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: {"id": user_id, "name": user_id, "role": "member", "enabled": True})
+    monkeypatch.setattr(router, "remote_branches", lambda url, user_id=None: remote_checks.append((url, user_id)) or ["feature/sp11", "dev"])
+    response = await router.create_bug_pipeline(
+        bug_pipeline_request(
+            repo_contexts=[
+                {
+                    "repo_key": "app",
+                    "branch": "feature/sp11",
+                    "role": "fix",
+                    "correlation_id_name": "request_id",
+                    "correlation_id_value": "req-1",
+                },
+                {
+                    "repo_key": "algo",
+                    "branch": "dev",
+                    "role": "observe",
+                    "correlation_id_name": "task_id",
+                    "correlation_id_value": "task-9",
+                },
+            ]
+        )
+    )
+
+    assert [repo["name"] for repo in created_repositories] == ["creation-tool", "algo-manager"]
+    assert [repo["install_harness"] for repo in created_repositories] == [False, False]
+    assert session_worktrees == [
+        ("creation-tool", "feature/sp11", "zhaojindong", "zhaojindong", True),
+        ("algo-manager", "dev", "zhaojindong", "zhaojindong", False),
+    ]
+    assert session_meta["related_repo_paths"] == {"algo-manager": str(related_path)}
+    assert response.repo_contexts[0]["correlation_id_value"] == "req-1"
+    assert response.repo_contexts[1]["correlation_id_name"] == "task_id"
+    assert "task_id `task-9`" in (primary_path / ".ai" / "dev-fix" / response.pipeline_id / "bug_report.md").read_text(encoding="utf-8")
+    assert len(remote_checks) == 2
 
 
 @pytest.mark.asyncio
@@ -402,6 +559,7 @@ async def test_bug_pipeline_approval_requires_reviewer_or_admin(monkeypatch):
             "session_id": "sess-1",
             "target_branch": "feature/sp11",
             "bugfix_branch": "bugfix/bug-1-fix",
+            "git_user_id": "reviewer",
             "namespace": "drama-dev",
             "affected_api": "GET /x",
             "problem_description": "bug",
@@ -436,6 +594,287 @@ async def test_bug_pipeline_approval_requires_reviewer_or_admin(monkeypatch):
 
     assert response.approval_status == "approved"
     assert response.steps["fix_plan"].status == "passed"
+
+
+@pytest.mark.asyncio
+async def test_bug_pipeline_reporter_can_terminate_pipeline(monkeypatch):
+    fake_store = FakeBugPipelineStore()
+    record = fake_store.create(
+        {
+            "pipeline_id": "bug-1",
+            "user_id": "tester",
+            "reviewer_id": "reviewer",
+            "repo_key": "app",
+            "repo_name": "app",
+            "workspace_id": "ws-1",
+            "session_id": "sess-1",
+            "target_branch": "feature/sp11",
+            "bugfix_branch": "bugfix/bug-1-fix",
+            "namespace": "drama-dev",
+            "affected_api": "GET /x",
+            "problem_description": "bug",
+            "expected_result": "ok",
+            "actual_result": "fail",
+            "artifact_dir": ".ai/dev-fix/bug-1",
+        }
+    )
+    record["steps"]["intake"]["status"] = "passed"
+    record["steps"]["root_cause"]["status"] = "passed"
+    record["steps"]["fix_plan"]["status"] = "pending"
+    monkeypatch.setattr(router, "bug_pipeline_store", fake_store)
+    monkeypatch.setattr(router, "_active_queries", {})
+    monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: {"id": user_id, "name": user_id, "role": "reporter", "enabled": True})
+    monkeypatch.setattr(type(router.settings), "is_admin", lambda self, user_id: False)
+
+    response = await router.terminate_bug_pipeline(
+        "bug-1",
+        BugPipelineTerminateRequest(reason="不是代码 bug"),
+        x_user_id="tester",
+    )
+
+    assert response.status == "terminated"
+    assert response.terminated_by == "tester"
+    assert response.termination_reason == "不是代码 bug"
+    assert response.steps["intake"].status == "passed"
+    assert response.steps["root_cause"].status == "passed"
+    assert response.steps["fix_plan"].status == "skipped"
+    assert response.steps["code_generation"].status == "skipped"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router.run_bug_pipeline_step("bug-1", "fix_plan", x_user_id="tester")
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_bug_pipeline_sidebar_session_can_be_renamed_and_deleted(monkeypatch):
+    fake_store = FakeBugPipelineStore()
+    fake_store.create(
+        {
+            "pipeline_id": "bug-1",
+            "user_id": "tester",
+            "reviewer_id": "reviewer",
+            "repo_key": "app",
+            "repo_name": "app",
+            "workspace_id": "ws-1",
+            "session_id": "sess-1",
+            "target_branch": "feature/sp11",
+            "bugfix_branch": "feature/sp11",
+            "namespace": "drama-dev",
+            "affected_api": "GET /x",
+            "problem_description": "接口报错",
+            "expected_result": "ok",
+            "actual_result": "fail",
+            "artifact_dir": ".ai/dev-fix/bug-1",
+        }
+    )
+    deleted_sessions = []
+
+    class FakeSessionStore:
+        def delete(self, session_id):
+            deleted_sessions.append(session_id)
+
+    monkeypatch.setattr(router, "bug_pipeline_store", fake_store)
+    monkeypatch.setattr(router, "session_store", FakeSessionStore())
+    monkeypatch.setattr(router, "_active_queries", {})
+    monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: {"id": user_id, "name": user_id, "role": "reporter", "enabled": True})
+    monkeypatch.setattr(type(router.settings), "is_admin", lambda self, user_id: False)
+
+    renamed = await router.rename_bug_pipeline(
+        "bug-1",
+        RenameRequest(name="图片生成 project_id 问题"),
+        x_user_id="tester",
+    )
+
+    assert renamed.display_name == "图片生成 project_id 问题"
+    assert fake_store.records["bug-1"]["display_name"] == "图片生成 project_id 问题"
+
+    deleted = await router.delete_bug_pipeline("bug-1", x_user_id="tester")
+
+    assert deleted == {"status": "deleted", "pipeline_id": "bug-1"}
+    assert "bug-1" not in fake_store.records
+    assert deleted_sessions == ["sess-1"]
+
+
+@pytest.mark.asyncio
+async def test_bug_pipeline_can_skip_quality_gate_steps_individually(monkeypatch):
+    fake_store = FakeBugPipelineStore()
+    record = fake_store.create(
+        {
+            "pipeline_id": "bug-1",
+            "user_id": "tester",
+            "reviewer_id": "reviewer",
+            "repo_key": "app",
+            "repo_name": "app",
+            "workspace_id": "ws-1",
+            "session_id": "sess-1",
+            "target_branch": "feature/sp11",
+            "bugfix_branch": "bugfix/bug-1-fix",
+            "namespace": "drama-dev",
+            "affected_api": "GET /x",
+            "problem_description": "bug",
+            "expected_result": "ok",
+            "actual_result": "fail",
+            "artifact_dir": ".ai/dev-fix/bug-1",
+        }
+    )
+    for step in ["intake", "root_cause", "fix_plan", "code_generation"]:
+        record["steps"][step]["status"] = "passed"
+    monkeypatch.setattr(router, "bug_pipeline_store", fake_store)
+    monkeypatch.setattr(router, "_active_queries", {})
+    async def fake_start_step(pipeline_id, step):
+        return fake_store.require(pipeline_id)
+
+    monkeypatch.setattr(router, "_start_bug_pipeline_step", fake_start_step)
+    monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: {"id": user_id, "name": user_id, "role": "reporter", "enabled": True})
+    monkeypatch.setattr(type(router.settings), "is_admin", lambda self, user_id: False)
+
+    first = await router.skip_bug_pipeline_step(
+        "bug-1",
+        "code_review",
+        BugPipelineStepRunRequest(note="skip review"),
+        x_user_id="tester",
+    )
+    second = await router.skip_bug_pipeline_step(
+        "bug-1",
+        "unit_test",
+        BugPipelineStepRunRequest(note="skip unit test"),
+        x_user_id="tester",
+    )
+    third = await router.skip_bug_pipeline_step(
+        "bug-1",
+        "regression",
+        BugPipelineStepRunRequest(note="skip regression"),
+        x_user_id="tester",
+    )
+
+    assert first.steps["code_review"].status == "skipped"
+    assert second.steps["unit_test"].status == "skipped"
+    assert third.steps["regression"].status == "skipped"
+    router._ensure_pipeline_code_ready(fake_store.require("bug-1"))
+
+
+@pytest.mark.asyncio
+async def test_bug_pipeline_code_approval_and_git_actions_require_developer(monkeypatch, tmp_path):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    fake_store = FakeBugPipelineStore()
+    record = fake_store.create(
+        {
+            "pipeline_id": "bug-1",
+            "user_id": "tester",
+            "reviewer_id": "reviewer",
+            "repo_key": "app",
+            "repo_name": "app",
+            "workspace_id": "ws-1",
+            "session_id": "sess-1",
+            "target_branch": "feature/sp11",
+            "bugfix_branch": "bugfix/bug-1-fix",
+            "namespace": "drama-dev",
+            "affected_api": "GET /x",
+            "problem_description": "bug",
+            "expected_result": "ok",
+            "actual_result": "fail",
+            "artifact_dir": ".ai/dev-fix/bug-1",
+        }
+    )
+    record["steps"]["regression"]["status"] = "passed"
+    monkeypatch.setattr(router, "bug_pipeline_store", fake_store)
+    monkeypatch.setattr(router, "resolve_session_repo_path", lambda session_id: repo_path)
+    monkeypatch.setattr(router, "_is_query_active", lambda session_id: False)
+    monkeypatch.setattr(type(router.settings), "is_admin", lambda self, user_id: user_id == "admin")
+
+    def fake_get_user(user_id):
+        roles = {"tester": "reporter", "reviewer": "member", "admin": "admin"}
+        return {"id": user_id, "name": user_id, "role": roles[user_id], "enabled": True}
+
+    monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: fake_get_user(user_id))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router.approve_bug_pipeline_code(
+            "bug-1",
+            BugPipelineApprovalRequest(approved=True),
+            x_user_id="tester",
+        )
+
+    assert exc_info.value.status_code == 403
+
+    approved = await router.approve_bug_pipeline_code(
+        "bug-1",
+        BugPipelineApprovalRequest(approved=True, comment="ship it"),
+        x_user_id="reviewer",
+    )
+
+    assert approved.code_approval_status == "approved"
+    assert approved.code_approved_by == "reviewer"
+
+    commit_calls = []
+    push_calls = []
+
+    def fake_commit(path, message, user_id=None):
+        commit_calls.append((path, message, user_id))
+        return SimpleNamespace(to_dict=lambda: {"status": "committed", "branch": "feature/sp11", "stdout": "ok", "stderr": ""}, status="committed", branch="feature/sp11")
+
+    def fake_push(path, branch=None, user_id=None):
+        push_calls.append((path, branch, user_id))
+        return SimpleNamespace(to_dict=lambda: {"status": "pushed", "branch": branch, "stdout": "", "stderr": ""}, status="pushed", branch=branch)
+
+    monkeypatch.setattr(router, "git_commit_all", fake_commit)
+    monkeypatch.setattr(router, "git_push", fake_push)
+
+    commit_response = await router.commit_bug_pipeline_changes(
+        "bug-1",
+        GitCommitRequest(message="fix project list"),
+        x_user_id="reviewer",
+    )
+    push_response = await router.push_bug_pipeline_changes("bug-1", x_user_id="reviewer")
+
+    assert commit_calls == [(repo_path, "fix project list", "reviewer")]
+    assert push_calls == [(repo_path, "feature/sp11", "reviewer")]
+    assert commit_response.status == "committed"
+    assert push_response.status == "pushed"
+
+
+@pytest.mark.asyncio
+async def test_bug_pipeline_git_commit_requires_code_approval(monkeypatch, tmp_path):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    fake_store = FakeBugPipelineStore()
+    record = fake_store.create(
+        {
+            "pipeline_id": "bug-1",
+            "user_id": "tester",
+            "reviewer_id": "reviewer",
+            "repo_key": "app",
+            "repo_name": "app",
+            "workspace_id": "ws-1",
+            "session_id": "sess-1",
+            "target_branch": "feature/sp11",
+            "bugfix_branch": "bugfix/bug-1-fix",
+            "namespace": "drama-dev",
+            "affected_api": "GET /x",
+            "problem_description": "bug",
+            "expected_result": "ok",
+            "actual_result": "fail",
+            "artifact_dir": ".ai/dev-fix/bug-1",
+        }
+    )
+    record["steps"]["regression"]["status"] = "passed"
+    monkeypatch.setattr(router, "bug_pipeline_store", fake_store)
+    monkeypatch.setattr(router, "resolve_session_repo_path", lambda session_id: repo_path)
+    monkeypatch.setattr(router, "_is_query_active", lambda session_id: False)
+    monkeypatch.setattr(type(router.settings), "get_user", lambda self, user_id: {"id": user_id, "name": user_id, "role": "member", "enabled": True})
+    monkeypatch.setattr(type(router.settings), "is_admin", lambda self, user_id: False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router.commit_bug_pipeline_changes(
+            "bug-1",
+            GitCommitRequest(message="fix bug"),
+            x_user_id="reviewer",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "approved" in exc_info.value.detail
 
 
 @pytest.mark.asyncio
@@ -1489,8 +1928,8 @@ def test_workspace_creates_session_specific_worktree(monkeypatch, tmp_path):
     )
     calls = []
 
-    def fake_create_worktree(url, source_dir, worktree_path, branch=None, user_id=None):
-        calls.append((url, source_dir, worktree_path, branch, user_id))
+    def fake_create_worktree(url, source_dir, worktree_path, branch=None, user_id=None, install_harness=True):
+        calls.append((url, source_dir, worktree_path, branch, user_id, install_harness))
         return SimpleNamespace(local_path=worktree_path)
 
     monkeypatch.setattr(workspace, "create_worktree", fake_create_worktree)
@@ -1505,6 +1944,7 @@ def test_workspace_creates_session_specific_worktree(monkeypatch, tmp_path):
             ws_dir / ".session-worktrees" / "sess-1" / "app",
             "feature/x",
             "zhaojindong",
+            True,
         )
     ]
 

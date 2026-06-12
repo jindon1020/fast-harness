@@ -131,7 +131,7 @@ body::before {
 }
 
 .sidebar__head {
-  padding: 20px 20px 12px;
+  padding: 18px 18px 12px;
   display: flex; align-items: center; justify-content: space-between;
 }
 
@@ -182,18 +182,21 @@ body::before {
 .sidebar__actions { display: flex; gap: 6px; }
 
 .sidebar__nav {
-  padding: 0 12px 10px;
+  padding: 0 10px 10px;
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 .sidebar__nav-link {
-  display: block;
-  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-dim);
   text-decoration: none;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 520;
   transition: all var(--transition);
 }
 .sidebar__nav-link:hover {
@@ -201,9 +204,14 @@ body::before {
   color: var(--text);
   border-color: var(--border-v);
 }
+.sidebar__nav-link--active {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-color: var(--border-v);
+}
 
 .sidebar__approval {
-  padding: 0 12px 10px;
+  padding: 0 10px 12px;
   border-top: 1px solid var(--border);
 }
 .approval-list {
@@ -230,9 +238,12 @@ body::before {
 }
 .approval-item__status {
   color: var(--warning);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  text-transform: uppercase;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  font-size: 10px;
+  padding: 2px 6px;
+  white-space: nowrap;
 }
 .approval-item__title {
   color: var(--text);
@@ -266,7 +277,7 @@ body::before {
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   transition: all var(--transition);
 }
 .approval-item__actions button:hover {
@@ -282,7 +293,7 @@ body::before {
 .approval-empty {
   color: var(--text-muted);
   font-size: 12px;
-  padding: 8px 2px 10px;
+  padding: 10px 4px 12px;
 }
 .approval-plan {
   max-height: min(58vh, 520px);
@@ -309,13 +320,13 @@ body::before {
 .btn-icon:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-focus); }
 
 .sidebar__sessions {
-  flex: 1; overflow-y: auto; padding: 0 12px 12px;
+  flex: 1; overflow-y: auto; padding: 0 10px 12px;
 }
 
 .session-item {
-  padding: 10px 12px; border-radius: var(--radius-sm);
+  padding: 8px 10px; border-radius: var(--radius-sm);
   cursor: pointer; transition: all var(--transition);
-  border: 1px solid transparent; margin-bottom: 2px;
+  border: 1px solid transparent; margin-bottom: 3px;
   display: flex; align-items: center; justify-content: space-between;
   font-size: 13px; color: var(--text-dim);
 }
@@ -324,12 +335,13 @@ body::before {
   background: var(--bg-elevated); border-color: var(--border-v);
   color: var(--text); font-weight: 480;
 }
-.session-item__id { flex: 1; font-family: var(--font-mono); font-size: 11px; }
+.session-item__id { flex: 1; min-width: 0; font-size: 12px; line-height: 1.35; }
+.session-item__branch { color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
 .session-item__actions { display: flex; gap: 4px; opacity: 0; transition: opacity var(--transition); }
 .session-item:hover .session-item__actions { opacity: 1; }
 
 .sidebar__foot {
-  padding: 12px 20px; border-top: 1px solid var(--border);
+  padding: 12px 14px; border-top: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
 }
 
@@ -352,8 +364,8 @@ body::before {
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--text-dim);
-  font-size: 11px;
-  padding: 0 8px;
+  font-size: 12px;
+  padding: 0 10px;
   cursor: pointer;
   transition: all var(--transition);
 }
@@ -379,45 +391,113 @@ body::before {
 .version { font-size: 11px; color: var(--text-muted); margin-left: auto; }
 
 .sidebar__section-label {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
-  color: var(--text-muted); padding: 14px 20px 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-dim); padding: 14px 2px 8px;
   display: flex; align-items: center; justify-content: space-between;
 }
 .sidebar__section-label button {
-  background: none; border: none; color: var(--text-dim);
-  cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1;
+  height: 24px;
+  min-width: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 8px;
+  line-height: 1;
 }
-.sidebar__section-label button:hover { color: var(--text); }
+.sidebar__section-label button:hover { color: var(--text); border-color: var(--border-v); background: var(--bg-hover); }
 
+.workspace-group { position: relative; }
 .workspace-item {
-  padding: 10px 12px; border-radius: var(--radius-sm);
+  padding: 10px; border-radius: var(--radius-sm);
   cursor: pointer; transition: all var(--transition);
-  border: 1px solid transparent; margin-bottom: 2px;
+  border: 1px solid transparent; margin-bottom: 4px;
   font-size: 13px; color: var(--text-dim);
-  display: flex; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) 30px; align-items: flex-start; gap: 8px;
 }
 .workspace-item:hover { background: var(--bg-hover); color: var(--text); }
 .workspace-item__dot {
   width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-  background: var(--text-muted);
+  background: var(--text-muted); margin-top: 7px;
 }
 .workspace-item--active .workspace-item__dot { background: var(--accent); }
-.workspace-item__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-item__actions { display: flex; gap: 4px; opacity: 0; transition: opacity var(--transition); }
-.workspace-item:hover .workspace-item__actions { opacity: 1; }
+.workspace-item__body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.workspace-item__name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 540; }
+.workspace-item__meta { color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-menu-button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: all var(--transition);
+}
+.workspace-item:hover .workspace-menu-button,
+.workspace-menu-button[aria-expanded="true"] {
+  opacity: 1;
+}
+.workspace-menu-button:hover,
+.workspace-menu-button[aria-expanded="true"] {
+  background: var(--bg-elevated);
+  border-color: var(--border-v);
+  color: var(--text);
+}
+.workspace-menu {
+  position: absolute;
+  top: 38px;
+  right: 6px;
+  z-index: 60;
+  width: 150px;
+  border: 1px solid var(--border-v);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  padding: 5px;
+}
+.workspace-menu[hidden] { display: none; }
+.workspace-menu button {
+  width: 100%;
+  height: 30px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  padding: 0 9px;
+  transition: all var(--transition);
+}
+.workspace-menu button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.workspace-menu button.workspace-menu__danger {
+  color: var(--error);
+}
+.workspace-menu button.workspace-menu__danger:hover {
+  background: var(--error-dim);
+}
 .sidebar-action {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
   color: var(--text-muted);
   cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.02em;
+  font-size: 11px;
   line-height: 1;
   min-width: 28px;
   padding: 4px 5px;
-  text-transform: uppercase;
   transition: all var(--transition);
 }
 .sidebar-action:hover {
@@ -430,7 +510,7 @@ body::before {
   border-color: transparent;
   color: var(--error);
 }
-.workspace-sessions { margin: 2px 0 8px 16px; }
+.workspace-sessions { margin: 2px 0 10px 16px; }
 .workspace-sessions .session-item { padding: 7px 10px; font-size: 12px; }
 
 .repo-item {
@@ -1489,13 +1569,13 @@ body::before {
 
   .workspace-item {
     display: grid;
-    grid-template-columns: 10px minmax(0, 1fr);
+    grid-template-columns: 10px minmax(0, 1fr) 30px;
     align-items: start;
     column-gap: 8px;
     row-gap: 3px;
   }
 
-  .workspace-item__actions,
+  .workspace-menu-button,
   .session-item__actions {
     opacity: 1;
   }
@@ -1506,25 +1586,13 @@ body::before {
     margin-top: 7px;
   }
 
-  .workspace-item__name {
+  .workspace-item__body {
     grid-column: 2;
+  }
+
+  .workspace-item__name {
     white-space: normal;
     overflow-wrap: anywhere;
-  }
-
-  .workspace-item > span[style] {
-    grid-column: 2;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .workspace-item__actions {
-    grid-column: 2;
-    justify-self: start;
-    flex-wrap: wrap;
-    margin-top: 3px;
   }
 
   .workspace-sessions {
@@ -1555,21 +1623,21 @@ body::before {
       </div>
     </div>
     <nav class="sidebar__nav" aria-label="Runtime pages">
-      <a class="sidebar__nav-link" href="/bug-fix">Bug Fix Pipeline</a>
+      <a class="sidebar__nav-link sidebar__nav-link--active" href="/bug-fix">Bug 排查流水线</a>
     </nav>
     <div class="sidebar__approval" id="approvalSection" style="display:none">
-      <div class="sidebar__section-label">待审批 <button id="btnRefreshApprovals" title="Refresh approvals">↻</button></div>
+      <div class="sidebar__section-label">我的审批 <button id="btnRefreshApprovals" title="刷新审批">刷新</button></div>
       <div class="approval-list" id="approvalList"></div>
     </div>
-    <div class="sidebar-resize" id="sidebarResizeHandle" title="Resize sidebar"></div>
+    <div class="sidebar-resize" id="sidebarResizeHandle" title="调整侧边栏宽度"></div>
     <div class="sidebar__sessions" id="sidebarScroll">
-      <div class="sidebar__section-label">Workspaces <button id="btnAddWs" title="Add workspace">+</button></div>
+      <div class="sidebar__section-label">工作区 <button id="btnAddWs" title="新建工作区">新建</button></div>
       <div id="workspaceList"></div>
     </div>
     <div class="sidebar__foot">
       <span class="current-user" id="currentUserLabel"></span>
-      <button class="logout-btn" id="btnLogout" title="Logout">Logout</button>
-      <button class="theme-toggle" id="themeToggle" title="Toggle theme"></button>
+      <button class="logout-btn" id="btnLogout" title="退出登录">退出</button>
+      <button class="theme-toggle" id="themeToggle" title="切换主题" aria-label="切换主题"></button>
       <span class="version">v0.1</span>
     </div>
   </aside>
@@ -1577,7 +1645,7 @@ body::before {
   <!-- ── MAIN ── -->
   <main class="main">
     <div class="toolbar">
-      <button class="btn-icon btn-mobile-menu" id="btnMobileMenu" title="Workspaces" aria-label="Open workspaces">☰</button>
+      <button class="btn-icon btn-mobile-menu" id="btnMobileMenu" title="工作区" aria-label="打开工作区">☰</button>
       <span class="toolbar__title" id="toolbarTitle">Select or create a session</span>
       <button class="btn-tool" id="btnUsage" title="Usage" aria-label="Usage"><span class="btn-tool__icon" aria-hidden="true">U</span><span class="btn-tool__label">Usage</span></button>
       <button class="btn-tool" id="btnCapabilities" title="Capabilities" aria-label="Capabilities"><span class="btn-tool__icon" aria-hidden="true">⚙</span><span class="btn-tool__label">Capabilities</span></button>
@@ -1793,14 +1861,14 @@ function renderPendingApprovals() {
     <article class="approval-item">
       <div class="approval-item__head">
         <span class="approval-item__id">${escapeHtml(pipeline.pipeline_id)}</span>
-        <span class="approval-item__status">waiting</span>
+        <span class="approval-item__status">待审批</span>
       </div>
-      <div class="approval-item__title">${escapeHtml(pipeline.problem_description || "Bug fix pipeline")}</div>
+      <div class="approval-item__title">${escapeHtml(pipeline.problem_description || "Bug 排查流水线")}</div>
       <div class="approval-item__meta">${escapeHtml(pipeline.repo_name || pipeline.repo_key)} · ${escapeHtml(pipeline.target_branch || "")}</div>
       <div class="approval-item__actions">
-        <button onclick="showApprovalPlan('${pipeline.pipeline_id}')">计划</button>
+        <button onclick="showApprovalPlan('${pipeline.pipeline_id}')">查看计划</button>
         <button class="approval-item__primary" onclick="approvePipelineFromSidebar('${pipeline.pipeline_id}')">通过</button>
-        <button onclick="openBugPipeline('${pipeline.pipeline_id}')">流水线</button>
+        <button onclick="openBugPipeline('${pipeline.pipeline_id}')">进入流水线</button>
       </div>
     </article>
   `).join("");
@@ -1998,9 +2066,9 @@ function renderHistoryMessage(msg) {
 
 async function deleteSession(e, id) {
   e.stopPropagation();
-  const confirmed = await showConfirmDialog("Delete session " + id + "?", {
-    title: "Delete Session",
-    confirmLabel: "Delete",
+  const confirmed = await showConfirmDialog("确定删除会话 " + id + "？", {
+    title: "删除会话",
+    confirmLabel: "删除",
     danger: true,
   });
   if (!confirmed) return;
@@ -2053,23 +2121,29 @@ function renderWorkspaces() {
     html += `<div class="workspace-group">
       <div class="workspace-item${active}" data-id="${w.workspace_id}" onclick="selectWorkspace('${w.workspace_id}')">
         <span class="workspace-item__dot"></span>
-        <span class="workspace-item__name">${escapeHtml(w.name)}</span>
-        <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(repoNames || "no repo")}</span>
-        <span class="workspace-item__actions">
-          <button class="sidebar-action workspace-action workspace-action--rename" onclick="renameWorkspace(event, '${w.workspace_id}'); event.stopPropagation();" title="Rename workspace">edit</button>
-          <button class="sidebar-action workspace-action workspace-action--session" onclick="showSessionDialog('${w.workspace_id}'); event.stopPropagation();" title="New session">chat</button>
-          <button class="sidebar-action workspace-action workspace-action--repo" onclick="showAddRepoDialog('${w.workspace_id}'); event.stopPropagation();" title="Add repository">repo</button>
-          <button class="sidebar-action sidebar-action--danger workspace-action workspace-action--delete" onclick="deleteWorkspace(event, '${w.workspace_id}')" title="Delete workspace">del</button>
+        <span class="workspace-item__body">
+          <span class="workspace-item__name">${escapeHtml(w.name)}</span>
+          <span class="workspace-item__meta">${escapeHtml(repoNames || "未绑定仓库")}</span>
         </span>
+        <button class="workspace-menu-button workspace-action"
+                onclick="toggleWorkspaceMenu(event, '${w.workspace_id}')"
+                aria-label="工作区操作"
+                aria-expanded="false">…</button>
+      </div>
+      <div class="workspace-menu" id="workspaceMenu-${w.workspace_id}" hidden>
+        <button class="workspace-action--rename" onclick="renameWorkspace(event, '${w.workspace_id}')">重命名工作区</button>
+        <button class="workspace-action--session" onclick="showSessionDialogFromMenu(event, '${w.workspace_id}')">新增会话</button>
+        <button class="workspace-action--repo" onclick="showAddRepoDialogFromMenu(event, '${w.workspace_id}')">新增仓库</button>
+        <button class="workspace-action--delete workspace-menu__danger" onclick="deleteWorkspace(event, '${w.workspace_id}')">删除工作区</button>
       </div>
       <div class="workspace-sessions">
         ${sessionsForWorkspace.map(s => `
           <div class="session-item ${state.activeSession === s.session_id ? "session-item--active" : ""}"
                data-id="${s.session_id}" onclick="selectSession('${s.session_id}')">
-            <span class="session-item__id">${escapeHtml(s.name || s.session_id)}<br><span style="color:var(--text-muted);font-size:9px">${escapeHtml(s.metadata?.branch || "")}</span></span>
+            <span class="session-item__id">${escapeHtml(s.name || s.session_id)}<br><span class="session-item__branch">${escapeHtml(s.metadata?.branch || "")}</span></span>
             <span class="session-item__actions">
-              <button class="sidebar-action session-item__rename" onclick="renameSession(event, '${s.session_id}')" title="Rename session">edit</button>
-              <button class="sidebar-action sidebar-action--danger session-item__del" onclick="deleteSession(event, '${s.session_id}')" title="Delete session">del</button>
+              <button class="sidebar-action session-item__rename" onclick="renameSession(event, '${s.session_id}')" title="重命名会话">改</button>
+              <button class="sidebar-action sidebar-action--danger session-item__del" onclick="deleteSession(event, '${s.session_id}')" title="删除会话">删</button>
             </span>
           </div>
         `).join("")}
@@ -2079,7 +2153,38 @@ function renderWorkspaces() {
   workspaceList.innerHTML = html;
 }
 
+function closeWorkspaceMenus() {
+  $$(".workspace-menu").forEach(menu => { menu.hidden = true; });
+  $$(".workspace-menu-button").forEach(button => {
+    button.setAttribute("aria-expanded", "false");
+  });
+}
+
+function toggleWorkspaceMenu(event, workspaceId) {
+  event.stopPropagation();
+  const menu = document.getElementById(`workspaceMenu-${workspaceId}`);
+  const button = event.currentTarget;
+  const willOpen = menu?.hidden;
+  closeWorkspaceMenus();
+  if (!menu || !willOpen) return;
+  menu.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+}
+
+function showSessionDialogFromMenu(event, workspaceId) {
+  event.stopPropagation();
+  closeWorkspaceMenus();
+  showSessionDialog(workspaceId);
+}
+
+function showAddRepoDialogFromMenu(event, workspaceId) {
+  event.stopPropagation();
+  closeWorkspaceMenus();
+  showAddRepoDialog(workspaceId);
+}
+
 function selectWorkspace(id) {
+  closeWorkspaceMenus();
   state.activeWorkspace = (state.activeWorkspace === id) ? null : id;
   renderWorkspaces();
   inputHint.textContent = state.activeWorkspace
@@ -2150,10 +2255,11 @@ async function getDefaultBranches() {
 
 async function deleteWorkspace(e, id) {
   e.stopPropagation();
+  closeWorkspaceMenus();
   const ws = state.workspaces.find(w => w.workspace_id === id);
-  const confirmed = await showConfirmDialog(`Delete workspace "${ws?.name || id}" and its sessions?`, {
-    title: "Delete Workspace",
-    confirmLabel: "Delete",
+  const confirmed = await showConfirmDialog(`确定删除工作区「${ws?.name || id}」及其会话？`, {
+    title: "删除工作区",
+    confirmLabel: "删除",
     danger: true,
   });
   if (!confirmed) return;
@@ -2177,8 +2283,9 @@ async function deleteWorkspace(e, id) {
 
 async function renameWorkspace(e, id) {
   e.stopPropagation();
+  closeWorkspaceMenus();
   const ws = state.workspaces.find(w => w.workspace_id === id);
-  const nextName = await showRenameDialog("Rename Workspace", ws?.name || id);
+  const nextName = await showRenameDialog("重命名工作区", ws?.name || id);
   if (!nextName || !nextName.trim()) return;
   await api("PATCH", "/workspaces/" + id, { name: nextName.trim() });
   await loadWorkspaces();
@@ -4130,7 +4237,10 @@ function initMobileNav() {
   btnMobileMenu?.addEventListener("click", toggleMobileSidebar);
   mobileSidebarBackdrop?.addEventListener("click", closeMobileSidebar);
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape") closeMobileSidebar();
+    if (event.key === "Escape") {
+      closeMobileSidebar();
+      closeWorkspaceMenus();
+    }
   });
   window.addEventListener("resize", () => {
     if (!isMobileViewport()) closeMobileSidebar();
@@ -4214,6 +4324,9 @@ promptInput.addEventListener("keydown", (e) => {
 /* ═══════════════════════ EVENT BINDINGS ═══════════════════════ */
 
 $("#btnAddWs").addEventListener("click", createWorkspace);
+document.addEventListener("click", event => {
+  if (!event.target.closest(".workspace-group")) closeWorkspaceMenus();
+});
 btnSend.addEventListener("click", () => {
   const stream = getSessionStream(state.activeSession);
   if (stream?.streaming) {

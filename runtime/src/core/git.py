@@ -123,16 +123,12 @@ def configure_worktree_identity(repo_path: Path, user_id: Optional[str] = None) 
 
 
 def _credential_helper(user_git: dict[str, str]) -> str:
-    codeup_user = user_git.get("codeup_user", "")
-    codeup_token = user_git.get("codeup_token", "")
-    codeup_token_env = user_git.get("codeup_token_env", "")
-    if not codeup_user or not (codeup_token or codeup_token_env):
+    codeup_user = user_git.get("codeup_user") or settings.git_codeup_user
+    codeup_token = user_git.get("codeup_token") or settings.git_codeup_token
+    if not codeup_user or not codeup_token:
         return ""
     username = f"username={_shell_single_quote(codeup_user)}"
-    if codeup_token_env:
-        password = f"password=\"${{{codeup_token_env}}}\""
-    else:
-        password = f"password={_shell_single_quote(codeup_token)}"
+    password = f"password={_shell_single_quote(codeup_token)}"
     return (
         "!f() { "
         "test \"$1\" = get || exit 0; "
@@ -409,6 +405,7 @@ def create_worktree(
     worktree_path: Path,
     branch: Optional[str] = None,
     user_id: Optional[str] = None,
+    install_harness: bool = True,
 ) -> RepoInfo:
     """Create an isolated git worktree for a branch from a shared source clone."""
     provider = detect_provider(url)
@@ -450,11 +447,12 @@ def create_worktree(
 
     configure_worktree_identity(worktree_path, user_id=user_id)
 
-    try:
-        _install_fast_harness_suite(worktree_path)
-    except RuntimeError:
-        _run(["git", "worktree", "remove", "--force", str(worktree_path)], source_repo, timeout=60)
-        raise
+    if install_harness:
+        try:
+            _install_fast_harness_suite(worktree_path)
+        except RuntimeError:
+            _run(["git", "worktree", "remove", "--force", str(worktree_path)], source_repo, timeout=60)
+            raise
 
     return RepoInfo(name=repo_name, url=url, provider=provider, branch=branch, local_path=worktree_path)
 
@@ -686,18 +684,41 @@ def push(repo_path: Path, branch: Optional[str] = None, user_id: Optional[str] =
     branch = normalize_branch_name(branch) or _get_current_branch(repo_path)
     if not branch or branch == "HEAD":
         raise RuntimeError("Cannot push from detached HEAD")
-    remote_url = _get_remote_url(repo_path)
-    provider = detect_provider(remote_url)
-    auth_url = _build_auth_url(remote_url, provider, user_id=user_id)
-    rc, stdout, stderr = _run(["git", "push", auth_url, f"HEAD:refs/heads/{branch}"], repo_path, timeout=120)
+    push_cmd = ["git", "push", "origin", f"HEAD:refs/heads/{branch}"]
+    rc, stdout, stderr = _run(push_cmd, repo_path, timeout=120)
+    rebased = False
+    if rc != 0 and _is_non_fast_forward(stdout, stderr):
+        fetch_rc, fetch_stdout, fetch_stderr = _fetch_remote_heads(repo_path, timeout=60, user_id=user_id)
+        if fetch_rc != 0:
+            raise RuntimeError(f"Git push failed: {_sanitize_git_output(fetch_stderr or fetch_stdout)}")
+        rebase_rc, rebase_stdout, rebase_stderr = _run(
+            ["git", "rebase", "--autostash", f"origin/{branch}"],
+            repo_path,
+            timeout=120,
+        )
+        if rebase_rc != 0:
+            _run(["git", "rebase", "--abort"], repo_path, timeout=30)
+            raise RuntimeError(
+                "Git push failed: remote branch has new changes and automatic rebase conflicted. "
+                f"{_sanitize_git_output(rebase_stderr or rebase_stdout)}"
+            )
+        rebased = True
+        rc, stdout, stderr = _run(push_cmd, repo_path, timeout=120)
     if rc != 0:
         raise RuntimeError(f"Git push failed: {_sanitize_git_output(stderr or stdout)}")
+    if rebased:
+        stdout = (stdout + "\nRebased onto remote branch before push.").strip()
     return GitActionResult(
         status="pushed",
         branch=branch,
         stdout=_sanitize_git_output(stdout),
         stderr=_sanitize_git_output(stderr),
     )
+
+
+def _is_non_fast_forward(stdout: str, stderr: str) -> bool:
+    output = f"{stdout}\n{stderr}".lower()
+    return "non-fast-forward" in output or "fetch first" in output or "failed to push some refs" in output
 
 
 def status(repo_path: Path, user_id: Optional[str] = None) -> GitStatus:

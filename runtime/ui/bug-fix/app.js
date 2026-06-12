@@ -10,6 +10,10 @@ const STEP_ARTIFACTS = {
   unit_test: "unit_test_results.md",
   regression: "regression_results.md",
 };
+const SKIPPABLE_STEPS = new Set(["code_review", "unit_test", "regression"]);
+const MAX_SCREENSHOTS = 5;
+const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
+const ALLOWED_SCREENSHOT_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 let state = {
   user: null,
@@ -20,6 +24,8 @@ let state = {
   activeStep: "",
   stream: null,
   pollTimer: null,
+  repoContexts: [],
+  screenshotImages: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -72,6 +78,8 @@ async function loadMe() {
   const data = await api("GET", "/me");
   state.user = data.user;
   $("#userLabel").textContent = `${data.user.name} · ${data.user.role}`;
+  const chatNav = $("#chatNavLink");
+  if (chatNav && data.user.role === "reporter") chatNav.hidden = true;
 }
 
 async function loadUsers() {
@@ -97,14 +105,41 @@ function bindEvents() {
   $("#btnLogout").addEventListener("click", logout);
   $("#btnTheme").addEventListener("click", toggleTheme);
   $("#btnNewPipeline").addEventListener("click", showCreateView);
+  $("#btnSidebarNewPipeline").addEventListener("click", showCreateView);
+  $("#btnAddRepoContext").addEventListener("click", addRepoContext);
+  $("#btnSelectScreenshots").addEventListener("click", () => $("#screenshotInput").click());
+  $("#screenshotInput").addEventListener("change", event => {
+    addScreenshotFiles(Array.from(event.target.files || []));
+    event.target.value = "";
+  });
+  $("#screenshotNotes").addEventListener("paste", handleScreenshotPaste);
+  bindScreenshotDropzone();
   $("#btnApprovalClose").addEventListener("click", closeApprovalModal);
   $("#btnApprovalCancel").addEventListener("click", closeApprovalModal);
   $("#btnApprovalConfirm").addEventListener("click", submitApprovalModal);
+  $("#btnCommitClose").addEventListener("click", closeCommitModal);
+  $("#btnCommitCancel").addEventListener("click", closeCommitModal);
+  $("#btnCommitConfirm").addEventListener("click", submitCommitModal);
+  $("#btnPipelineSessionClose").addEventListener("click", closePipelineSessionModal);
+  $("#btnPipelineSessionCancel").addEventListener("click", closePipelineSessionModal);
+  $("#btnPipelineSessionConfirm").addEventListener("click", submitPipelineSessionModal);
   $("#approvalModal").addEventListener("click", (event) => {
     if (event.target.id === "approvalModal") closeApprovalModal();
   });
+  $("#commitModal").addEventListener("click", (event) => {
+    if (event.target.id === "commitModal") closeCommitModal();
+  });
+  $("#pipelineSessionModal").addEventListener("click", (event) => {
+    if (event.target.id === "pipelineSessionModal") closePipelineSessionModal();
+  });
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".pipeline-list-row")) closePipelineMenus();
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#approvalModal").hidden) closeApprovalModal();
+    if (event.key === "Escape" && !$("#commitModal").hidden) closeCommitModal();
+    if (event.key === "Escape" && !$("#pipelineSessionModal").hidden) closePipelineSessionModal();
+    if (event.key === "Escape") closePipelineMenus();
   });
 }
 
@@ -115,6 +150,8 @@ function showCreateView() {
   stopPolling();
   $("#createView").hidden = false;
   $("#pipelineView").hidden = true;
+  renderScreenshotPreview();
+  renderRepoContexts();
   renderPipelines();
 }
 
@@ -127,6 +164,7 @@ function renderFormOptions() {
   $("#repoKey").innerHTML = state.repos.map(repo => `<option value="${escapeHtml(repo.key)}">${escapeHtml(repo.name)}</option>`).join("");
   const developers = state.users.filter(user => user.role === "member" || user.role === "admin");
   $("#reviewerId").innerHTML = developers.map(user => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name)} (${escapeHtml(user.id)})</option>`).join("");
+  renderRepoContexts();
   loadBranches();
 }
 
@@ -156,6 +194,9 @@ async function createPipeline(event) {
     await loadPipelines();
     renderPipelines();
     $("#pipelineForm").reset();
+    state.repoContexts = [];
+    state.screenshotImages = [];
+    renderScreenshotPreview();
     renderFormOptions();
     await selectPipeline(created.pipeline_id);
     toast("Pipeline created and started");
@@ -181,8 +222,210 @@ function formPayload() {
     affected_data: $("#affectedData").value || null,
     regression_curl: $("#regressionCurl").value || null,
     screenshot_notes: $("#screenshotNotes").value || null,
+    screenshot_images: state.screenshotImages.map(image => ({
+      name: image.name,
+      mime_type: image.mime_type,
+      data: image.data,
+      size: image.size,
+    })),
     extra_context: $("#extraContext").value || null,
+    repo_contexts: repoContextsPayload(),
   };
+}
+
+function bindScreenshotDropzone() {
+  const dropzone = $("#screenshotDropzone");
+  dropzone.addEventListener("paste", handleScreenshotPaste);
+  dropzone.addEventListener("dragover", event => {
+    event.preventDefault();
+    dropzone.classList.add("drag-over");
+  });
+  dropzone.addEventListener("dragleave", event => {
+    if (!dropzone.contains(event.relatedTarget)) dropzone.classList.remove("drag-over");
+  });
+  dropzone.addEventListener("drop", event => {
+    event.preventDefault();
+    dropzone.classList.remove("drag-over");
+    addScreenshotFiles(Array.from(event.dataTransfer?.files || []));
+  });
+}
+
+function handleScreenshotPaste(event) {
+  const files = Array.from(event.clipboardData?.items || [])
+    .filter(item => item.kind === "file" && item.type.startsWith("image/"))
+    .map(item => item.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault();
+  addScreenshotFiles(files);
+}
+
+async function addScreenshotFiles(files) {
+  const imageFiles = files.filter(file => file && file.type.startsWith("image/"));
+  if (!imageFiles.length) {
+    toast("请选择图片文件");
+    return;
+  }
+  for (const file of imageFiles) {
+    if (state.screenshotImages.length >= MAX_SCREENSHOTS) {
+      toast(`最多上传 ${MAX_SCREENSHOTS} 张截图`);
+      break;
+    }
+    if (!ALLOWED_SCREENSHOT_TYPES.has(file.type)) {
+      toast(`不支持的图片格式：${file.type || file.name}`);
+      continue;
+    }
+    if (file.size > MAX_SCREENSHOT_BYTES) {
+      toast(`${file.name} 超过 10MB`);
+      continue;
+    }
+    try {
+      state.screenshotImages.push(await readScreenshotFile(file));
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+  renderScreenshotPreview();
+}
+
+function readScreenshotFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      const base64 = dataUrl.includes(",") ? dataUrl.split(",", 2)[1] : dataUrl;
+      resolve({
+        name: file.name || "screenshot",
+        mime_type: file.type,
+        data: base64,
+        size: file.size,
+        preview_url: dataUrl,
+      });
+    };
+    reader.onerror = () => reject(new Error(`读取截图失败：${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderScreenshotPreview() {
+  const preview = $("#screenshotPreview");
+  if (!preview) return;
+  preview.innerHTML = state.screenshotImages.map((image, index) => `
+    <article class="screenshot-card">
+      <img src="${escapeHtml(image.preview_url)}" alt="${escapeHtml(image.name)}">
+      <div class="screenshot-card__meta">
+        <span class="screenshot-card__name" title="${escapeHtml(image.name)}">${escapeHtml(image.name)}</span>
+        <button class="btn screenshot-card__remove" type="button" data-index="${index}">删除</button>
+      </div>
+    </article>
+  `).join("");
+  preview.querySelectorAll(".screenshot-card__remove").forEach(button => {
+    button.addEventListener("click", () => {
+      state.screenshotImages.splice(Number(button.dataset.index), 1);
+      renderScreenshotPreview();
+    });
+  });
+}
+
+function repoContextsPayload() {
+  const primary = {
+    repo_key: $("#repoKey").value,
+    branch: $("#targetBranch").value,
+    role: "fix",
+    correlation_id_name: $("#primaryCorrelationName").value || "request_id",
+    correlation_id_value: $("#requestId").value || null,
+  };
+  const related = Array.from(document.querySelectorAll(".repo-context-row")).map(row => ({
+    repo_key: row.querySelector(".repo-context-repo").value,
+    branch: row.querySelector(".repo-context-branch").value || null,
+    role: "observe",
+    correlation_id_name: row.querySelector(".repo-context-id-name").value || null,
+    correlation_id_value: row.querySelector(".repo-context-id-value").value || null,
+    note: row.querySelector(".repo-context-note").value || null,
+  })).filter(context => context.repo_key);
+  return [primary, ...related];
+}
+
+function addRepoContext() {
+  const available = state.repos.find(repo => repo.key !== $("#repoKey").value) || state.repos[0];
+  state.repoContexts.push({
+    repo_key: available?.key || "",
+    branch: available?.default_branch || "dev",
+    correlation_id_name: "task_id",
+    correlation_id_value: "",
+    note: "",
+  });
+  renderRepoContexts();
+}
+
+function renderRepoContexts() {
+  const list = $("#repoContextList");
+  if (!list) return;
+  if (!state.repoContexts.length) {
+    list.innerHTML = `<div class="empty">暂未添加关联仓库。跨服务问题可添加 algo-manager、workflow 等仓库辅助排查。</div>`;
+    return;
+  }
+  list.innerHTML = state.repoContexts.map((context, index) => renderRepoContextRow(context, index)).join("");
+  list.querySelectorAll(".repo-context-row").forEach((row, index) => {
+    row.querySelector(".repo-context-remove").addEventListener("click", () => {
+      state.repoContexts.splice(index, 1);
+      renderRepoContexts();
+    });
+    row.querySelector(".repo-context-repo").addEventListener("change", event => {
+      const repo = state.repos.find(item => item.key === event.target.value);
+      state.repoContexts[index].repo_key = event.target.value;
+      state.repoContexts[index].branch = repo?.default_branch || "dev";
+      renderRepoContexts();
+    });
+    row.querySelector(".repo-context-branch").addEventListener("input", event => {
+      state.repoContexts[index].branch = event.target.value;
+    });
+    row.querySelector(".repo-context-id-name").addEventListener("input", event => {
+      state.repoContexts[index].correlation_id_name = event.target.value;
+    });
+    row.querySelector(".repo-context-id-value").addEventListener("input", event => {
+      state.repoContexts[index].correlation_id_value = event.target.value;
+    });
+    row.querySelector(".repo-context-note").addEventListener("input", event => {
+      state.repoContexts[index].note = event.target.value;
+    });
+  });
+}
+
+function renderRepoContextRow(context, index) {
+  const repoOptions = state.repos.map(repo => `
+    <option value="${escapeHtml(repo.key)}" ${repo.key === context.repo_key ? "selected" : ""}>${escapeHtml(repo.name)}</option>
+  `).join("");
+  return `
+    <section class="repo-context-row">
+      <div class="repo-context-row__head">
+        <div class="repo-context-row__title">关联仓库 ${index + 1}</div>
+        <button class="btn repo-context-row__remove repo-context-remove" type="button">移除</button>
+      </div>
+      <div class="repo-context-row__grid">
+        <label class="field">
+          <span>仓库</span>
+          <select class="repo-context-repo">${repoOptions}</select>
+        </label>
+        <label class="field">
+          <span>观测分支</span>
+          <input class="repo-context-branch" value="${escapeHtml(context.branch || "dev")}" placeholder="dev">
+        </label>
+        <label class="field">
+          <span>ID 类型</span>
+          <input class="repo-context-id-name" value="${escapeHtml(context.correlation_id_name || "")}" placeholder="task_id">
+        </label>
+        <label class="field">
+          <span>ID 值</span>
+          <input class="repo-context-id-value" value="${escapeHtml(context.correlation_id_value || "")}" placeholder="可选">
+        </label>
+      </div>
+      <label class="field">
+        <span>说明</span>
+        <input class="repo-context-note" value="${escapeHtml(context.note || "")}" placeholder="例如：下游任务状态、回调链路、异步处理服务">
+      </label>
+    </section>
+  `;
 }
 
 function renderPipelines() {
@@ -192,14 +435,40 @@ function renderPipelines() {
     return;
   }
   list.innerHTML = state.pipelines.map(item => `
-    <button class="pipeline-item ${item.pipeline_id === state.activeId ? "active" : ""}" data-id="${escapeHtml(item.pipeline_id)}">
-      <div class="pipeline-item__id">${escapeHtml(item.pipeline_id)} · ${escapeHtml(item.status)}</div>
-      <div class="pipeline-item__desc">${escapeHtml(item.problem_description)}</div>
-    </button>
+    <div class="pipeline-list-row">
+      <button class="pipeline-item ${item.pipeline_id === state.activeId ? "active" : ""}" data-id="${escapeHtml(item.pipeline_id)}">
+        <div class="pipeline-item__id">${escapeHtml(item.pipeline_id)} · ${escapeHtml(item.status)}</div>
+        <div class="pipeline-item__desc">${escapeHtml(pipelineLabel(item))}</div>
+      </button>
+      <button class="pipeline-menu-button" aria-label="流水线会话操作" aria-expanded="false" onclick="togglePipelineMenu(event, '${escapeHtml(item.pipeline_id)}')">…</button>
+      <div class="pipeline-menu" id="pipelineMenu-${escapeHtml(item.pipeline_id)}" hidden>
+        <button onclick="openPipelineRenameModal(event, '${escapeHtml(item.pipeline_id)}')">重命名会话</button>
+        <button class="pipeline-menu__danger" onclick="openPipelineDeleteModal(event, '${escapeHtml(item.pipeline_id)}')">删除会话</button>
+      </div>
+    </div>
   `).join("");
   list.querySelectorAll(".pipeline-item").forEach(button => {
     button.addEventListener("click", () => selectPipeline(button.dataset.id));
   });
+}
+
+function pipelineLabel(item) {
+  return item.display_name || item.problem_description || item.pipeline_id;
+}
+
+function closePipelineMenus() {
+  document.querySelectorAll(".pipeline-menu").forEach(menu => { menu.hidden = true; });
+  document.querySelectorAll(".pipeline-menu-button").forEach(button => button.setAttribute("aria-expanded", "false"));
+}
+
+function togglePipelineMenu(event, pipelineId) {
+  event.stopPropagation();
+  const menu = document.getElementById(`pipelineMenu-${pipelineId}`);
+  const willOpen = menu?.hidden;
+  closePipelineMenus();
+  if (!menu || !willOpen) return;
+  menu.hidden = false;
+  event.currentTarget.setAttribute("aria-expanded", "true");
 }
 
 async function selectPipeline(id) {
@@ -253,15 +522,18 @@ function renderDetail(item) {
       <div class="meta">
         <span class="pill">${escapeHtml(item.status)}</span>
         <span class="pill">repo:${escapeHtml(item.repo_name)}</span>
+        <span class="pill">contexts:${(item.repo_contexts || []).length || 1}</span>
         <span class="pill">target:${escapeHtml(item.target_branch)}</span>
-        <span class="pill">bugfix:${escapeHtml(item.bugfix_branch)}</span>
+        <span class="pill">push:${escapeHtml(item.target_branch)}</span>
         <span class="pill">ns:${escapeHtml(item.namespace)}</span>
       </div>
       <div class="actions">
         ${approvalButtons(item)}
+        ${terminateButton(item)}
         <button class="btn" id="btnLoadDiff">查看 Diff</button>
       </div>
-      <div class="hint">流水线会自动推进。修复计划阶段会暂停等待审批，最终由研发人工合并 bugfix 分支到目标 feature 分支。</div>
+      ${codeReviewActions(item)}
+      <div class="hint">流水线会自动推进。修复计划阶段会暂停等待审批，最终由研发直接提交并推送目标 feature 分支。</div>
     </section>
     <section class="pipeline-track">${nodes}</section>
   `;
@@ -272,9 +544,20 @@ function renderDetail(item) {
       loadOutput();
     });
   });
+  $("#detail").querySelectorAll(".node-skip").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      skipPipelineStep(button.dataset.step);
+    });
+  });
   $("#btnApprove")?.addEventListener("click", () => openApprovalModal(true));
   $("#btnReject")?.addEventListener("click", () => openApprovalModal(false));
+  $("#btnTerminatePipeline")?.addEventListener("click", openTerminateModal);
   $("#btnLoadDiff")?.addEventListener("click", loadDiff);
+  $("#btnCodeApprove")?.addEventListener("click", () => openCodeApprovalModal(true));
+  $("#btnCodeReject")?.addEventListener("click", () => openCodeApprovalModal(false));
+  $("#btnBugCommit")?.addEventListener("click", openCommitModal);
+  $("#btnBugPush")?.addEventListener("click", pushBugPipeline);
 }
 
 function renderNode(item, step, idx) {
@@ -282,11 +565,28 @@ function renderNode(item, step, idx) {
   const active = state.activeStep === step ? "active" : "";
   return `
     <article class="pipeline-node ${active}" data-step="${escapeHtml(step)}" data-status="${escapeHtml(info.status)}">
-      <div class="node-circle">${idx}</div>
+      <div class="node-head">
+        <div class="node-circle">${idx}</div>
+        <div class="node-status-badge">${escapeHtml(statusLabel(info.status))}</div>
+      </div>
       <div class="node-title">${escapeHtml(info.title)}</div>
       <div class="node-status">${escapeHtml(info.status)} · ${info.attempts || 0}</div>
+      ${skipStepButton(item, step)}
     </article>
   `;
+}
+
+function skipStepButton(item, step) {
+  const info = item.steps[step] || {};
+  const canOperate = state.user && (
+    state.user.id === item.user_id ||
+    state.user.id === item.reviewer_id ||
+    state.user.role === "admin"
+  );
+  if (!canOperate || !SKIPPABLE_STEPS.has(step)) return "";
+  if (["passed", "skipped"].includes(info.status)) return "";
+  if (item.status === "terminated") return "";
+  return `<button class="btn node-skip" type="button" data-step="${escapeHtml(step)}">跳过</button>`;
 }
 
 function approvalButtons(item) {
@@ -296,8 +596,57 @@ function approvalButtons(item) {
   return `<button class="btn btn-primary" id="btnApprove">审批通过</button><button class="btn btn-danger" id="btnReject">拒绝计划</button>`;
 }
 
+function terminateButton(item) {
+  const finished = ["passed", "failed", "terminated"].includes(item.status);
+  const canTerminate = !finished && state.user && (
+    state.user.id === item.user_id ||
+    state.user.id === item.reviewer_id ||
+    state.user.role === "admin"
+  );
+  if (!canTerminate) return "";
+  return `<button class="btn btn-danger" id="btnTerminatePipeline">终止流水线</button>`;
+}
+
+function statusLabel(status) {
+  const labels = {
+    pending: "待执行",
+    running: "运行中",
+    waiting_approval: "待审批",
+    passed: "通过",
+    failed: "失败",
+    skipped: "跳过",
+  };
+  return labels[status] || status;
+}
+
+function codeReviewActions(item) {
+  if (!["passed", "skipped"].includes(item.steps.regression?.status)) return "";
+  const status = item.code_approval_status || "not_required";
+  const canOperate = state.user && (state.user.role === "admin" || state.user.id === item.reviewer_id);
+  const statusText = status === "approved" ? "已通过" : status === "rejected" ? "已拒绝" : "待审批";
+  const controls = [];
+  if (canOperate && status !== "approved") {
+    controls.push(`<button class="btn btn-primary" id="btnCodeApprove">代码审批通过</button>`);
+    controls.push(`<button class="btn btn-danger" id="btnCodeReject">拒绝代码改动</button>`);
+  }
+  if (canOperate && status === "approved") {
+    controls.push(`<button class="btn btn-primary" id="btnBugCommit">代码提交</button>`);
+    controls.push(`<button class="btn" id="btnBugPush">推送远程</button>`);
+  }
+  return `
+    <section class="code-review-panel">
+      <div>
+        <div class="code-review-panel__label">研发代码改动审批</div>
+        <div class="code-review-panel__status">${escapeHtml(statusText)} · push:${escapeHtml(item.target_branch)}</div>
+      </div>
+      <div class="actions">${controls.join("")}</div>
+    </section>
+  `;
+}
+
 function openApprovalModal(approved) {
   const modal = $("#approvalModal");
+  modal.dataset.kind = "plan";
   modal.dataset.approved = approved ? "true" : "false";
   $("#approvalModalTitle").textContent = approved ? "审批通过" : "拒绝修复计划";
   $("#approvalCommentLabel").textContent = approved ? "审批意见（可选）" : "拒绝原因（可选）";
@@ -307,31 +656,232 @@ function openApprovalModal(approved) {
   window.setTimeout(() => $("#approvalComment").focus(), 0);
 }
 
+function openCodeApprovalModal(approved) {
+  const modal = $("#approvalModal");
+  modal.dataset.kind = "code";
+  modal.dataset.approved = approved ? "true" : "false";
+  $("#approvalModalTitle").textContent = approved ? "代码改动审批通过" : "拒绝代码改动";
+  $("#approvalCommentLabel").textContent = approved ? "审批意见（可选）" : "拒绝原因（可选）";
+  $("#btnApprovalConfirm").textContent = approved ? "确认通过" : "确认拒绝";
+  $("#approvalComment").value = "";
+  modal.hidden = false;
+  window.setTimeout(() => $("#approvalComment").focus(), 0);
+}
+
+function openTerminateModal() {
+  const modal = $("#approvalModal");
+  modal.dataset.kind = "terminate";
+  modal.dataset.approved = "false";
+  $("#approvalModalTitle").textContent = "终止流水线";
+  $("#approvalCommentLabel").textContent = "终止原因";
+  $("#btnApprovalConfirm").textContent = "确认终止";
+  $("#approvalComment").value = "";
+  modal.hidden = false;
+  window.setTimeout(() => $("#approvalComment").focus(), 0);
+}
+
 function closeApprovalModal() {
   $("#approvalModal").hidden = true;
+  $("#approvalModal").dataset.kind = "";
   $("#approvalModal").dataset.approved = "";
   $("#approvalComment").value = "";
 }
 
 async function submitApprovalModal() {
   const modal = $("#approvalModal");
+  const kind = modal.dataset.kind || "plan";
   const approved = modal.dataset.approved === "true";
   const comment = $("#approvalComment").value.trim();
   $("#btnApprovalConfirm").disabled = true;
   try {
-    const updated = await api("POST", `/bug-pipelines/${encodeURIComponent(state.activeId)}/approval`, { approved, comment });
+    let updated;
+    if (kind === "terminate") {
+      updated = await api("POST", `/bug-pipelines/${encodeURIComponent(state.activeId)}/terminate`, { reason: comment });
+    } else {
+      const path = kind === "code" ? "code-approval" : "approval";
+      updated = await api("POST", `/bug-pipelines/${encodeURIComponent(state.activeId)}/${path}`, { approved, comment });
+    }
     upsertPipeline(updated);
-    state.activeStep = approved ? "code_generation" : "fix_plan";
+    state.activeStep = kind === "terminate" ? currentStep(updated) : (kind === "code" ? "regression" : (approved ? "code_generation" : "fix_plan"));
     renderPipelines();
     renderDetail(updated);
     closeApprovalModal();
-    startStream();
-    startPolling();
-    toast(approved ? "Approved, pipeline resumed" : "Rejected");
+    if (kind === "plan") {
+      startStream();
+      startPolling();
+    }
+    if (kind === "terminate") {
+      closeStream();
+      stopPolling();
+      toast("Pipeline terminated");
+    } else {
+      toast(approved ? "Approved" : "Rejected");
+    }
   } catch (error) {
     toast(error.message);
   } finally {
     $("#btnApprovalConfirm").disabled = false;
+  }
+}
+
+async function openCommitModal() {
+  const item = activePipeline();
+  if (!item) return;
+  $("#commitModal").hidden = false;
+  $("#commitMessage").value = "Generating commit message...";
+  $("#btnCommitConfirm").disabled = true;
+  try {
+    const data = await api("GET", `/bug-pipelines/${encodeURIComponent(item.pipeline_id)}/git/commit-message`);
+    $("#commitMessage").value = data.message || `Fix ${item.repo_name} bug`;
+  } catch (error) {
+    $("#commitMessage").value = `Fix ${item.repo_name} bug`;
+    toast(error.message);
+  } finally {
+    $("#btnCommitConfirm").disabled = false;
+    window.setTimeout(() => $("#commitMessage").focus(), 0);
+  }
+}
+
+function closeCommitModal() {
+  $("#commitModal").hidden = true;
+  $("#commitMessage").value = "";
+}
+
+function openPipelineRenameModal(event, pipelineId) {
+  event.stopPropagation();
+  closePipelineMenus();
+  const item = state.pipelines.find(pipeline => pipeline.pipeline_id === pipelineId);
+  if (!item) return;
+  const modal = $("#pipelineSessionModal");
+  modal.dataset.kind = "rename";
+  modal.dataset.pipelineId = pipelineId;
+  $("#pipelineSessionModalTitle").textContent = "重命名会话";
+  $("#pipelineSessionNameField").hidden = false;
+  $("#pipelineSessionName").value = pipelineLabel(item);
+  $("#pipelineSessionMessage").textContent = "只修改左侧列表展示名称，不会改动原始 Bug 描述和过程产物。";
+  $("#btnPipelineSessionConfirm").textContent = "确认重命名";
+  $("#btnPipelineSessionConfirm").classList.remove("btn-danger");
+  modal.hidden = false;
+  window.setTimeout(() => $("#pipelineSessionName").focus(), 0);
+}
+
+function openPipelineDeleteModal(event, pipelineId) {
+  event.stopPropagation();
+  closePipelineMenus();
+  const item = state.pipelines.find(pipeline => pipeline.pipeline_id === pipelineId);
+  if (!item) return;
+  const modal = $("#pipelineSessionModal");
+  modal.dataset.kind = "delete";
+  modal.dataset.pipelineId = pipelineId;
+  $("#pipelineSessionModalTitle").textContent = "删除会话";
+  $("#pipelineSessionNameField").hidden = true;
+  $("#pipelineSessionMessage").textContent = `确定删除「${pipelineLabel(item)}」？会删除该流水线记录和会话历史，不会删除工作区代码文件。`;
+  $("#btnPipelineSessionConfirm").textContent = "确认删除";
+  $("#btnPipelineSessionConfirm").classList.add("btn-danger");
+  modal.hidden = false;
+}
+
+function closePipelineSessionModal() {
+  const modal = $("#pipelineSessionModal");
+  modal.hidden = true;
+  modal.dataset.kind = "";
+  modal.dataset.pipelineId = "";
+  $("#pipelineSessionName").value = "";
+  $("#pipelineSessionMessage").textContent = "";
+  $("#pipelineSessionNameField").hidden = false;
+  $("#btnPipelineSessionConfirm").classList.remove("btn-danger");
+}
+
+async function submitPipelineSessionModal() {
+  const modal = $("#pipelineSessionModal");
+  const pipelineId = modal.dataset.pipelineId;
+  const kind = modal.dataset.kind;
+  if (!pipelineId) return;
+  $("#btnPipelineSessionConfirm").disabled = true;
+  try {
+    if (kind === "rename") {
+      const name = $("#pipelineSessionName").value.trim();
+      if (!name) {
+        toast("请输入会话名称");
+        return;
+      }
+      const updated = await api("PATCH", `/bug-pipelines/${encodeURIComponent(pipelineId)}`, { name });
+      upsertPipeline(updated);
+      renderPipelines();
+      if (state.activeId === pipelineId) renderDetail(updated);
+      toast("会话已重命名");
+    }
+    if (kind === "delete") {
+      await api("DELETE", `/bug-pipelines/${encodeURIComponent(pipelineId)}`);
+      state.pipelines = state.pipelines.filter(item => item.pipeline_id !== pipelineId);
+      if (state.activeId === pipelineId) showCreateView();
+      else renderPipelines();
+      toast("会话已删除");
+    }
+    closePipelineSessionModal();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    $("#btnPipelineSessionConfirm").disabled = false;
+  }
+}
+
+async function submitCommitModal() {
+  const item = activePipeline();
+  const message = $("#commitMessage").value.trim();
+  if (!item || !message) {
+    toast("Commit message is required");
+    return;
+  }
+  $("#btnCommitConfirm").disabled = true;
+  try {
+    const result = await api("POST", `/bug-pipelines/${encodeURIComponent(item.pipeline_id)}/git/commit`, { message });
+    closeCommitModal();
+    await refreshActive();
+    toast(result.status === "clean" ? "No changes to commit" : "Committed");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    $("#btnCommitConfirm").disabled = false;
+  }
+}
+
+async function pushBugPipeline() {
+  const item = activePipeline();
+  if (!item) return;
+  const button = $("#btnBugPush");
+  button.disabled = true;
+  try {
+    const result = await api("POST", `/bug-pipelines/${encodeURIComponent(item.pipeline_id)}/git/push`);
+    await refreshActive();
+    toast(result.status === "pushed" ? "Pushed" : result.status);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function skipPipelineStep(step) {
+  const item = activePipeline();
+  if (!item) return;
+  try {
+    const updated = await api("POST", `/bug-pipelines/${encodeURIComponent(item.pipeline_id)}/steps/${encodeURIComponent(step)}/skip`, { note: "人工跳过" });
+    upsertPipeline(updated);
+    state.activeStep = step;
+    renderPipelines();
+    renderDetail(updated);
+    await loadOutput();
+    if (pipelineIsLive(updated)) {
+      startStream();
+      startPolling();
+    } else {
+      closeStream();
+      stopPolling();
+    }
+    toast("Step skipped");
+  } catch (error) {
+    toast(error.message);
   }
 }
 
@@ -418,6 +968,7 @@ function renderStageOutput(item, step, artifact, logs) {
       <section class="stage-section">
         <div class="stage-section__title">阶段摘要</div>
         <div class="markdown-body">${renderMarkdown(limitText(summary, 7000))}</div>
+        ${step === "intake" ? renderPersistedScreenshots(item) : ""}
       </section>
     `);
   } else {
@@ -437,14 +988,26 @@ function renderStageOutput(item, step, artifact, logs) {
 }
 
 function buildIntakeMarkdown(item) {
+  const contexts = item.repo_contexts || [];
   const lines = [
     "## 基本信息",
     `- Pipeline: \`${item.pipeline_id}\``,
-    `- 仓库: \`${item.repo_name || item.repo_key}\``,
+    `- 主修复仓库: \`${item.repo_name || item.repo_key}\``,
     `- 目标修复分支: \`${item.target_branch}\``,
-    `- 临时 Bugfix 分支: \`${item.bugfix_branch}\``,
+    `- 推送分支: \`${item.target_branch}\``,
     `- 测试环境 namespace: \`${item.namespace}\``,
     `- 审批研发: \`${item.reviewer_id}\``,
+  ];
+  if (contexts.length) {
+    lines.push("", "## 仓库排查上下文");
+    contexts.forEach(context => {
+      const idName = context.correlation_id_name || "关联 ID";
+      const idValue = context.correlation_id_value || "未提供";
+      lines.push(`- \`${context.repo_name}\` (${context.role}): branch \`${context.branch}\`, ${idName} \`${idValue}\``);
+      if (context.note) lines.push(`  - 说明: ${context.note}`);
+    });
+  }
+  lines.push(
     "",
     "## 问题描述",
     item.problem_description || "",
@@ -457,11 +1020,11 @@ function buildIntakeMarkdown(item) {
     "",
     "## 实际结果",
     item.actual_result || "",
-  ];
+  );
   const optional = [
     ["request_id", "Request ID"],
-    ["occurred_at", "发生时间"],
-    ["affected_data", "影响用户或数据 ID"],
+    ["occurred_at", "发生时间范围"],
+    ["affected_data", "当前登录用户ID"],
     ["regression_curl", "用例回归 curl"],
     ["screenshot_notes", "截图说明"],
     ["extra_context", "补充信息"],
@@ -469,7 +1032,33 @@ function buildIntakeMarkdown(item) {
   optional.forEach(([key, title]) => {
     if (item[key]) lines.push("", `## ${title}`, item[key]);
   });
+  if (item.screenshot_attachments?.length) {
+    lines.push("", "## 问题截图");
+    item.screenshot_attachments.forEach(attachment => {
+      lines.push(`- ${attachment.name || "screenshot"}: \`${attachment.path}\``);
+    });
+  }
   return lines.join("\n").trim();
+}
+
+function renderPersistedScreenshots(item) {
+  const attachments = item.screenshot_attachments || [];
+  if (!attachments.length) return "";
+  return `
+    <div class="stage-screenshot-gallery">
+      ${attachments.map(attachment => {
+        const filename = attachment.path ? attachment.path.split("/").pop() : "";
+        const url = `${API}/bug-pipelines/${encodeURIComponent(item.pipeline_id)}/screenshots/${encodeURIComponent(filename)}`;
+        const name = attachment.name || filename || "screenshot";
+        return `
+          <a class="stage-screenshot" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+            <img src="${escapeHtml(url)}" alt="${escapeHtml(name)}">
+            <div class="stage-screenshot__name">${escapeHtml(name)}</div>
+          </a>
+        `;
+      }).join("")}
+    </div>
+  `;
 }
 
 async function loadDiff() {
